@@ -1,4 +1,3 @@
-
 import React, { useState } from "react";
 import {
   View,
@@ -9,30 +8,83 @@ import {
   TextInput,
   ScrollView,
   SafeAreaView,
+  Alert,
 } from "react-native";
+import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
+import { doc, setDoc } from "firebase/firestore";
+import { auth, db } from "../config/firebase";
+import { registerUserToMySQL } from "../services/authService";
+import { useNavigation } from "@react-navigation/native";
+import { StackNavigationProp } from "@react-navigation/stack";
+import { RootStackParamList } from "../types/navigaton";
 
-const SplashScreen = () => {
-  const [username, setUsername] = useState<string>("");
-  const [name, setName] = useState<string>("");
-  const [email, setEmail] = useState<string>("");
-  const [password, setPassword] = useState<string>("");
+type NavigationProp = StackNavigationProp<RootStackParamList, "SignUp">;
+
+const SignUpScreen = () => {
+  const navigation = useNavigation<NavigationProp>();
+
+  const [username, setUsername] = useState("");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const handleSignUp = async () => {
+    try {
+      if (!username || !name || !email || !password) {
+        Alert.alert("Error", "Please fill out all fields");
+        return;
+      }
+
+      const userCredential = await createUserWithEmailAndPassword(
+        auth,
+        email,
+        password
+      );
+      const user = userCredential.user;
+
+      await updateProfile(user, { displayName: name });
+
+      await setDoc(doc(db, "users", user.uid), {
+        username,
+        name,
+        email,
+        level: 1,
+        xpPoints: 0,
+        futureCoins: 0,
+        createdAt: new Date(),
+      });
+
+      const response = await registerUserToMySQL({
+        user_id: user.uid,
+        username,
+        name,
+        email,
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data?.error || "MySQL insert failed");
+      }
+
+      Alert.alert("Success", "Account created successfully");
+      navigation.navigate("Home", { username });
+    } catch (err: any) {
+      console.error("SIGNUP ERROR:", err.message);
+      Alert.alert("Signup Failed", err.message);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         <View style={styles.container}>
-          {/* Logo */}
           <Image
             source={require("../assets/futuremove-logo.png")}
             style={styles.logo}
-            resizeMode="contain"
           />
-
-          {/* App Name & Slogan */}
           <Text style={styles.title}>FutureMove</Text>
           <Text style={styles.slogan}>"Move Forward, Achieve More."</Text>
 
-          {/* Sign Up Form */}
           <View style={styles.formContainer}>
             <Text style={styles.formTitle}>Create Your Account</Text>
 
@@ -42,14 +94,12 @@ const SplashScreen = () => {
               value={username}
               onChangeText={setUsername}
             />
-
             <TextInput
               style={styles.input}
               placeholder="Full Name"
               value={name}
               onChangeText={setName}
             />
-
             <TextInput
               style={styles.input}
               placeholder="Email"
@@ -58,7 +108,6 @@ const SplashScreen = () => {
               keyboardType="email-address"
               autoCapitalize="none"
             />
-
             <TextInput
               style={styles.input}
               placeholder="Password"
@@ -68,30 +117,13 @@ const SplashScreen = () => {
             />
           </View>
 
-          {/* Sign Up Button */}
-          <TouchableOpacity style={styles.signUpButton}>
+          <TouchableOpacity style={styles.signUpButton} onPress={handleSignUp}>
             <Text style={styles.buttonText}>Sign Up</Text>
           </TouchableOpacity>
 
-          {/* Divider */}
-          <View style={styles.dividerContainer}>
-            <View style={styles.divider} />
-            <Text style={styles.dividerText}>OR</Text>
-            <View style={styles.divider} />
-          </View>
-
-          {/* Google Sign Up Button */}
-          <TouchableOpacity style={styles.googleButton}>
-            <Text style={styles.googleButtonText}>Sign up with Google</Text>
+          <TouchableOpacity onPress={() => navigation.navigate("Splash")}>
+            <Text style={styles.link}>Already have an account? Sign in</Text>
           </TouchableOpacity>
-
-          {/* Already have account text */}
-          <View style={styles.loginContainer}>
-            <Text style={styles.loginText}>Already have an account? </Text>
-            <TouchableOpacity>
-              <Text style={styles.loginLink}>Log In</Text>
-            </TouchableOpacity>
-          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -99,28 +131,14 @@ const SplashScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: "#f5f5f5",
-  },
-  scrollContainer: {
-    flexGrow: 1,
-  },
-  container: {
-    flex: 1,
-    alignItems: "center",
-    padding: 20,
-  },
-  logo: {
-    width: 120,
-    height: 120,
-    marginTop: 40,
-    marginBottom: 10,
-  },
+  safeArea: { flex: 1, backgroundColor: "#f5f5f5" },
+  scrollContainer: { flexGrow: 1 },
+  container: { flex: 1, alignItems: "center", padding: 20 },
+  logo: { width: 120, height: 120, marginTop: 40, marginBottom: 10 },
   title: {
     fontSize: 32,
     fontWeight: "bold",
-    color: "#4A90E2", // Blue color from your design
+    color: "#4A90E2",
     marginBottom: 10,
   },
   slogan: {
@@ -129,10 +147,7 @@ const styles = StyleSheet.create({
     marginBottom: 30,
     fontStyle: "italic",
   },
-  formContainer: {
-    width: "100%",
-    marginBottom: 20,
-  },
+  formContainer: { width: "100%", marginBottom: 20 },
   formTitle: {
     fontSize: 20,
     fontWeight: "bold",
@@ -159,57 +174,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 20,
   },
-  buttonText: {
-    color: "white",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  dividerContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    width: "100%",
-    marginVertical: 15,
-  },
-  divider: {
-    flex: 1,
-    height: 1,
-    backgroundColor: "#ddd",
-  },
-  dividerText: {
-    paddingHorizontal: 10,
-    color: "#666",
-  },
-  googleButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "white",
-    borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 25,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    width: "100%",
-    marginBottom: 20,
-  },
-  googleButtonText: {
-    color: "#333",
-    fontSize: 16,
-    fontWeight: "500",
-  },
-  loginContainer: {
-    flexDirection: "row",
-    marginVertical: 20,
-  },
-  loginText: {
-    color: "#666",
-    fontSize: 16,
-  },
-  loginLink: {
+  buttonText: { color: "white", fontSize: 18, fontWeight: "bold" },
+  link: {
     color: "#4A90E2",
     fontSize: 16,
-    fontWeight: "bold",
+    fontWeight: "500",
+    textAlign: "center",
   },
 });
 
-export default SplashScreen;
+export default SignUpScreen;
