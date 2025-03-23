@@ -11,23 +11,20 @@ const Stack = createStackNavigator<RootStackParamList>();
 
 const App = () => {
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>FutureMove</Text>
-      <StatusBar style="auto" />
-    </View>
+    <NavigationContainer>
+      <Stack.Navigator
+        initialRouteName="Splash"
+        screenOptions={{ headerShown: false }}
+      >
+        {/* <Stack.Screen name="TestAPI" component={TestApiScreen} /> */}
+        <Stack.Screen name="Splash" component={SplashScreen} />
+        <Stack.Screen name="SignUp" component={SignUpScreen} />
+        <Stack.Screen name="Home" component={HomeScreen} />
+      </Stack.Navigator>
+    </NavigationContainer>
   );
-}
+};
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  title: {
-    fontSize: 40, 
-    fontWeight: "bold",
-    color: "#4A90E2"
-  },
-});
+
+export default App;
+
