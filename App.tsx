@@ -1,25 +1,30 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import React from "react";
+import { NavigationContainer } from "@react-navigation/native";
+import { createStackNavigator } from "@react-navigation/stack";
+import TestApiScreen from "./src/screens/TestApiScreen";
+import SplashScreen from "./src/screens/SplashScreen";
+import HomeScreen from "./src/screens/HomeScreen";
+import SignUpScreen from "./src/screens/SignUpScreen";
+import { RootStackParamList } from "./src/types/navigaton";
 
-export default function App() {
+const Stack = createStackNavigator<RootStackParamList>();
+
+const App = () => {
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>FutureMove</Text>
-      <StatusBar style="auto" />
-    </View>
+    <NavigationContainer>
+      <Stack.Navigator
+        initialRouteName="Splash"
+        screenOptions={{ headerShown: false }}
+      >
+        {/* <Stack.Screen name="TestAPI" component={TestApiScreen} /> */}
+        <Stack.Screen name="Splash" component={SplashScreen} />
+        <Stack.Screen name="SignUp" component={SignUpScreen} />
+        <Stack.Screen name="Home" component={HomeScreen} />
+      </Stack.Navigator>
+    </NavigationContainer>
   );
-}
+};
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  title: {
-    fontSize: 44, 
-    fontWeight: "bold",
-    color: "#4A90E2"
-  },
-});
+
+export default App;
+
