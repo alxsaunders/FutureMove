@@ -41,7 +41,7 @@ const HomeScreen = ({ navigation, route }: Props) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    marginTop: 28,
+    marginTop: 50,
     padding: 20,
     backgroundColor: "#f5f5f5",
   },
