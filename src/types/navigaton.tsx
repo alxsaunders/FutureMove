@@ -5,6 +5,7 @@ export type RootStackParamList = {
   Splash: undefined;
   Home: { username: string };
   SignUp: undefined;
+  Main: undefined;
 };
 
 export type SplashScreenNavigationProp = StackNavigationProp<
@@ -25,4 +26,12 @@ export type HomeScreenProps = {
 
 export type SplashScreenProps = {
   navigation: SplashScreenNavigationProp;
+};
+
+export type BottomTabParamList = {
+  Home: undefined;
+  Goals: undefined;
+  Community: undefined;
+  ItemShop: undefined;
+  Profile: undefined;
 };

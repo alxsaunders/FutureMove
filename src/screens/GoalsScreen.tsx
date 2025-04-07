@@ -1,19 +1,20 @@
-// src/screens/ItemShopScreen.tsx
+// src/screens/GoalsScreen.tsx
 import React from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-const ItemShopScreen = () => {
+const GoalsScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Item Shop</Text>
+        <Text style={styles.title}>My Goals</Text>
+        <TouchableOpacity style={styles.addButton}>
+          <Text style={styles.addButtonText}>+ Add New Goal</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.content}>
-        <Text style={styles.subtitle}>
-          Spend your FutureCoins on rewards and items
-        </Text>
+        <Text style={styles.subtitle}>Set and track your goals here</Text>
       </View>
     </SafeAreaView>
   );
@@ -29,6 +30,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
     borderBottomColor: "#E0E0E0",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   title: {
     fontSize: 24,
@@ -46,6 +50,17 @@ const styles = StyleSheet.create({
     color: "#666",
     textAlign: "center",
   },
+  addButton: {
+    backgroundColor: "#6A5ACD",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+  },
+  addButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "600",
+  },
 });
 
-export default ItemShopScreen;
+export default GoalsScreen;
