@@ -204,7 +204,7 @@ const styles = StyleSheet.create({
   middleTabLabelText: {
     color: "#6A5ACD", // Same color as other tab labels
     position: "absolute",
-    bottom: -17, // Position the text below the raised button
+    bottom: -18, // Position the text below the raised button
     width: 70, // Give enough width for the text
   },
 });
