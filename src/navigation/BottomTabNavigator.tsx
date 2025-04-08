@@ -139,13 +139,13 @@ const BottomTabNavigator = () => {
 const styles = StyleSheet.create({
   tabBarContainer: {
     flexDirection: "row",
-    height: 65,
+    height: 80,
     backgroundColor: "#FFFFFF",
     borderTopWidth: 1,
     borderTopColor: "#E0E0E0",
     justifyContent: "space-around",
     alignItems: "flex-end",
-    paddingBottom: 5,
+    paddingBottom: 20,
   },
   tabButton: {
     flex: 1,
@@ -160,6 +160,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: 8,
     width: 70,
+    paddingBottom: 10,
   },
   middleTabContainer: {
     alignItems: "center",
@@ -176,8 +177,8 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   tabIcon: {
-    width: 24,
-    height: 24,
+    width: 30,
+    height: 30,
     resizeMode: "contain",
   },
   middleTabIcon: {
@@ -187,24 +188,24 @@ const styles = StyleSheet.create({
     tintColor: "#FFFFFF", // Makes the icon white for visibility
   },
   focusedIcon: {
-    transform: [{ scale: 1.0 }], // Slightly enlarge the icon when active
+    transform: [{ scale: 1 }], // Slightly enlarge the icon when active
   },
   focusedTab: {
     
     borderTopColor: "#6A5ACD",
-    paddingTop: 0,
+    
   },
   tabLabelText: {
     color: "#6A5ACD",
-    fontSize: 12,
-    marginTop: 2,
+    fontSize: 10,
+    marginTop: 3,
     fontWeight: "500",
     textAlign: "center",
   },
   middleTabLabelText: {
     color: "#6A5ACD", // Same color as other tab labels
     position: "absolute",
-    bottom: -18, // Position the text below the raised button
+    bottom: -16, // Position the text below the raised button
     width: 70, // Give enough width for the text
   },
 });
