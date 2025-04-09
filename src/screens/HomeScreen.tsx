@@ -1,100 +1,746 @@
-// src/screens/HomeScreen.tsx
-import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import React, { useEffect, useState, useRef } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  SafeAreaView,
+  TouchableOpacity,
+  Alert,
+  FlatList,
+  SectionList,
+  Dimensions,
+} from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { RootStackParamList } from "../types/navigaton"
+import { RootStackParamList } from "../types/navigaton";
+import { ProgressCircle } from "../components/ProgressCircle";
+import { DailyQuote } from "../components/DailyQuote";
+import { RoutinesList } from "../components/RoutinesList";
+import { NewsList } from "../components/NewsList";
+import { GoalListItem } from "../components/GoalListitem";
+import { fetchDailyQuote } from "../services/QuoteService";
+import { fetchUserGoals } from "../services/GoalService";
+import { fetchUserRoutines } from "../services/RoutineService";
+import { fetchNews } from "../services/NewsService";
+import { Goal, Routine, News, Quote } from "../types";
+import { COLORS } from "../common/constants/colors";
+import { Ionicons } from "@expo/vector-icons";
 
+// Get screen width for card sizing
+const { width } = Dimensions.get("window");
+const CARD_WIDTH = width * 0.7;
+const CARD_SPACING = 12;
+
+// Define section types for the SectionList
+type SectionType = {
+  title: string;
+  data: any[];
+  renderItem: (item: any) => React.ReactElement;
+  keyExtractor: (item: any) => string;
+};
 
 type Props = NativeStackScreenProps<RootStackParamList, "Home">;
 
 const HomeScreen = ({ navigation, route }: Props) => {
-  const { username } = route.params;
+  const username = route.params?.username || "User";
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [routines, setRoutines] = useState<Routine[]>([]);
+  const [news, setNews] = useState<News[]>([]);
+  const [overallProgress, setOverallProgress] = useState(0);
+  const [userLevel, setUserLevel] = useState(5);
+  const [userExp, setUserExp] = useState(75);
+  const [streakCount, setStreakCount] = useState(7); // User's current streak
 
-  const handleLogout = () => {
-    navigation.replace("Splash");
+  // Ref for the main SectionList
+  const sectionListRef = useRef(null);
+
+  useEffect(() => {
+    // Fetch user data
+    const fetchUserData = async () => {
+      try {
+        // Get daily quote
+        const quoteData = await fetchDailyQuote();
+        setQuote(quoteData);
+
+        // Get user goals
+        const goalsData = await fetchUserGoals();
+
+        // Sort goals - incomplete first, then completed
+        const sortedGoals = [...goalsData].sort((a, b) => {
+          if (a.isCompleted && !b.isCompleted) return 1;
+          if (!a.isCompleted && b.isCompleted) return -1;
+          return 0;
+        });
+
+        setGoals(sortedGoals);
+
+        // Calculate overall progress - example: 2 completed out of 5 = 40%
+        const completedGoals = goalsData.filter(
+          (goal) => goal.isCompleted
+        ).length;
+        const totalGoals = goalsData.length;
+        const progressPercentage =
+          totalGoals > 0 ? Math.round((completedGoals / totalGoals) * 100) : 0;
+        setOverallProgress(progressPercentage);
+
+        // Get user routines
+        const routinesData = await fetchUserRoutines();
+        setRoutines(routinesData);
+
+        // Get relevant news
+        const newsData = await fetchNews();
+        setNews(newsData);
+
+        // Set user level and experience
+        setUserLevel(5);
+        setUserExp(75);
+      } catch (error) {
+        console.error("Error fetching data:", error);
+      }
+    };
+
+    fetchUserData();
+  }, []);
+
+  const toggleGoalCompletion = (goalId: number) => {
+    setGoals((prevGoals) => {
+      const updatedGoals = prevGoals.map((goal) => {
+        if (goal.id === goalId) {
+          // Toggle completion status
+          return {
+            ...goal,
+            isCompleted: !goal.isCompleted,
+          };
+        }
+        return goal;
+      });
+
+      // Sort goals - incomplete first, then completed
+      const sortedGoals = [...updatedGoals].sort((a, b) => {
+        if (a.isCompleted && !b.isCompleted) return 1;
+        if (!a.isCompleted && b.isCompleted) return -1;
+        return 0;
+      });
+
+      // Recalculate progress percentage
+      const completedGoals = updatedGoals.filter((g) => g.isCompleted).length;
+      const totalGoals = updatedGoals.length;
+      const newProgress = Math.round((completedGoals / totalGoals) * 100);
+      setOverallProgress(newProgress);
+
+      return sortedGoals;
+    });
+  };
+
+  // Create header component with company name
+  const renderHeader = () => (
+    <View style={styles.header}>
+      <Text style={styles.companyName}>FutureMove</Text>
+    </View>
+  );
+
+  // Progress section with welcome message, streak, and progress circle
+  const renderProgressSection = () => (
+    <View style={styles.progressSection}>
+      {/* Welcome and Streak */}
+      <View style={styles.welcomeRow}>
+        <Text style={styles.welcomeText}>Welcome Back, {username}!</Text>
+        <View style={styles.streakContainer}>
+          <Ionicons name="flame" size={24} color={COLORS.accent2} />
+          <Text style={styles.streakText}>{streakCount}</Text>
+        </View>
+      </View>
+
+      <View style={styles.progressContainer}>
+        <View style={styles.progressCircleContainer}>
+          <ProgressCircle
+            progress={overallProgress}
+            size={140}
+            strokeWidth={15}
+            progressColor={COLORS.primary}
+          />
+          <View style={styles.goalCountContainer}>
+            <Text style={styles.goalCompletedText}>
+              {goals.filter((goal) => goal.isCompleted).length}/{goals.length}
+            </Text>
+            <Text style={styles.goalCompletedLabel}>Goals</Text>
+          </View>
+        </View>
+
+        <View style={styles.levelContainer}>
+          <View style={styles.levelHeader}>
+            <Text style={styles.levelText}>Level {userLevel}</Text>
+            <Text style={styles.expText}>{userExp}/100 XP</Text>
+          </View>
+          <View style={styles.expBarContainer}>
+            <View style={[styles.expBar, { width: `${userExp}%` }]} />
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+
+  // Daily quote component
+  const renderDailyQuote = () => (
+    <DailyQuote quote={quote?.text} author={quote?.author} />
+  );
+
+  // Render individual goal item for goals section (horizontal card)
+  const renderGoalItem = ({ item }: { item: Goal }) => (
+    <TouchableOpacity
+      style={styles.goalCard}
+      onPress={() => Alert.alert("View Goal", `Viewing goal: ${item.title}`)}
+      activeOpacity={0.8}
+    >
+      <View style={styles.goalCardContent}>
+        <View style={styles.goalCardHeader}>
+          <Text
+            style={[
+              styles.goalCardTitle,
+              item.isCompleted ? styles.completedText : {},
+            ]}
+            numberOfLines={2}
+          >
+            {item.title}
+          </Text>
+          {item.category && (
+            <View
+              style={[
+                styles.categoryBadge,
+                { backgroundColor: item.color || COLORS.primary },
+              ]}
+            >
+              <Text style={styles.categoryText}>{item.category}</Text>
+            </View>
+          )}
+        </View>
+
+        {item.description && (
+          <Text
+            style={[
+              styles.goalCardDescription,
+              item.isCompleted ? styles.completedText : {},
+            ]}
+            numberOfLines={3}
+          >
+            {item.description}
+          </Text>
+        )}
+
+        <TouchableOpacity
+          style={[
+            styles.checkButton,
+            item.isCompleted ? styles.completedCheckButton : {},
+          ]}
+          onPress={() => toggleGoalCompletion(item.id)}
+        >
+          {item.isCompleted ? (
+            <Ionicons
+              name="checkmark-circle"
+              size={28}
+              color={COLORS.success}
+            />
+          ) : (
+            <Ionicons
+              name="ellipse-outline"
+              size={28}
+              color={COLORS.textLight}
+            />
+          )}
+        </TouchableOpacity>
+      </View>
+    </TouchableOpacity>
+  );
+
+  // Render horizontal goal list
+  const renderHorizontalGoalList = () => (
+    <FlatList
+      data={goals}
+      keyExtractor={(item) => item.id.toString()}
+      renderItem={renderGoalItem}
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.horizontalListContent}
+      snapToInterval={CARD_WIDTH + CARD_SPACING}
+      snapToAlignment="start"
+      decelerationRate="fast"
+    />
+  );
+
+  // Goals section with horizontal list of goals, create button
+  const renderGoalsSection = () => (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Today's Goals</Text>
+        <TouchableOpacity
+          style={styles.viewAllButton}
+          onPress={() =>
+            Alert.alert("View All Goals", "All goals screen would open here")
+          }
+        >
+          <Text style={styles.viewAllText}>View All</Text>
+        </TouchableOpacity>
+      </View>
+
+      {goals.length > 0 ? (
+        renderHorizontalGoalList()
+      ) : (
+        <View style={styles.emptyStateContainer}>
+          <Text style={styles.noGoalsText}>You have 0 active goals.</Text>
+        </View>
+      )}
+
+      <TouchableOpacity
+        style={styles.actionButton}
+        onPress={() =>
+          Alert.alert("Create Goal", "Create new goal screen would open here")
+        }
+      >
+        <Text style={styles.actionButtonText}>Create New Goal</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  // Horizontal routine card render
+  const renderRoutineItem = ({ item }: { item: Routine }) => (
+    <TouchableOpacity
+      style={styles.routineCard}
+      onPress={() =>
+        Alert.alert("View Routine", `Viewing routine: ${item.title}`)
+      }
+      activeOpacity={0.8}
+    >
+      <View style={styles.routineCardContent}>
+        <View style={styles.routineCardHeader}>
+          <Text style={styles.routineCardTitle} numberOfLines={1}>
+            {item.title}
+          </Text>
+          <Text style={styles.routineCardFrequency}>{item.frequency}</Text>
+        </View>
+
+        <View style={styles.routineProgressContainer}>
+          <View style={styles.routineProgressBar}>
+            <View
+              style={[
+                styles.routineProgressFill,
+                {
+                  width: `${(item.completedTasks / item.totalTasks) * 100}%`,
+                  backgroundColor:
+                    item.completedTasks === item.totalTasks
+                      ? COLORS.success
+                      : COLORS.primary,
+                },
+              ]}
+            />
+          </View>
+          <Text style={styles.routineProgressText}>
+            {item.completedTasks}/{item.totalTasks}
+          </Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  // Render horizontal routines list
+  const renderHorizontalRoutinesList = () => (
+    <FlatList
+      data={routines}
+      keyExtractor={(item) => item.id.toString()}
+      renderItem={renderRoutineItem}
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.horizontalListContent}
+      snapToInterval={CARD_WIDTH + CARD_SPACING}
+      snapToAlignment="start"
+      decelerationRate="fast"
+    />
+  );
+
+  // Routines section
+  const renderRoutinesSection = () => (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Routines</Text>
+        <TouchableOpacity
+          style={styles.viewAllButton}
+          onPress={() =>
+            Alert.alert(
+              "View All Routines",
+              "All routines screen would open here"
+            )
+          }
+        >
+          <Text style={styles.viewAllText}>View All</Text>
+        </TouchableOpacity>
+      </View>
+
+      {routines.length > 0 ? (
+        renderHorizontalRoutinesList()
+      ) : (
+        <View style={styles.emptyStateContainer}>
+          <Text style={styles.noGoalsText}>You have 0 active routines.</Text>
+        </View>
+      )}
+
+      <TouchableOpacity
+        style={styles.actionButton}
+        onPress={() =>
+          Alert.alert(
+            "Create Routine",
+            "Create new routine screen would open here"
+          )
+        }
+      >
+        <Text style={styles.actionButtonText}>Create New Routine</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  // News section
+  const renderNewsSection = () => (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>News</Text>
+      <NewsList news={news} />
+    </View>
+  );
+
+  // Prepare sections for SectionList
+  const sections: SectionType[] = [
+    {
+      title: "quote",
+      data: [{ id: "quote" }],
+      renderItem: () => renderDailyQuote(),
+      keyExtractor: () => "quote",
+    },
+    {
+      title: "progress",
+      data: [{ id: "progress" }],
+      renderItem: () => renderProgressSection(),
+      keyExtractor: () => "progress",
+    },
+    {
+      title: "goals",
+      data: [{ id: "goals" }],
+      renderItem: () => renderGoalsSection(),
+      keyExtractor: () => "goals",
+    },
+    {
+      title: "routines",
+      data: [{ id: "routines" }],
+      renderItem: () => renderRoutinesSection(),
+      keyExtractor: () => "routines",
+    },
+    {
+      title: "news",
+      data: [{ id: "news" }],
+      renderItem: () => renderNewsSection(),
+      keyExtractor: () => "news",
+    },
+  ];
+
+  // Render each section with no section headers
+  const renderSection = ({ item }: { item: any }) => {
+    // Find the section for this item
+    const section = sections.find((s) => s.data[0].id === item.id);
+    if (section) {
+      return section.renderItem(item);
+    }
+    return null;
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.welcomeText}>Welcome, {username}!</Text>
+    <SafeAreaView style={styles.container}>
+      {renderHeader()}
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Your Progress</Text>
-        <Text style={styles.cardContent}>You have 0 active goals.</Text>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Quick Actions</Text>
-        <TouchableOpacity style={styles.actionButton}>
-          <Text style={styles.actionButtonText}>Create New Goal</Text>
-        </TouchableOpacity>
-      
-      </View>
-
-      <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-        <Text style={styles.logoutButtonText}>Logout</Text>
-      </TouchableOpacity>
-    </View>
+      <SectionList
+        ref={sectionListRef}
+        sections={sections}
+        renderItem={renderSection}
+        renderSectionHeader={() => null} // No section headers
+        keyExtractor={(item) => item.id}
+        stickySectionHeadersEnabled={false}
+        showsVerticalScrollIndicator={true}
+        contentContainerStyle={styles.sectionListContent}
+      />
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    marginTop: 50,
-    padding: 20,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: COLORS.background,
   },
-  welcomeText: {
+  sectionListContent: {
+    paddingBottom: 20,
+  },
+  header: {
+    padding: 16,
+    marginTop: 20,
+  },
+  companyName: {
     fontSize: 24,
     fontWeight: "bold",
-    marginBottom: 20,
-    color: "#4A90E2",
+    color: COLORS.primary,
+    marginBottom: 4,
   },
-  card: {
-    backgroundColor: "white",
-    borderRadius: 10,
+  progressSection: {
     padding: 16,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: 16,
+    marginHorizontal: 16,
+    marginVertical: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 5,
+    elevation: 4,
+  },
+  welcomeRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    paddingBottom: 12,
+  },
+  welcomeText: {
+    fontSize: 18,
+    fontWeight: "500",
+    color: COLORS.text,
+  },
+  streakContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.lightBackground,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  streakText: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: COLORS.accent2,
+    marginLeft: 5,
+  },
+  progressContainer: {
+    alignItems: "center",
+  },
+  progressCircleContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+    position: "relative",
+  },
+  goalCountContainer: {
+    position: "absolute",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  goalCompletedText: {
+    fontSize: 26,
+    fontWeight: "bold",
+    color: COLORS.text,
+  },
+  goalCompletedLabel: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+  },
+  levelContainer: {
+    width: "100%",
+    marginBottom: 10,
+  },
+  levelHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 5,
+  },
+  levelText: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: COLORS.text,
+  },
+  expText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+  },
+  expBarContainer: {
+    height: 10,
+    backgroundColor: COLORS.lightBackground,
+    borderRadius: 5,
+    overflow: "hidden",
+  },
+  expBar: {
+    height: "100%",
+    backgroundColor: COLORS.accent1,
+    borderRadius: 5,
+  },
+  section: {
+    padding: 16,
+    marginBottom: 8,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: COLORS.text,
+  },
+  horizontalListContent: {
+    paddingLeft: 16,
+    paddingRight: 40,
+    paddingVertical: 8,
+  },
+  emptyStateContainer: {
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: 12,
+    padding: 20,
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  goalCard: {
+    width: CARD_WIDTH,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: 16,
+    marginRight: CARD_SPACING,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 2,
+    elevation: 3,
+    borderLeftWidth: 4,
+    borderLeftColor: COLORS.primary,
+    overflow: "hidden",
   },
-  cardTitle: {
+  goalCardContent: {
+    padding: 16,
+    flex: 1,
+  },
+  goalCardHeader: {
+    marginBottom: 8,
+  },
+  goalCardTitle: {
     fontSize: 18,
-    fontWeight: "bold",
-    marginBottom: 10,
-    color: "#333",
+    fontWeight: "600",
+    color: COLORS.text,
+    marginBottom: 4,
   },
-  cardContent: {
-    fontSize: 16,
-    color: "#666",
+  goalCardDescription: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginBottom: 12,
+    flex: 1,
+  },
+  categoryBadge: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginTop: 4,
+  },
+  categoryText: {
+    color: COLORS.white,
+    fontSize: 12,
+    fontWeight: "bold",
+  },
+  completedText: {
+    color: COLORS.textSecondary,
+    textDecorationLine: "line-through",
+  },
+  checkButton: {
+    alignSelf: "flex-end",
+    padding: 5,
+  },
+  completedCheckButton: {
+    opacity: 0.9,
+  },
+  routineCard: {
+    width: CARD_WIDTH,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: 16,
+    marginRight: CARD_SPACING,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    borderLeftWidth: 4,
+    borderLeftColor: COLORS.accent1,
+    overflow: "hidden",
+  },
+  routineCardContent: {
+    padding: 16,
+    flex: 1,
+  },
+  routineCardHeader: {
+    marginBottom: 12,
+  },
+  routineCardTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: COLORS.text,
+    marginBottom: 4,
+  },
+  routineCardFrequency: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+  },
+  routineProgressContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 8,
+  },
+  routineProgressBar: {
+    flex: 1,
+    height: 8,
+    backgroundColor: COLORS.lightBackground,
+    borderRadius: 4,
+    marginRight: 8,
+    overflow: "hidden",
+  },
+  routineProgressFill: {
+    height: "100%",
+    borderRadius: 4,
+  },
+  routineProgressText: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: COLORS.textSecondary,
+    width: 36,
+    textAlign: "right",
+  },
+  noGoalsText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginBottom: 10,
+    textAlign: "center",
+    padding: 20,
   },
   actionButton: {
-    backgroundColor: "#4A90E2",
+    backgroundColor: COLORS.primary,
     padding: 12,
     borderRadius: 8,
     alignItems: "center",
-    marginBottom: 10,
+    marginTop: 12,
   },
   actionButtonText: {
-    color: "white",
+    color: COLORS.white,
     fontWeight: "600",
-    fontSize: 16,
+    fontSize: 14,
   },
-  logoutButton: {
-    marginTop: 20,
-    padding: 15,
-    borderRadius: 8,
-    backgroundColor: "#f0f0f0",
-    alignItems: "center",
+  viewAllButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
   },
-  logoutButtonText: {
-    color: "#666",
-    fontSize: 16,
-    fontWeight: "600",
+  viewAllText: {
+    color: COLORS.primary,
+    fontSize: 14,
+    fontWeight: "500",
   },
 });
 
