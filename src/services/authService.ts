@@ -11,7 +11,7 @@ export const registerUserToMySQL = async ({
   name,
   email
 }: MySQLUser) => {    //for android use 10.0.2.2 for mac 'ipconfig getifaddr en0'
-  return await fetch('http://192.168.1.207:3001/api/users', {
+  return await fetch('http://10.0.2.2:3001/api/users', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
