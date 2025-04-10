@@ -1,6 +1,6 @@
 # FutureMove
 
-![FutureMove Logo](assets/logo.png)
+![FutureMove Logo](assets/futuremove-logo.png)
 
 ## "Move Forward, Achieve More."
 
