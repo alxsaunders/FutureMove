@@ -17,7 +17,7 @@ export const fetchUserRoutines = async (): Promise<Routine[]> => {
     },
     {
       id: 2,
-      title: 'Study Session',
+      title: 'LeetCode Practice',
       frequency: 'Weekdays',
       completedTasks: 1,
       totalTasks: 2,

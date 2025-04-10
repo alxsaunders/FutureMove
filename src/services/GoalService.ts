@@ -9,8 +9,8 @@ export const fetchUserGoals = async (): Promise<Goal[]> => {
   return [
     {
       id: 1,
-      title: "Learn React Native",
-      description: "Master React Native development to build cross-platform mobile apps",
+      title: "Complete English Asignment",
+      description: "Master Spanish lvl 1",
       startDate: "2025-03-01",
       endDate: "2025-06-30",
       progress: 45,
@@ -28,14 +28,14 @@ export const fetchUserGoals = async (): Promise<Goal[]> => {
         {
           id: 102,
           goalId: 1,
-          title: "Build first app",
+          title: "able to say a sentence",
           isCompleted: true,
           dueDate: "2025-04-01"
         },
         {
           id: 103,
           goalId: 1,
-          title: "Learn advanced state management",
+          title: "Learn advance words",
           isCompleted: false,
           dueDate: "2025-05-15"
         }
@@ -43,12 +43,12 @@ export const fetchUserGoals = async (): Promise<Goal[]> => {
     },
     {
       id: 2,
-      title: "Exercise 3 times per week",
-      description: "Maintain a consistent workout routine for better health",
+      title: "Fix DoorKnob",
+      description: "fix broke door handle",
       startDate: "2025-01-01",
       endDate: "2025-12-31",
       progress: 65,
-      category: "Health",
+      category: "Repair",
       isCompleted: false,
       color: "#56C3B6",
       subgoals: [
@@ -77,14 +77,14 @@ export const fetchUserGoals = async (): Promise<Goal[]> => {
     },
     {
       id: 3,
-      title: "Save $5000 for vacation",
-      description: "Set aside money each month for summer vacation",
+      title: "Read 20 pages",
+      description: "Set aside time to read",
       startDate: "2025-01-01",
       endDate: "2025-07-31",
       progress: 30,
-      category: "Finance",
+      category: "Learning",
       isCompleted: false,
-      color: "#4CAF50",
+      color: "#5E6CE7",
     }
   ];
 };
