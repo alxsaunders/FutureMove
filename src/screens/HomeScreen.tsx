@@ -16,7 +16,7 @@ import { ProgressCircle } from "../components/ProgressCircle";
 import { DailyQuote } from "../components/DailyQuote";
 import { RoutinesList } from "../components/RoutinesList";
 import { NewsList } from "../components/NewsList";
-import { GoalListItem } from "../components/GoalListitem";
+import { GoalListItem } from "../components/GoalListItem";
 import { fetchDailyQuote } from "../services/QuoteService";
 import { fetchUserGoals } from "../services/GoalService";
 import { fetchUserRoutines } from "../services/RoutineService";

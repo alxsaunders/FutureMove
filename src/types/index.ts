@@ -25,6 +25,8 @@ export interface Goal {
   isCompleted: boolean;
   color?: string;
   icon?: string;
+  isDaily?: boolean; // Added for GoalsScreen
+  created_at?: string; // Added for GoalsScreen
 }
 
 export interface SubGoal {
@@ -107,6 +109,27 @@ export interface ShopItem {
   image: string;
   isOwned: boolean;
   isEquipped: boolean;
+}
+
+// Streak tracking types
+export interface StreakInfo {
+  userId: string;
+  goalId?: number;
+  routineId?: number;
+  currentStreak: number;
+  longestStreak: number;
+  lastCompletedDate?: string;
+  startDate?: string;
+}
+
+// Coin transaction type
+export interface CoinTransaction {
+  id: number;
+  userId: string;
+  amount: number; // Positive for earned, negative for spent
+  source: string; // "goal_completion", "routine_completion", "purchase", "achievement"
+  referenceId?: number;
+  timestamp: string;
 }
 
 // Navigation types

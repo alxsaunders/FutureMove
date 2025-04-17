@@ -4,10 +4,11 @@ import { createStackNavigator } from "@react-navigation/stack";
 import { StatusBar } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
+// Context
+import { AuthProvider } from "./src/contexts/AuthContext"; // ✅ make sure this path is correct
+
 // Import screens
-import TestApiScreen from "./src/screens/TestApiScreen";
 import SplashScreen from "./src/screens/SplashScreen";
-import HomeScreen from "./src/screens/HomeScreen";
 import SignUpScreen from "./src/screens/SignUpScreen";
 import { RootStackParamList } from "./src/types/navigaton";
 
@@ -19,21 +20,21 @@ const Stack = createStackNavigator<RootStackParamList>();
 const App = () => {
   return (
     <SafeAreaProvider>
-      <StatusBar
-        barStyle="light-content" // This makes the status bar icons white
-        backgroundColor="#3B82F6" // This would make the background white
-      />
-      <NavigationContainer>
-        <Stack.Navigator
-          initialRouteName="Splash"
-          screenOptions={{ headerShown: false }}
-        >
-          {/* <Stack.Screen name="TestAPI" component={TestApiScreen} /> */}
-          <Stack.Screen name="Splash" component={SplashScreen} />
-          <Stack.Screen name="SignUp" component={SignUpScreen} />
-          <Stack.Screen name="Main" component={BottomTabNavigator} />
-        </Stack.Navigator>
-      </NavigationContainer>
+      <AuthProvider>
+        {" "}
+        {/* ✅ wrap app with AuthProvider */}
+        <StatusBar barStyle="light-content" backgroundColor="#3B82F6" />
+        <NavigationContainer>
+          <Stack.Navigator
+            initialRouteName="Splash"
+            screenOptions={{ headerShown: false }}
+          >
+            <Stack.Screen name="Splash" component={SplashScreen} />
+            <Stack.Screen name="SignUp" component={SignUpScreen} />
+            <Stack.Screen name="Main" component={BottomTabNavigator} />
+          </Stack.Navigator>
+        </NavigationContainer>
+      </AuthProvider>
     </SafeAreaProvider>
   );
 };

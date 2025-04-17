@@ -1,179 +1,176 @@
-import { Goal, SubGoal } from '../types';
+// src/services/GoalService.ts
+import { Goal } from '../types';
 
-// This is a mock service. In a real app, this would connect to your backend API
-export const fetchUserGoals = async (): Promise<Goal[]> => {
-  // Simulate API call delay
-  await new Promise(resolve => setTimeout(resolve, 600));
-  
-  // Mock data
-  return [
-    {
-      id: 1,
-      title: "Complete English Asignment",
-      description: "Master Spanish lvl 1",
-      startDate: "2025-03-01",
-      endDate: "2025-06-30",
-      progress: 45,
-      category: "Learning",
-      isCompleted: false,
-      color: "#5E6CE7",
-      subgoals: [
-        {
-          id: 101,
-          goalId: 1,
-          title: "Complete basic tutorial",
-          isCompleted: true,
-          dueDate: "2025-03-15"
-        },
-        {
-          id: 102,
-          goalId: 1,
-          title: "able to say a sentence",
-          isCompleted: true,
-          dueDate: "2025-04-01"
-        },
-        {
-          id: 103,
-          goalId: 1,
-          title: "Learn advance words",
-          isCompleted: false,
-          dueDate: "2025-05-15"
-        }
-      ]
-    },
-    {
-      id: 2,
-      title: "Fix DoorKnob",
-      description: "fix broke door handle",
-      startDate: "2025-01-01",
-      endDate: "2025-12-31",
-      progress: 65,
-      category: "Repair",
-      isCompleted: false,
-      color: "#56C3B6",
-      subgoals: [
-        {
-          id: 201,
-          goalId: 2,
-          title: "Monday workout",
-          isCompleted: true,
-          dueDate: "2025-04-08"
-        },
-        {
-          id: 202,
-          goalId: 2,
-          title: "Wednesday workout",
-          isCompleted: true,
-          dueDate: "2025-04-10"
-        },
-        {
-          id: 203,
-          goalId: 2,
-          title: "Friday workout",
-          isCompleted: false,
-          dueDate: "2025-04-12"
-        }
-      ]
-    },
-    {
-      id: 3,
-      title: "Read 20 pages",
-      description: "Set aside time to read",
-      startDate: "2025-01-01",
-      endDate: "2025-07-31",
-      progress: 30,
-      category: "Learning",
-      isCompleted: false,
-      color: "#5E6CE7",
+const API_URL = 'http://10.0.2.2:3001/api'; // Emulator localhost
+
+// Fetch all goals for a user
+export const fetchUserGoals = async (userId: string = 'default_user'): Promise<Goal[]> => {
+  try {
+    const res = await fetch(`${API_URL}/goals?userId=${userId}`);
+    if (!res.ok) throw new Error('Failed to fetch goals');
+    const data = await res.json();
+    
+    // Handle different response formats
+    // If the response is already an array, return it
+    if (Array.isArray(data)) {
+      return data.map(goal => ({
+        id: goal.goal_id || goal.id,
+        title: goal.title,
+        description: goal.description,
+        category: goal.category,
+        color: getCategoryColor(goal.category),
+        isCompleted: goal.is_completed === 1 || goal.isCompleted === true,
+        isDaily: goal.is_daily === 1 || goal.isDaily === true,
+        progress: goal.progress || 0,
+        startDate: goal.target_date || goal.startDate,
+        userId: goal.user_id || goal.userId,
+        coinReward: goal.coin_reward || goal.coinReward || 0
+      }));
     }
-  ];
+    
+    // If it's in the { goals: [] } format
+    if (data.goals && Array.isArray(data.goals)) {
+      return data.goals.map(goal => ({
+        id: goal.goal_id || goal.id,
+        title: goal.title,
+        description: goal.description,
+        category: goal.category,
+        color: getCategoryColor(goal.category),
+        isCompleted: goal.is_completed === 1 || goal.isCompleted === true,
+        isDaily: goal.is_daily === 1 || goal.isDaily === true,
+        progress: goal.progress || 0,
+        startDate: goal.target_date || goal.startDate,
+        userId: goal.user_id || goal.userId,
+        coinReward: goal.coin_reward || goal.coinReward || 0
+      }));
+    }
+    
+    // If no valid format is found
+    return [];
+  } catch (err) {
+    console.error('Error fetching user goals:', err);
+    throw err;
+  }
 };
 
-// Function to get a specific goal
-export const fetchGoalById = async (goalId: number): Promise<Goal | null> => {
-  // Simulate API call delay
-  await new Promise(resolve => setTimeout(resolve, 300));
-  
-  // Get all goals first
-  const allGoals = await fetchUserGoals();
-  
-  // Find and return the specific goal
-  return allGoals.find(goal => goal.id === goalId) || null;
+// Update a goal's progress
+export const updateGoalProgress = async (goalId: number, progress: number): Promise<Goal | null> => {
+  try {
+    const res = await fetch(`${API_URL}/goals/${goalId}/progress`, {
+      method: 'PUT', // Keep using PUT as in your original code
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ progress }),
+    });
+    
+    if (!res.ok) throw new Error('Failed to update goal progress');
+    const data = await res.json();
+    
+    // Handle different response formats
+    const goal = data.goal || data;
+    
+    if (!goal) return null;
+    
+    return {
+      id: goal.goal_id || goal.id,
+      title: goal.title,
+      description: goal.description,
+      category: goal.category,
+      color: getCategoryColor(goal.category),
+      isCompleted: goal.is_completed === 1 || goal.isCompleted === true,
+      isDaily: goal.is_daily === 1 || goal.isDaily === true,
+      progress: goal.progress || 0,
+      startDate: goal.target_date || goal.startDate,
+      userId: goal.user_id || goal.userId,
+      coinReward: goal.coin_reward || goal.coinReward || 0
+    };
+  } catch (err) {
+    console.error('Error updating goal progress:', err);
+    throw err;
+  }
 };
 
-// Function to create a new goal
-export const createGoal = async (goalData: Partial<Goal>): Promise<Goal> => {
-  // Simulate API call delay
-  await new Promise(resolve => setTimeout(resolve, 500));
-  
-  // Mock response with generated ID
-  return {
-    id: Math.floor(Math.random() * 1000) + 10, // Generate random ID
-    title: goalData.title || "New Goal",
-    description: goalData.description || "",
-    startDate: goalData.startDate || new Date().toISOString().split('T')[0],
-    endDate: goalData.endDate,
-    progress: 0,
-    category: goalData.category || "Personal",
-    isCompleted: false,
-    color: goalData.color || "#F66E6E",
-    subgoals: [],
+// Create a new goal for a user
+export const createGoal = async (goal: Partial<Goal>, userId: string): Promise<Goal> => {
+  try {
+    const res = await fetch(`${API_URL}/goals`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: userId,                         // fix snake_case for DB
+        title: goal.title,
+        description: goal.description || '',
+        target_date: goal.startDate || new Date().toISOString().split('T')[0],
+        progress: goal.progress ?? 0,
+        is_completed: goal.isCompleted ? 1 : 0,  // Convert to integer for DB
+        is_daily: goal.isDaily ? 1 : 0,          // Convert to integer for DB
+        category: goal.category || 'Personal',
+        coin_reward: goal.coinReward ?? 10       // Default reward value
+      }),
+    });
+
+    if (!res.ok) throw new Error('Failed to create goal');
+    const data = await res.json();
+    
+    // Handle different response formats
+    const createdGoal = data.goal || data;
+    
+    if (!createdGoal) throw new Error('No goal data returned from server');
+    
+    return {
+      id: createdGoal.goal_id || createdGoal.id,
+      title: createdGoal.title,
+      description: createdGoal.description,
+      category: createdGoal.category,
+      color: getCategoryColor(createdGoal.category),
+      isCompleted: createdGoal.is_completed === 1 || createdGoal.isCompleted === true,
+      isDaily: createdGoal.is_daily === 1 || createdGoal.isDaily === true,
+      progress: createdGoal.progress || 0,
+      startDate: createdGoal.target_date || createdGoal.startDate,
+      userId: createdGoal.user_id || createdGoal.userId,
+      coinReward: createdGoal.coin_reward || createdGoal.coinReward || 0
+    };
+  } catch (err) {
+    console.error('Error creating goal:', err);
+    throw err;
+  }
+};
+
+// Get user's streak
+export const getUserStreaks = async (userId: string): Promise<number> => {
+  try {
+    const res = await fetch(`${API_URL}/users/${userId}/streak`);
+    if (!res.ok) throw new Error('Failed to fetch streaks');
+    const data = await res.json();
+    return data.streak || data.streakCount || 0;
+  } catch (err) {
+    console.error('Error fetching streaks:', err);
+    return 0;
+  }
+};
+
+// Get user's coin balance
+export const getUserFutureCoins = async (userId: string): Promise<number> => {
+  try {
+    const res = await fetch(`${API_URL}/users/${userId}/futurecoins`);
+    if (!res.ok) throw new Error('Failed to fetch future coins');
+    const data = await res.json();
+    return data.futureCoins || data.future_coins || 0;
+  } catch (err) {
+    console.error('Error fetching coins:', err);
+    return 0;
+  }
+};
+
+// Helper function to get color for a category
+function getCategoryColor(category?: string): string {
+  const categoryColors: Record<string, string> = {
+    'Personal': '#3B82F6', // Blue
+    'Work': '#4CAF50',     // Green
+    'Learning': '#5E6CE7', // Purple
+    'Health': '#F44336',   // Red
+    'Finance': '#FF9800',  // Orange
+    'Repair': '#56C3B6'    // Cyan
   };
-};
-
-// Function to update a goal's progress
-export const updateGoalProgress = async (
-  goalId: number,
-  progress: number
-): Promise<Goal | null> => {
-  // Simulate API call delay
-  await new Promise(resolve => setTimeout(resolve, 300));
   
-  // Get the specific goal
-  const goal = await fetchGoalById(goalId);
-  
-  if (!goal) return null;
-  
-  // Update the progress
-  const updatedGoal = {
-    ...goal,
-    progress: Math.min(Math.max(progress, 0), 100), // Ensure progress is between 0-100
-    isCompleted: progress >= 100,
-  };
-  
-  // In a real app, this would update the backend
-  console.log(`Goal ${goalId} progress updated to ${progress}%`);
-  
-  return updatedGoal;
-};
-
-// Function to add a subgoal
-export const addSubGoal = async (
-  goalId: number,
-  subGoalData: Partial<SubGoal>
-): Promise<SubGoal> => {
-  // Simulate API call delay
-  await new Promise(resolve => setTimeout(resolve, 400));
-  
-  // Mock response with generated ID
-  return {
-    id: Math.floor(Math.random() * 1000) + 100, // Generate random ID
-    goalId: goalId,
-    title: subGoalData.title || "New Subgoal",
-    isCompleted: false,
-    dueDate: subGoalData.dueDate,
-  };
-};
-
-// Function to toggle a subgoal's completion status
-export const toggleSubGoalCompletion = async (
-  subGoalId: number
-): Promise<boolean> => {
-  // Simulate API call delay
-  await new Promise(resolve => setTimeout(resolve, 300));
-  
-  // In a real app, this would update the backend
-  console.log(`Subgoal ${subGoalId} completion toggled`);
-  
-  return true;
-};
+  return category && categoryColors[category] ? categoryColors[category] : '#3B82F6';
+}
