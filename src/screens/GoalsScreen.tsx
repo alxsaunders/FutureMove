@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   ScrollView,
   ActivityIndicator,
 } from "react-native";
+import { useFocusEffect } from "@react-navigation/native"; // Import useFocusEffect
 import { GoalsScreenProps } from "../types/navigaton";
 import { GoalListItem } from "../components/GoalListItem";
 import { Goal } from "../types";
@@ -26,6 +27,10 @@ import {
   getUserStreaks,
   getUserFutureCoins,
 } from "../services/GoalService";
+
+// Define types for filters and sorting
+type GoalFilterType = "all" | "active" | "completed";
+type GoalSortType = "default" | "date" | "category" | "progress";
 
 const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
   const { currentUser } = useAuth();
@@ -85,7 +90,17 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
     }
   };
 
-  // Initial data load
+  // Use the useFocusEffect hook to refresh data when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      loadUserData();
+      return () => {
+        // Cleanup function if needed
+      };
+    }, [userId]) // Add userId as a dependency
+  );
+
+  // Initial data load on mount (this can stay as it will only run once)
   useEffect(() => {
     loadUserData();
   }, [userId]);

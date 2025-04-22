@@ -57,7 +57,7 @@ export const fetchUserGoals = async (userId: string = 'default_user'): Promise<G
 export const updateGoalProgress = async (goalId: number, progress: number): Promise<Goal | null> => {
   try {
     const res = await fetch(`${API_URL}/goals/${goalId}/progress`, {
-      method: 'PUT', // Keep using PUT as in your original code
+      method: 'PUT', 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ progress }),
     });
@@ -174,3 +174,42 @@ function getCategoryColor(category?: string): string {
   
   return category && categoryColors[category] ? categoryColors[category] : '#3B82F6';
 }
+
+// Update user coins - new helper function to sync with your UI
+export const updateUserCoins = async (amount: number): Promise<void> => {
+  try {
+    // You would typically need a userId here, but for compatibility with your
+    // existing code, you might get it from the current auth context
+    const userId = 'default_user'; // In a real app, get this from auth context
+    
+    await fetch(`${API_URL}/users/${userId}/futurecoins`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount }),
+    });
+  } catch (err) {
+    console.error('Error updating user coins:', err);
+    throw err;
+  }
+};
+
+// Update user XP - new helper function to sync with your UI
+export const updateUserXP = async (amount: number): Promise<any> => {
+  try {
+    // You would typically need a userId here, but for compatibility with your
+    // existing code, you might get it from the current auth context
+    const userId = 'default_user'; // In a real app, get this from auth context
+    
+    const res = await fetch(`${API_URL}/users/${userId}/xp`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount }),
+    });
+    
+    if (!res.ok) throw new Error('Failed to update XP');
+    return await res.json();
+  } catch (err) {
+    console.error('Error updating user XP:', err);
+    throw err;
+  }
+};

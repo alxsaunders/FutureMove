@@ -14,7 +14,7 @@ export type RootStackParamList = {
 
 // Bottom Tab Parameters
 export type BottomTabParamList = {
-  Home: undefined;
+  Home: { username?: string };
   Goals: undefined;
   Community: undefined;
   ItemShop: undefined;

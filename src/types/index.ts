@@ -17,18 +17,15 @@ export interface Goal {
   id: number;
   title: string;
   description?: string;
-  startDate: string;
-  endDate?: string;
-  progress: number; // 0-100
   category?: string;
-  subgoals?: SubGoal[];
-  isCompleted: boolean;
   color?: string;
-  icon?: string;
-  isDaily?: boolean; // Added for GoalsScreen
-  created_at?: string; // Added for GoalsScreen
+  isCompleted: boolean;
+  isDaily: boolean;
+  progress: number;
+  startDate?: string;
+  userId?: string;  // Add this to fix the first and third error
+  coinReward?: number;  // Add this to fix the second error
 }
-
 export interface SubGoal {
   id: number;
   goalId: number;

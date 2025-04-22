@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -10,20 +10,21 @@ import {
   SectionList,
   Dimensions,
 } from "react-native";
-import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { RootStackParamList } from "../types/navigaton";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { GoalsScreenNavigationProp, HomeScreenProps } from "../types/navigaton";
 import { ProgressCircle } from "../components/ProgressCircle";
 import { DailyQuote } from "../components/DailyQuote";
 import { RoutinesList } from "../components/RoutinesList";
 import { NewsList } from "../components/NewsList";
 import { GoalListItem } from "../components/GoalListItem";
 import { fetchDailyQuote } from "../services/QuoteService";
-import { fetchUserGoals } from "../services/GoalService";
+import { fetchUserGoals, updateGoalProgress } from "../services/GoalService";
 import { fetchUserRoutines } from "../services/RoutineService";
 import { fetchNews } from "../services/NewsService";
 import { Goal, Routine, News, Quote } from "../types";
 import { COLORS } from "../common/constants/colors";
 import { Ionicons } from "@expo/vector-icons";
+import { useAuth } from "../contexts/AuthContext";
 
 // Get screen width for card sizing
 const { width } = Dimensions.get("window");
@@ -38,10 +39,14 @@ type SectionType = {
   keyExtractor: (item: any) => string;
 };
 
-type Props = NativeStackScreenProps<RootStackParamList, "Home">;
+const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
+  // Use tabNavigation for navigating to bottom tab screens
+  const tabNavigation = useNavigation<GoalsScreenNavigationProp>();
 
-const HomeScreen = ({ navigation, route }: Props) => {
-  const username = route.params?.username || "User";
+  const { currentUser } = useAuth();
+  const userId = currentUser?.id || "default_user";
+
+  const username = route.params?.username || currentUser?.name || "User";
   const [quote, setQuote] = useState<Quote | null>(null);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [routines, setRoutines] = useState<Routine[]>([]);
@@ -49,87 +54,142 @@ const HomeScreen = ({ navigation, route }: Props) => {
   const [overallProgress, setOverallProgress] = useState(0);
   const [userLevel, setUserLevel] = useState(5);
   const [userExp, setUserExp] = useState(75);
-  const [streakCount, setStreakCount] = useState(7); // User's current streak
+  const [streakCount, setStreakCount] = useState(7);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [quoteLoaded, setQuoteLoaded] = useState(false);
 
   // Ref for the main SectionList
   const sectionListRef = useRef(null);
 
-  useEffect(() => {
-    // Fetch user data
-    const fetchUserData = async () => {
-      try {
-        // Get daily quote
-        const quoteData = await fetchDailyQuote();
-        setQuote(quoteData);
+  // Function to fetch all user data EXCEPT quote
+  const fetchUserData = async () => {
+    try {
+      setIsRefreshing(true);
 
-        // Get user goals
-        const goalsData = await fetchUserGoals();
-
-        // Sort goals - incomplete first, then completed
-        const sortedGoals = [...goalsData].sort((a, b) => {
-          if (a.isCompleted && !b.isCompleted) return 1;
-          if (!a.isCompleted && b.isCompleted) return -1;
-          return 0;
-        });
-
-        setGoals(sortedGoals);
-
-        // Calculate overall progress - example: 2 completed out of 5 = 40%
-        const completedGoals = goalsData.filter(
-          (goal) => goal.isCompleted
-        ).length;
-        const totalGoals = goalsData.length;
-        const progressPercentage =
-          totalGoals > 0 ? Math.round((completedGoals / totalGoals) * 100) : 0;
-        setOverallProgress(progressPercentage);
-
-        // Get user routines
-        const routinesData = await fetchUserRoutines();
-        setRoutines(routinesData);
-
-        // Get relevant news
-        const newsData = await fetchNews();
-        setNews(newsData);
-
-        // Set user level and experience
-        setUserLevel(5);
-        setUserExp(75);
-      } catch (error) {
-        console.error("Error fetching data:", error);
-      }
-    };
-
-    fetchUserData();
-  }, []);
-
-  const toggleGoalCompletion = (goalId: number) => {
-    setGoals((prevGoals) => {
-      const updatedGoals = prevGoals.map((goal) => {
-        if (goal.id === goalId) {
-          // Toggle completion status
-          return {
-            ...goal,
-            isCompleted: !goal.isCompleted,
-          };
-        }
-        return goal;
-      });
+      // Get user goals
+      const goalsData = await fetchUserGoals(userId);
 
       // Sort goals - incomplete first, then completed
-      const sortedGoals = [...updatedGoals].sort((a, b) => {
+      const sortedGoals = [...goalsData].sort((a, b) => {
         if (a.isCompleted && !b.isCompleted) return 1;
         if (!a.isCompleted && b.isCompleted) return -1;
         return 0;
       });
 
-      // Recalculate progress percentage
-      const completedGoals = updatedGoals.filter((g) => g.isCompleted).length;
-      const totalGoals = updatedGoals.length;
-      const newProgress = Math.round((completedGoals / totalGoals) * 100);
-      setOverallProgress(newProgress);
+      setGoals(sortedGoals);
 
-      return sortedGoals;
-    });
+      // Calculate overall progress
+      const completedGoals = goalsData.filter(
+        (goal) => goal.isCompleted
+      ).length;
+      const totalGoals = goalsData.length;
+      const progressPercentage =
+        totalGoals > 0 ? Math.round((completedGoals / totalGoals) * 100) : 0;
+      setOverallProgress(progressPercentage);
+
+      // Get user routines
+      const routinesData = await fetchUserRoutines();
+      setRoutines(routinesData);
+
+      // Get relevant news
+      const newsData = await fetchNews();
+      setNews(newsData);
+
+      // Set user level and experience
+      setUserLevel(currentUser?.level || 5);
+      setUserExp(currentUser?.xp_points || 75);
+    } catch (error) {
+      console.error("Error fetching data:", error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  // Load the quote only once (on initial mount)
+  useEffect(() => {
+    const loadQuote = async () => {
+      if (!quoteLoaded) {
+        try {
+          const quoteData = await fetchDailyQuote();
+          setQuote(quoteData);
+          setQuoteLoaded(true);
+        } catch (error) {
+          console.error("Error fetching quote:", error);
+        }
+      }
+    };
+
+    loadQuote();
+  }, [quoteLoaded]);
+
+  // Use useFocusEffect to refresh data whenever the screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      // Fetch data when screen comes into focus (except quote)
+      fetchUserData();
+
+      return () => {
+        // Any cleanup if needed
+      };
+    }, [userId])
+  );
+
+  // Initial data load on mount
+  useEffect(() => {
+    fetchUserData();
+  }, [userId]);
+
+  // Toggle goal completion with database update
+  const toggleGoalCompletion = async (goalId: number) => {
+    try {
+      // Find the goal we're toggling
+      const goalToToggle = goals.find((goal) => goal.id === goalId);
+
+      if (!goalToToggle) return;
+
+      // Calculate new progress value
+      const newProgress = !goalToToggle.isCompleted ? 100 : 0;
+
+      // Update the goal in the database
+      await updateGoalProgress(goalId, newProgress);
+
+      // Optimistically update the UI
+      setGoals((prevGoals) => {
+        const updatedGoals = prevGoals.map((goal) => {
+          if (goal.id === goalId) {
+            return {
+              ...goal,
+              isCompleted: !goal.isCompleted,
+              progress: newProgress,
+            };
+          }
+          return goal;
+        });
+
+        // Sort goals - incomplete first, then completed
+        const sortedGoals = [...updatedGoals].sort((a, b) => {
+          if (a.isCompleted && !b.isCompleted) return 1;
+          if (!a.isCompleted && b.isCompleted) return -1;
+          return 0;
+        });
+
+        // Recalculate progress percentage
+        const completedGoals = updatedGoals.filter((g) => g.isCompleted).length;
+        const totalGoals = updatedGoals.length;
+        const newOverallProgress = Math.round(
+          (completedGoals / totalGoals) * 100
+        );
+        setOverallProgress(newOverallProgress);
+
+        return sortedGoals;
+      });
+    } catch (error) {
+      console.error("Error toggling goal completion:", error);
+      Alert.alert("Error", "Failed to update goal. Please try again.");
+
+      // If there was an error, refresh the goals to make sure UI is in sync with database
+      fetchUserData();
+    }
   };
 
   // Create header component with company name
@@ -189,7 +249,10 @@ const HomeScreen = ({ navigation, route }: Props) => {
   const renderGoalItem = ({ item }: { item: Goal }) => (
     <TouchableOpacity
       style={styles.goalCard}
-      onPress={() => Alert.alert("View Goal", `Viewing goal: ${item.title}`)}
+      onPress={() => {
+        // Navigate to the Goals tab
+        tabNavigation.navigate("Goals");
+      }}
       activeOpacity={0.8}
     >
       <View style={styles.goalCardContent}>
@@ -274,9 +337,10 @@ const HomeScreen = ({ navigation, route }: Props) => {
         <Text style={styles.sectionTitle}>Today's Goals</Text>
         <TouchableOpacity
           style={styles.viewAllButton}
-          onPress={() =>
-            Alert.alert("View All Goals", "All goals screen would open here")
-          }
+          onPress={() => {
+            // Navigate to the Goals tab
+            tabNavigation.navigate("Goals");
+          }}
         >
           <Text style={styles.viewAllText}>View All</Text>
         </TouchableOpacity>
@@ -292,9 +356,10 @@ const HomeScreen = ({ navigation, route }: Props) => {
 
       <TouchableOpacity
         style={styles.actionButton}
-        onPress={() =>
-          Alert.alert("Create Goal", "Create new goal screen would open here")
-        }
+        onPress={() => {
+          // Navigate to the Goals tab
+          tabNavigation.navigate("Goals");
+        }}
       >
         <Text style={styles.actionButtonText}>Create New Goal</Text>
       </TouchableOpacity>
@@ -448,6 +513,11 @@ const HomeScreen = ({ navigation, route }: Props) => {
     return null;
   };
 
+  // Optional: Add pull-to-refresh functionality
+  const handleRefresh = () => {
+    fetchUserData();
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {renderHeader()}
@@ -461,6 +531,8 @@ const HomeScreen = ({ navigation, route }: Props) => {
         stickySectionHeadersEnabled={false}
         showsVerticalScrollIndicator={true}
         contentContainerStyle={styles.sectionListContent}
+        refreshing={isRefreshing}
+        onRefresh={handleRefresh}
       />
     </SafeAreaView>
   );
