@@ -24,7 +24,8 @@ export const fetchUserGoals = async (userId: string = 'default_user'): Promise<G
         progress: goal.progress || 0,
         startDate: goal.target_date || goal.startDate,
         userId: goal.user_id || goal.userId,
-        coinReward: goal.coin_reward || goal.coinReward || 0
+        coinReward: goal.coin_reward || goal.coinReward || 0,
+        routineDays: goal.routine_days || goal.routineDays || [] // Added for routine days
       }));
     }
     
@@ -41,7 +42,8 @@ export const fetchUserGoals = async (userId: string = 'default_user'): Promise<G
         progress: goal.progress || 0,
         startDate: goal.target_date || goal.startDate,
         userId: goal.user_id || goal.userId,
-        coinReward: goal.coin_reward || goal.coinReward || 0
+        coinReward: goal.coin_reward || goal.coinReward || 0,
+        routineDays: goal.routine_days || goal.routineDays || [] // Added for routine days
       }));
     }
     
@@ -81,7 +83,8 @@ export const updateGoalProgress = async (goalId: number, progress: number): Prom
       progress: goal.progress || 0,
       startDate: goal.target_date || goal.startDate,
       userId: goal.user_id || goal.userId,
-      coinReward: goal.coin_reward || goal.coinReward || 0
+      coinReward: goal.coin_reward || goal.coinReward || 0,
+      routineDays: goal.routine_days || goal.routineDays || [] // Added for routine days
     };
   } catch (err) {
     console.error('Error updating goal progress:', err);
@@ -92,6 +95,9 @@ export const updateGoalProgress = async (goalId: number, progress: number): Prom
 // Create a new goal for a user
 export const createGoal = async (goal: Partial<Goal>, userId: string): Promise<Goal> => {
   try {
+    // Convert the routineDays array to a JSON string for the API
+    const routineDaysString = goal.routineDays ? JSON.stringify(goal.routineDays) : null;
+    
     const res = await fetch(`${API_URL}/goals`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -104,7 +110,8 @@ export const createGoal = async (goal: Partial<Goal>, userId: string): Promise<G
         is_completed: goal.isCompleted ? 1 : 0,  // Convert to integer for DB
         is_daily: goal.isDaily ? 1 : 0,          // Convert to integer for DB
         category: goal.category || 'Personal',
-        coin_reward: goal.coinReward ?? 10       // Default reward value
+        coin_reward: goal.coinReward ?? 10,      // Default reward value
+        routine_days: routineDaysString          // Added for routine days
       }),
     });
 
@@ -127,10 +134,54 @@ export const createGoal = async (goal: Partial<Goal>, userId: string): Promise<G
       progress: createdGoal.progress || 0,
       startDate: createdGoal.target_date || createdGoal.startDate,
       userId: createdGoal.user_id || createdGoal.userId,
-      coinReward: createdGoal.coin_reward || createdGoal.coinReward || 0
+      coinReward: createdGoal.coin_reward || createdGoal.coinReward || 0,
+      routineDays: createdGoal.routine_days 
+        ? JSON.parse(createdGoal.routine_days) 
+        : createdGoal.routineDays || [] // Parse routine days from JSON string
     };
   } catch (err) {
     console.error('Error creating goal:', err);
+    throw err;
+  }
+};
+
+// Update the routine days for a goal
+export const updateGoalRoutineDays = async (goalId: number, routineDays: number[]): Promise<Goal | null> => {
+  try {
+    const res = await fetch(`${API_URL}/goals/${goalId}`, {
+      method: 'PATCH', 
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        routine_days: JSON.stringify(routineDays) 
+      }),
+    });
+    
+    if (!res.ok) throw new Error('Failed to update routine days');
+    const data = await res.json();
+    
+    // Handle different response formats
+    const goal = data.goal || data;
+    
+    if (!goal) return null;
+    
+    return {
+      id: goal.goal_id || goal.id,
+      title: goal.title,
+      description: goal.description,
+      category: goal.category,
+      color: getCategoryColor(goal.category),
+      isCompleted: goal.is_completed === 1 || goal.isCompleted === true,
+      isDaily: goal.is_daily === 1 || goal.isDaily === true,
+      progress: goal.progress || 0,
+      startDate: goal.target_date || goal.startDate,
+      userId: goal.user_id || goal.userId,
+      coinReward: goal.coin_reward || goal.coinReward || 0,
+      routineDays: goal.routine_days 
+        ? JSON.parse(goal.routine_days) 
+        : goal.routineDays || []
+    };
+  } catch (err) {
+    console.error('Error updating routine days:', err);
     throw err;
   }
 };
@@ -162,7 +213,7 @@ export const getUserFutureCoins = async (userId: string): Promise<number> => {
 };
 
 // Helper function to get color for a category
-function getCategoryColor(category?: string): string {
+export const getCategoryColor = (category?: string): string => {
   const categoryColors: Record<string, string> = {
     'Personal': '#3B82F6', // Blue
     'Work': '#4CAF50',     // Green
@@ -173,9 +224,9 @@ function getCategoryColor(category?: string): string {
   };
   
   return category && categoryColors[category] ? categoryColors[category] : '#3B82F6';
-}
+};
 
-// Update user coins - new helper function to sync with your UI
+// Update user coins
 export const updateUserCoins = async (amount: number): Promise<void> => {
   try {
     // You would typically need a userId here, but for compatibility with your
@@ -193,7 +244,7 @@ export const updateUserCoins = async (amount: number): Promise<void> => {
   }
 };
 
-// Update user XP - new helper function to sync with your UI
+// Update user XP
 export const updateUserXP = async (amount: number): Promise<any> => {
   try {
     // You would typically need a userId here, but for compatibility with your
@@ -212,4 +263,22 @@ export const updateUserXP = async (amount: number): Promise<any> => {
     console.error('Error updating user XP:', err);
     throw err;
   }
+};
+
+// Helper function to check if a goal is active today (for daily goals)
+export const isGoalActiveToday = (goal: Goal): boolean => {
+  if (!goal.isDaily) return true; // Non-daily goals are always active
+  
+  if (!goal.routineDays || goal.routineDays.length === 0) return true; // If no days specified, show on all days
+  
+  const today = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
+  return goal.routineDays.includes(today);
+};
+
+// Get all goals active for today
+export const getTodaysGoals = async (userId: string): Promise<Goal[]> => {
+  const allGoals = await fetchUserGoals(userId);
+  return allGoals.filter(goal => 
+    !goal.isCompleted && isGoalActiveToday(goal)
+  );
 };

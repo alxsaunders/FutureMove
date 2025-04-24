@@ -23,9 +23,11 @@ export interface Goal {
   isDaily: boolean;
   progress: number;
   startDate?: string;
-  userId?: string;  // Add this to fix the first and third error
-  coinReward?: number;  // Add this to fix the second error
+  userId?: string;
+  coinReward?: number;
+  routineDays?: number[]; // Added for day-specific routine functionality
 }
+
 export interface SubGoal {
   id: number;
   goalId: number;

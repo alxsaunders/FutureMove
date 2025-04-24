@@ -223,7 +223,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
             <Text style={styles.goalCompletedText}>
               {goals.filter((goal) => goal.isCompleted).length}/{goals.length}
             </Text>
-            <Text style={styles.goalCompletedLabel}>Goals</Text>
+            <Text style={styles.goalCompletedLabel}>Today's Goals</Text>
           </View>
         </View>
 

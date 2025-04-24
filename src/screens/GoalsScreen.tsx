@@ -13,7 +13,7 @@ import {
   ScrollView,
   ActivityIndicator,
 } from "react-native";
-import { useFocusEffect } from "@react-navigation/native"; // Import useFocusEffect
+import { useFocusEffect } from "@react-navigation/native";
 import { GoalsScreenProps } from "../types/navigaton";
 import { GoalListItem } from "../components/GoalListItem";
 import { Goal } from "../types";
@@ -26,11 +26,23 @@ import {
   createGoal,
   getUserStreaks,
   getUserFutureCoins,
+  getCategoryColor,
 } from "../services/GoalService";
 
 // Define types for filters and sorting
-type GoalFilterType = "all" | "active" | "completed";
+type GoalFilterType = "all" | "active" | "routine" | "completed";
 type GoalSortType = "default" | "date" | "category" | "progress";
+
+// Days of the week for routines
+const DAYS_OF_WEEK = [
+  { id: 0, name: "Sun", fullName: "Sunday" },
+  { id: 1, name: "Mon", fullName: "Monday" },
+  { id: 2, name: "Tue", fullName: "Tuesday" },
+  { id: 3, name: "Wed", fullName: "Wednesday" },
+  { id: 4, name: "Thu", fullName: "Thursday" },
+  { id: 5, name: "Fri", fullName: "Friday" },
+  { id: 6, name: "Sat", fullName: "Saturday" },
+];
 
 const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
   const { currentUser } = useAuth();
@@ -38,7 +50,7 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
 
   const [goals, setGoals] = useState<Goal[]>([]);
   const [filteredGoals, setFilteredGoals] = useState<Goal[]>([]);
-  const [filterType, setFilterType] = useState<GoalFilterType>("all");
+  const [filterType, setFilterType] = useState<GoalFilterType>("active");
   const [sortType, setSortType] = useState<GoalSortType>("default");
   const [futureCoins, setFutureCoins] = useState(0);
   const [streakCount, setStreakCount] = useState(0);
@@ -46,7 +58,10 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
   const [newGoalTitle, setNewGoalTitle] = useState("");
   const [newGoalDescription, setNewGoalDescription] = useState("");
   const [newGoalCategory, setNewGoalCategory] = useState("Personal");
-  const [newGoalIsDaily, setNewGoalIsDaily] = useState(true);
+  const [newGoalIsDaily, setNewGoalIsDaily] = useState(false);
+  const [newGoalSelectedDays, setNewGoalSelectedDays] = useState<number[]>([]);
+  // Add routineDays to store which days a routine goal is scheduled for
+  const [routineDays, setRoutineDays] = useState<Record<number, number[]>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [isFilterModalVisible, setFilterModalVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -62,6 +77,32 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
     { name: "Finance", color: "#FF9800" },
   ];
 
+  // Helper to check if a goal should be active today
+  const isGoalActiveToday = (goal: Goal) => {
+    if (!goal.isDaily) return true; // Non-daily goals are always active
+
+    const today = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
+
+    // First check the goal's own routineDays property (from the database)
+    if (goal.routineDays && goal.routineDays.length > 0) {
+      return goal.routineDays.includes(today);
+    }
+
+    // Fall back to the local state if available
+    const goalDays = routineDays[goal.id];
+
+    // If no days are specified in either place, show it on all days
+    if (
+      (!goalDays || goalDays.length === 0) &&
+      (!goal.routineDays || goal.routineDays.length === 0)
+    ) {
+      return true;
+    }
+
+    // Otherwise, check if today is in the routine days
+    return goalDays && goalDays.includes(today);
+  };
+
   // Load user data (goals, streaks, coins)
   const loadUserData = async () => {
     try {
@@ -70,6 +111,17 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
       // Fetch goals
       const goalsData = await fetchUserGoals(userId);
       setGoals(goalsData);
+
+      // For now, mock routine days since we don't have them in the backend yet
+      const mockRoutineDays: Record<number, number[]> = {};
+      goalsData.forEach((goal) => {
+        if (goal.isDaily) {
+          // Assign every day routine for daily goals
+          mockRoutineDays[goal.id] = [0, 1, 2, 3, 4, 5, 6]; // All days
+        }
+      });
+      setRoutineDays(mockRoutineDays);
+
       applyFilters(goalsData, filterType, sortType, searchQuery);
 
       // Fetch streak count
@@ -100,7 +152,7 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
     }, [userId]) // Add userId as a dependency
   );
 
-  // Initial data load on mount (this can stay as it will only run once)
+  // Initial data load on mount
   useEffect(() => {
     loadUserData();
   }, [userId]);
@@ -112,67 +164,93 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
   };
 
   // Apply filters and sorting to goals
-  const applyFilters = (
-    goalsList: Goal[],
-    filter: GoalFilterType = filterType,
-    sort: GoalSortType = sortType,
-    search: string = searchQuery
-  ) => {
-    // Filter based on completion status
-    let result = [...goalsList];
+ const applyFilters = (
+   goalsList: Goal[],
+   filter: GoalFilterType = filterType,
+   sort: GoalSortType = sortType,
+   search: string = searchQuery
+ ) => {
+   // Filter based on completion status and routine type
+   let result = [...goalsList];
 
-    if (filter === "active") {
-      result = result.filter((goal) => !goal.isCompleted);
-    } else if (filter === "completed") {
-      result = result.filter((goal) => goal.isCompleted);
-    }
+   if (filter === "active") {
+     // Get today's day of week (0=Sunday, 1=Monday, etc.)
+     const today = new Date().getDay();
 
-    // Apply search query
-    if (search.trim() !== "") {
-      const lowerCaseQuery = search.toLowerCase();
-      result = result.filter(
-        (goal) =>
-          goal.title.toLowerCase().includes(lowerCaseQuery) ||
-          (goal.description &&
-            goal.description.toLowerCase().includes(lowerCaseQuery)) ||
-          (goal.category &&
-            goal.category.toLowerCase().includes(lowerCaseQuery))
-      );
-    }
+     // Active goals are incomplete goals that are scheduled for today
+     result = result.filter((goal) => {
+       // Must be incomplete
+       if (goal.isCompleted) return false;
 
-    // Apply sorting
-    switch (sort) {
-      case "date":
-        result.sort((a, b) => {
-          // Sort by date (newest first)
-          const dateA = a.startDate ? new Date(a.startDate).getTime() : 0;
-          const dateB = b.startDate ? new Date(b.startDate).getTime() : 0;
-          return dateB - dateA;
-        });
-        break;
-      case "category":
-        result.sort((a, b) => {
-          // Sort by category
-          return (a.category || "").localeCompare(b.category || "");
-        });
-        break;
-      case "progress":
-        // Sort by progress (highest first)
-        result.sort((a, b) => b.progress - a.progress);
-        break;
-      default:
-        // Default sorting (active goals first, then by date)
-        result.sort((a, b) => {
-          if (a.isCompleted && !b.isCompleted) return 1;
-          if (!a.isCompleted && b.isCompleted) return -1;
-          const dateA = a.startDate ? new Date(a.startDate).getTime() : 0;
-          const dateB = b.startDate ? new Date(b.startDate).getTime() : 0;
-          return dateB - dateA;
-        });
-    }
+       // If it's not a daily goal, include it
+       if (!goal.isDaily) return true;
 
-    setFilteredGoals(result);
-  };
+       // For daily goals, check if today is in the routine days
+       if (goal.routineDays && goal.routineDays.length > 0) {
+         return goal.routineDays.includes(today);
+       }
+
+       // Fall back to the local state if available
+       const goalDays = routineDays[goal.id];
+       if (goalDays && goalDays.length > 0) {
+         return goalDays.includes(today);
+       }
+
+       // If no days are specified in either place, show it on all days
+       return true;
+     });
+   } else if (filter === "routine") {
+     // Show only daily/routine goals
+     result = result.filter((goal) => goal.isDaily);
+   } else if (filter === "completed") {
+     result = result.filter((goal) => goal.isCompleted);
+   }
+
+   // Apply search query
+   if (search.trim() !== "") {
+     const lowerCaseQuery = search.toLowerCase();
+     result = result.filter(
+       (goal) =>
+         goal.title.toLowerCase().includes(lowerCaseQuery) ||
+         (goal.description &&
+           goal.description.toLowerCase().includes(lowerCaseQuery)) ||
+         (goal.category && goal.category.toLowerCase().includes(lowerCaseQuery))
+     );
+   }
+
+   // Apply sorting
+   switch (sort) {
+     case "date":
+       result.sort((a, b) => {
+         // Sort by date (newest first)
+         const dateA = a.startDate ? new Date(a.startDate).getTime() : 0;
+         const dateB = b.startDate ? new Date(b.startDate).getTime() : 0;
+         return dateB - dateA;
+       });
+       break;
+     case "category":
+       result.sort((a, b) => {
+         // Sort by category
+         return (a.category || "").localeCompare(b.category || "");
+       });
+       break;
+     case "progress":
+       // Sort by progress (highest first)
+       result.sort((a, b) => b.progress - a.progress);
+       break;
+     default:
+       // Default sorting (active goals first, then by date)
+       result.sort((a, b) => {
+         if (a.isCompleted && !b.isCompleted) return 1;
+         if (!a.isCompleted && b.isCompleted) return -1;
+         const dateA = a.startDate ? new Date(a.startDate).getTime() : 0;
+         const dateB = b.startDate ? new Date(b.startDate).getTime() : 0;
+         return dateB - dateA;
+       });
+   }
+
+   setFilteredGoals(result);
+ };
 
   const toggleGoalCompletion = async (goalId: number) => {
     try {
@@ -201,27 +279,57 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
     }
   };
 
+  // Toggle day selection for routine
+  const toggleDaySelection = (dayId: number) => {
+    if (newGoalSelectedDays.includes(dayId)) {
+      setNewGoalSelectedDays(newGoalSelectedDays.filter((id) => id !== dayId));
+    } else {
+      setNewGoalSelectedDays([...newGoalSelectedDays, dayId]);
+    }
+  };
+
   const handleCreateGoal = async () => {
     if (newGoalTitle.trim() === "") {
       Alert.alert("Error", "Please enter a goal title");
       return;
     }
 
+    // For routine goals, at least one day must be selected
+    if (newGoalIsDaily && newGoalSelectedDays.length === 0) {
+      // If no days are selected for a daily goal, default to all days
+      setNewGoalSelectedDays([0, 1, 2, 3, 4, 5, 6]);
+    }
+
     try {
       // Create a new goal using the service
-      const newGoal = await createGoal(
-        {
-          title: newGoalTitle,
-          description: newGoalDescription,
-          category: newGoalCategory,
-          isCompleted: false,
-          isDaily: newGoalIsDaily,
-          color: categories.find((c) => c.name === newGoalCategory)?.color,
-          startDate: new Date().toISOString().split("T")[0],
-          progress: 0,
-        },
-        userId
-      );
+     const newGoal = await createGoal(
+       {
+         title: newGoalTitle,
+         description: newGoalDescription,
+         category: newGoalCategory,
+         isCompleted: false,
+         isDaily: newGoalIsDaily,
+         color: getCategoryColor(newGoalCategory),
+         startDate: new Date().toISOString().split("T")[0],
+         progress: 0,
+         userId: userId,
+         coinReward: 10, // Default reward
+         routineDays: newGoalIsDaily
+           ? newGoalSelectedDays.length > 0
+             ? newGoalSelectedDays
+             : [0, 1, 2, 3, 4, 5, 6]
+           : [],
+       },
+       userId
+     );
+
+      // Store the selected days for this goal
+      if (newGoalIsDaily && newGoal.id) {
+        setRoutineDays((prev) => ({
+          ...prev,
+          [newGoal.id]: [...newGoalSelectedDays],
+        }));
+      }
 
       // Reload goals
       loadUserData();
@@ -231,7 +339,8 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
       setNewGoalTitle("");
       setNewGoalDescription("");
       setNewGoalCategory("Personal");
-      setNewGoalIsDaily(true);
+      setNewGoalIsDaily(false);
+      setNewGoalSelectedDays([]);
     } catch (error) {
       console.error("Error creating goal:", error);
       Alert.alert("Error", "Failed to create goal. Please try again.");
@@ -261,6 +370,44 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
       <TouchableOpacity
         style={[
           styles.filterTab,
+          filterType === "active" && styles.activeFilterTab,
+        ]}
+        onPress={() => {
+          setFilterType("active");
+          applyFilters(goals, "active");
+        }}
+      >
+        <Text
+          style={[
+            styles.filterTabText,
+            filterType === "active" && styles.activeFilterTabText,
+          ]}
+        >
+          Today
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[
+          styles.filterTab,
+          filterType === "routine" && styles.activeFilterTab,
+        ]}
+        onPress={() => {
+          setFilterType("routine");
+          applyFilters(goals, "routine");
+        }}
+      >
+        <Text
+          style={[
+            styles.filterTabText,
+            filterType === "routine" && styles.activeFilterTabText,
+          ]}
+        >
+          Routines
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[
+          styles.filterTab,
           filterType === "all" && styles.activeFilterTab,
         ]}
         onPress={() => {
@@ -280,25 +427,6 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
       <TouchableOpacity
         style={[
           styles.filterTab,
-          filterType === "active" && styles.activeFilterTab,
-        ]}
-        onPress={() => {
-          setFilterType("active");
-          applyFilters(goals, "active");
-        }}
-      >
-        <Text
-          style={[
-            styles.filterTabText,
-            filterType === "active" && styles.activeFilterTabText,
-          ]}
-        >
-          Active
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[
-          styles.filterTab,
           filterType === "completed" && styles.activeFilterTab,
         ]}
         onPress={() => {
@@ -312,7 +440,7 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
             filterType === "completed" && styles.activeFilterTabText,
           ]}
         >
-          Completed
+          Done
         </Text>
       </TouchableOpacity>
     </View>
@@ -356,8 +484,21 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
     </View>
   );
 
-  // Render individual goal item
-  const renderGoalItem = ({ item }: { item: Goal }) => (
+const renderGoalItem = ({ item }: { item: Goal }) => {
+  // First check if goal has routineDays property from database
+  let daysToShow = item.routineDays || [];
+
+  // If empty, fall back to local state
+  if (daysToShow.length === 0) {
+    daysToShow = routineDays[item.id] || [];
+  }
+
+  // If both are empty and it's a daily goal, default to all days
+  if (daysToShow.length === 0 && item.isDaily) {
+    daysToShow = [0, 1, 2, 3, 4, 5, 6]; // All days
+  }
+
+  return (
     <View style={styles.goalItemContainer}>
       <TouchableOpacity
         style={[
@@ -366,7 +507,7 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
         ]}
         onPress={() => {
           // Navigate to goal details
-          Alert.alert("Goal Selected", `Goal ID: ${item.id}`);
+          navigation.navigate("GoalDetail", { goalId: item.id });
         }}
       >
         <View style={styles.goalContent}>
@@ -417,6 +558,34 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
             <Text style={styles.progressText}>{item.progress}%</Text>
           </View>
 
+          {/* Routine days indicator */}
+          {item.isDaily && (
+            <View style={styles.routineDaysContainer}>
+              {DAYS_OF_WEEK.map((day) => (
+                <View
+                  key={day.id}
+                  style={[
+                    styles.dayIndicator,
+                    daysToShow.includes(day.id)
+                      ? { backgroundColor: item.color || COLORS.primary }
+                      : { backgroundColor: COLORS.lightBackground },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.dayIndicatorText,
+                      daysToShow.includes(day.id)
+                        ? { color: COLORS.white }
+                        : { color: COLORS.textSecondary },
+                    ]}
+                  >
+                    {day.name[0]}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+
           <View style={styles.goalFooter}>
             {item.category && (
               <View
@@ -455,6 +624,7 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
       </TouchableOpacity>
     </View>
   );
+};
 
   // Filter modal
   const renderFilterModal = () => (
@@ -571,10 +741,10 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
               style={styles.resetButton}
               onPress={() => {
                 // Reset all filters
-                setFilterType("all");
+                setFilterType("active");
                 setSortType("default");
                 setSearchQuery("");
-                applyFilters(goals, "all", "default", "");
+                applyFilters(goals, "active", "default", "");
                 setFilterModalVisible(false);
               }}
             >
@@ -586,7 +756,7 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
     </Modal>
   );
 
-  // Create goal modal
+  // Create goal modal with routine days selection
   const renderCreateModal = () => (
     <Modal
       visible={isCreateModalVisible}
@@ -668,6 +838,38 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
               />
             </View>
 
+            {/* Routine days selection */}
+            {newGoalIsDaily && (
+              <View style={styles.routineDaysSection}>
+                <Text style={styles.inputLabel}>Repeat on these days:</Text>
+                <View style={styles.daysContainer}>
+                  {DAYS_OF_WEEK.map((day) => (
+                    <TouchableOpacity
+                      key={day.id}
+                      style={[
+                        styles.dayButton,
+                        newGoalSelectedDays.includes(day.id) && {
+                          backgroundColor: COLORS.primary,
+                        },
+                      ]}
+                      onPress={() => toggleDaySelection(day.id)}
+                    >
+                      <Text
+                        style={[
+                          styles.dayButtonText,
+                          newGoalSelectedDays.includes(day.id) && {
+                            color: COLORS.white,
+                          },
+                        ]}
+                      >
+                        {day.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
+
             <TouchableOpacity
               style={styles.createButton}
               onPress={handleCreateGoal}
@@ -705,7 +907,9 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
             : filterType === "completed"
             ? "You haven't completed any goals yet."
             : filterType === "active"
-            ? "You don't have any active goals."
+            ? "You don't have any active goals for today."
+            : filterType === "routine"
+            ? "You don't have any routine goals set up."
             : "You don't have any goals. Create one to get started!"}
         </Text>
       </View>
@@ -908,6 +1112,22 @@ const styles = StyleSheet.create({
     width: 35,
     textAlign: "right",
   },
+  routineDaysContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  dayIndicator: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  dayIndicatorText: {
+    fontSize: 10,
+    fontWeight: "bold",
+  },
   goalFooter: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -929,7 +1149,7 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
   },
   dailyBadge: {
-    backgroundColor: COLORS.accent1,
+    backgroundColor: COLORS.accent2,
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,
@@ -994,7 +1214,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: "80%",
+    maxHeight: "90%", // Increased height for routine selection
   },
   filterModalContainer: {
     backgroundColor: COLORS.background,
@@ -1076,6 +1296,28 @@ const styles = StyleSheet.create({
   switchLabel: {
     fontSize: 16,
     fontWeight: "500",
+    color: COLORS.text,
+  },
+  routineDaysSection: {
+    marginBottom: 20,
+  },
+  daysContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
+  dayButton: {
+    width: "30%",
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  dayButtonText: {
+    fontSize: 14,
     color: COLORS.text,
   },
   createButton: {
