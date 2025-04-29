@@ -5,50 +5,48 @@ import { NavigatorScreenParams } from "@react-navigation/native";
 // Root Stack Parameters
 export type RootStackParamList = {
   Splash: undefined;
-  Home: { username: string };
+  Home: { 
+    username: string;
+    userLevel?: number;
+    userExp?: number;
+    userCoins?: number;
+    streakCount?: number;
+  };
   SignUp: undefined;
   Main: undefined;
-  GoalDetail: { goalId: number }; // Added for goal details
-  Login: undefined; // Added for authentication
+  GoalDetail: { goalId: number }; 
+  Login: undefined; 
 };
 
 // Bottom Tab Parameters
 export type BottomTabParamList = {
-  Home: { username?: string };
-  Goals: undefined;
+  Home: { 
+    username?: string;
+    userLevel?: number;
+    userExp?: number;
+    userCoins?: number;
+    streakCount?: number;
+  };
+  Goals: {
+    viewGoalId?: number;
+    openCreateGoal?: boolean;
+    createAsRoutine?: boolean;
+    filterType?: string;
+  };
   Community: undefined;
   ItemShop: undefined;
   Profile: undefined;
 };
 
 // Root Stack Navigation Props
-export type SplashScreenNavigationProp = StackNavigationProp<
-  RootStackParamList,
-  "Splash"
->;
-export type HomeScreenNavigationProp = StackNavigationProp<
-  RootStackParamList,
-  "Home"
->;
-// Added GoalDetail navigation prop
-export type GoalDetailScreenNavigationProp = StackNavigationProp<
-  RootStackParamList,
-  "GoalDetail"
->;
-// Added Login navigation prop
-export type LoginScreenNavigationProp = StackNavigationProp<
-  RootStackParamList,
-  "Login"
->;
+export type SplashScreenNavigationProp = StackNavigationProp<RootStackParamList, "Splash">;
+export type HomeScreenNavigationProp = StackNavigationProp<RootStackParamList, "Home">;
+export type GoalDetailScreenNavigationProp = StackNavigationProp<RootStackParamList, "GoalDetail">;
+export type LoginScreenNavigationProp = StackNavigationProp<RootStackParamList, "Login">;
 
 // Root Stack Route Props
 export type HomeScreenRouteProp = RouteProp<RootStackParamList, "Home">;
-// Added GoalDetail route prop
-export type GoalDetailScreenRouteProp = RouteProp<
-  RootStackParamList,
-  "GoalDetail"
->;
-// Added Login route prop
+export type GoalDetailScreenRouteProp = RouteProp<RootStackParamList, "GoalDetail">;
 export type LoginScreenRouteProp = RouteProp<RootStackParamList, "Login">;
 
 // Combined Screen Props
@@ -61,24 +59,18 @@ export type SplashScreenProps = {
   navigation: SplashScreenNavigationProp;
 };
 
-// Added GoalDetail screen props
 export type GoalDetailScreenProps = {
   navigation: GoalDetailScreenNavigationProp;
   route: GoalDetailScreenRouteProp;
 };
 
-// Added Login screen props
 export type LoginScreenProps = {
   navigation: LoginScreenNavigationProp;
   route: LoginScreenRouteProp;
 };
 
 // Bottom Tab Navigation Props
-export type GoalsScreenNavigationProp = StackNavigationProp<
-  BottomTabParamList,
-  "Goals"
->;
-
+export type GoalsScreenNavigationProp = StackNavigationProp<BottomTabParamList, "Goals">;
 export type GoalsScreenRouteProp = RouteProp<BottomTabParamList, "Goals">;
 
 export type GoalsScreenProps = {
@@ -86,7 +78,7 @@ export type GoalsScreenProps = {
   route: GoalsScreenRouteProp;
 };
 
-// Declare global namespace for type augmentation (helpful for useNavigation hook)
+// Declare global namespace for type augmentation
 declare global {
   namespace ReactNavigation {
     interface RootParamList extends RootStackParamList {}

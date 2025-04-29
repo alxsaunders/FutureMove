@@ -14,12 +14,22 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { GoalsScreenNavigationProp, HomeScreenProps } from "../types/navigaton";
 import { ProgressCircle } from "../components/ProgressCircle";
 import { DailyQuote } from "../components/DailyQuote";
-import { RoutinesList } from "../components/RoutinesList";
+import { RoutineListItem } from "../components/RoutineListItem";
 import { NewsList } from "../components/NewsList";
 import { GoalListItem } from "../components/GoalListItem";
 import { fetchDailyQuote } from "../services/QuoteService";
-import { fetchUserGoals, updateGoalProgress } from "../services/GoalService";
-import { fetchUserRoutines } from "../services/RoutineService";
+import {
+  fetchUserGoals,
+  updateGoalProgress,
+  isGoalActiveToday,
+  getTodaysGoals,
+  getCategoryColor,
+} from "../services/GoalService";
+import {
+  fetchUserRoutines,
+  toggleRoutineCompletion,
+  isRoutineActiveToday,
+} from "../services/RoutineService";
 import { fetchNews } from "../services/NewsService";
 import { Goal, Routine, News, Quote } from "../types";
 import { COLORS } from "../common/constants/colors";
@@ -39,6 +49,32 @@ type SectionType = {
   keyExtractor: (item: any) => string;
 };
 
+// Helper function to check if goal rewards can be claimed
+// This would normally be in GoalService.ts
+const canClaimRewardsForGoal = async (goal: Goal) => {
+  // For one-time goals, check if they're completed on the assigned day
+  if (goal.type === "one-time") {
+    const today = new Date();
+    const goalDate = new Date(goal.targetDate || Date.now());
+
+    // If the goal was due in the past, don't allow claiming rewards
+    if (goalDate < today && goalDate.toDateString() !== today.toDateString()) {
+      return false;
+    }
+  }
+
+  // All other goals can claim rewards
+  return true;
+};
+
+// Define XP and coin rewards
+const GOAL_COMPLETION_XP = 10;
+const ROUTINE_COMPLETION_XP = 5;
+const STREAK_MILESTONE_XP = 25; // XP for reaching streak milestones (7, 30, etc)
+const GOAL_COMPLETION_COINS = 5;
+const ROUTINE_COMPLETION_COINS = 2;
+const STREAK_MILESTONE_COINS = 20;
+
 const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   // Use tabNavigation for navigating to bottom tab screens
   const tabNavigation = useNavigation<GoalsScreenNavigationProp>();
@@ -46,15 +82,31 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   const { currentUser } = useAuth();
   const userId = currentUser?.id || "default_user";
 
+  // Updated to prioritize route params for username
   const username = route.params?.username || currentUser?.name || "User";
+
+  // Updated state initialization to use route params first
   const [quote, setQuote] = useState<Quote | null>(null);
-  const [goals, setGoals] = useState<Goal[]>([]);
+  const [allGoals, setAllGoals] = useState<Goal[]>([]);
+  const [todayGoals, setTodayGoals] = useState<Goal[]>([]);
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [news, setNews] = useState<News[]>([]);
   const [overallProgress, setOverallProgress] = useState(0);
-  const [userLevel, setUserLevel] = useState(5);
-  const [userExp, setUserExp] = useState(75);
-  const [streakCount, setStreakCount] = useState(7);
+
+  // Use route params for user stats with appropriate fallbacks
+  const [userLevel, setUserLevel] = useState(
+    route.params?.userLevel || currentUser?.level || 1
+  );
+  const [userExp, setUserExp] = useState(
+    route.params?.userExp || currentUser?.xp_points || 0
+  );
+  const [userCoins, setUserCoins] = useState(
+    route.params?.userCoins || currentUser?.future_coins || 0
+  );
+  const [streakCount, setStreakCount] = useState(
+    route.params?.streakCount || 0
+  );
+
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [quoteLoaded, setQuoteLoaded] = useState(false);
 
@@ -66,42 +118,89 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
     try {
       setIsRefreshing(true);
 
-      // Get user goals
+      // Get all user goals
       const goalsData = await fetchUserGoals(userId);
+      setAllGoals(goalsData);
+
+      // Filter for today's goals only (not completed and active today)
+      const todaysGoalsData = goalsData.filter(
+        (goal) => !goal.isCompleted && isGoalActiveToday(goal)
+      );
 
       // Sort goals - incomplete first, then completed
-      const sortedGoals = [...goalsData].sort((a, b) => {
+      const sortedGoals = [...todaysGoalsData].sort((a, b) => {
         if (a.isCompleted && !b.isCompleted) return 1;
         if (!a.isCompleted && b.isCompleted) return -1;
         return 0;
       });
 
-      setGoals(sortedGoals);
+      setTodayGoals(sortedGoals);
 
-      // Calculate overall progress
-      const completedGoals = goalsData.filter(
+      // Calculate overall progress for today's goals
+      const completedGoals = todaysGoalsData.filter(
         (goal) => goal.isCompleted
       ).length;
-      const totalGoals = goalsData.length;
+      const totalGoals = todaysGoalsData.length;
       const progressPercentage =
         totalGoals > 0 ? Math.round((completedGoals / totalGoals) * 100) : 0;
       setOverallProgress(progressPercentage);
 
       // Get user routines
-      const routinesData = await fetchUserRoutines();
+      const routinesData = await fetchUserRoutines(userId);
       setRoutines(routinesData);
 
       // Get relevant news
       const newsData = await fetchNews();
       setNews(newsData);
 
-      // Set user level and experience
-      setUserLevel(currentUser?.level || 5);
-      setUserExp(currentUser?.xp_points || 75);
+      // Set user level and experience - updated to preserve route params
+      setUserLevel(route.params?.userLevel || currentUser?.level || userLevel);
+      setUserExp(route.params?.userExp || currentUser?.xp_points || userExp);
+      setUserCoins(
+        route.params?.userCoins || currentUser?.future_coins || userCoins
+      );
     } catch (error) {
       console.error("Error fetching data:", error);
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  // Mock function to update user streak
+  // This would normally be in a service
+  const updateStreak = async () => {
+    // This would update streak in the database
+    // For now just increment the local state
+    setStreakCount((prev) => prev + 1);
+  };
+
+  // Mock function to handle XP gains
+  const handleXpGain = async (xpAmount: number) => {
+    try {
+      // Get current XP and level
+      const newXP = userExp + xpAmount;
+      let newLevel = userLevel;
+
+      // Check if user leveled up (every 100 XP)
+      if (newXP >= 100) {
+        const levelsGained = Math.floor(newXP / 100);
+        newLevel += levelsGained;
+
+        // Show level up alert
+        Alert.alert(
+          "Level Up!",
+          `Congratulations! You've reached level ${newLevel}!`,
+          [{ text: "Awesome!", style: "default" }]
+        );
+
+        setUserLevel(newLevel);
+        setUserExp(newXP % 100);
+      } else {
+        // Just update XP
+        setUserExp(newXP);
+      }
+    } catch (error) {
+      console.error("Error updating XP:", error);
     }
   };
 
@@ -123,6 +222,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   }, [quoteLoaded]);
 
   // Use useFocusEffect to refresh data whenever the screen comes into focus
+  // Updated dependency array to include route params
   useFocusEffect(
     useCallback(() => {
       // Fetch data when screen comes into focus (except quote)
@@ -131,30 +231,68 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
       return () => {
         // Any cleanup if needed
       };
-    }, [userId])
+    }, [
+      userId,
+      route.params?.userLevel,
+      route.params?.userExp,
+      route.params?.userCoins,
+      route.params?.streakCount,
+    ])
   );
 
   // Initial data load on mount
+  // Updated dependency array to include route params
   useEffect(() => {
     fetchUserData();
-  }, [userId]);
+  }, [
+    userId,
+    route.params?.userLevel,
+    route.params?.userExp,
+    route.params?.userCoins,
+    route.params?.streakCount,
+  ]);
 
   // Toggle goal completion with database update
   const toggleGoalCompletion = async (goalId: number) => {
     try {
       // Find the goal we're toggling
-      const goalToToggle = goals.find((goal) => goal.id === goalId);
+      const goalToToggle = todayGoals.find((goal) => goal.id === goalId);
 
       if (!goalToToggle) return;
 
       // Calculate new progress value
       const newProgress = !goalToToggle.isCompleted ? 100 : 0;
+      const wasCompleted = goalToToggle.isCompleted;
 
       // Update the goal in the database
       await updateGoalProgress(goalId, newProgress);
 
+      // If this is a completion (not unchecking), handle rewards
+      if (!wasCompleted && newProgress === 100) {
+        // Check if user can claim rewards for this goal (one-day goals can't be claimed if expired)
+        const canClaimRewards = await canClaimRewardsForGoal(goalToToggle);
+
+        if (canClaimRewards) {
+          // Award XP
+          await handleXpGain(GOAL_COMPLETION_XP);
+
+          // Award coins
+          setUserCoins((prev) => prev + GOAL_COMPLETION_COINS);
+
+          // Update streak data
+          await updateStreak();
+
+          // Show completion message
+          Alert.alert(
+            "Goal Completed!",
+            `Great job! You've earned ${GOAL_COMPLETION_XP} XP and ${GOAL_COMPLETION_COINS} coins.`,
+            [{ text: "Nice!", style: "default" }]
+          );
+        }
+      }
+
       // Optimistically update the UI
-      setGoals((prevGoals) => {
+      setTodayGoals((prevGoals) => {
         const updatedGoals = prevGoals.map((goal) => {
           if (goal.id === goalId) {
             return {
@@ -176,9 +314,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
         // Recalculate progress percentage
         const completedGoals = updatedGoals.filter((g) => g.isCompleted).length;
         const totalGoals = updatedGoals.length;
-        const newOverallProgress = Math.round(
-          (completedGoals / totalGoals) * 100
-        );
+        const newOverallProgress =
+          totalGoals > 0 ? Math.round((completedGoals / totalGoals) * 100) : 0;
         setOverallProgress(newOverallProgress);
 
         return sortedGoals;
@@ -192,10 +329,67 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
     }
   };
 
+  // Toggle routine completion
+  const handleToggleRoutine = async (routineId: number) => {
+    try {
+      // Find the routine
+      const routineToToggle = routines.find(
+        (routine) => routine.id === routineId
+      );
+      if (!routineToToggle) return;
+
+      // Check if this is a completion (all tasks complete)
+      const willBeCompleted =
+        routineToToggle.completedTasks + 1 === routineToToggle.totalTasks;
+
+      // Toggle the routine completion via service
+      await toggleRoutineCompletion(routineId);
+
+      // If routine is now complete, handle rewards
+      if (willBeCompleted) {
+        // Award XP
+        await handleXpGain(ROUTINE_COMPLETION_XP);
+
+        // Award coins
+        setUserCoins((prev) => prev + ROUTINE_COMPLETION_COINS);
+
+        // Update streak
+        await updateStreak();
+
+        // Show completion message
+        Alert.alert(
+          "Routine Completed!",
+          `Well done! You've earned ${ROUTINE_COMPLETION_XP} XP and ${ROUTINE_COMPLETION_COINS} coins.`,
+          [{ text: "Great!", style: "default" }]
+        );
+      }
+
+      // Refresh data to show updated state
+      fetchUserData();
+    } catch (error) {
+      console.error("Error toggling routine completion:", error);
+      Alert.alert("Error", "Failed to update routine. Please try again.");
+    }
+  };
+
+  // Navigation functions
+  const navigateToGoalsScreen = () => {
+    tabNavigation.navigate("Goals");
+  };
+
+  const navigateToCreateGoal = () => {
+    // Navigate to Goals tab with param to trigger create form
+    tabNavigation.navigate("Goals", { openCreateGoal: true });
+  };
+
   // Create header component with company name
   const renderHeader = () => (
     <View style={styles.header}>
       <Text style={styles.companyName}>FutureMove</Text>
+      <View style={styles.userCoinsContainer}>
+        <Ionicons name="wallet-outline" size={20} color={COLORS.accent2} />
+        <Text style={styles.userCoinsText}>{userCoins}</Text>
+      </View>
     </View>
   );
 
@@ -221,7 +415,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
           />
           <View style={styles.goalCountContainer}>
             <Text style={styles.goalCompletedText}>
-              {goals.filter((goal) => goal.isCompleted).length}/{goals.length}
+              {todayGoals.filter((goal) => goal.isCompleted).length}/
+              {todayGoals.length}
             </Text>
             <Text style={styles.goalCompletedLabel}>Today's Goals</Text>
           </View>
@@ -248,10 +443,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   // Render individual goal item for goals section (horizontal card)
   const renderGoalItem = ({ item }: { item: Goal }) => (
     <TouchableOpacity
-      style={styles.goalCard}
+      style={[
+        styles.goalCard,
+        { borderLeftColor: item.color || COLORS.primary },
+      ]}
       onPress={() => {
-        // Navigate to the Goals tab
-        tabNavigation.navigate("Goals");
+        // Navigate to the Goals tab with specific goal ID
+        tabNavigation.navigate("Goals", { viewGoalId: item.id });
       }}
       activeOpacity={0.8}
     >
@@ -318,7 +516,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   // Render horizontal goal list
   const renderHorizontalGoalList = () => (
     <FlatList
-      data={goals}
+      data={todayGoals}
       keyExtractor={(item) => item.id.toString()}
       renderItem={renderGoalItem}
       horizontal
@@ -337,74 +535,131 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
         <Text style={styles.sectionTitle}>Today's Goals</Text>
         <TouchableOpacity
           style={styles.viewAllButton}
-          onPress={() => {
-            // Navigate to the Goals tab
-            tabNavigation.navigate("Goals");
-          }}
+          onPress={navigateToGoalsScreen}
         >
           <Text style={styles.viewAllText}>View All</Text>
         </TouchableOpacity>
       </View>
 
-      {goals.length > 0 ? (
+      {todayGoals.length > 0 ? (
         renderHorizontalGoalList()
       ) : (
         <View style={styles.emptyStateContainer}>
-          <Text style={styles.noGoalsText}>You have 0 active goals.</Text>
+          <Text style={styles.noGoalsText}>
+            You have 0 active goals for today.
+          </Text>
         </View>
       )}
 
       <TouchableOpacity
         style={styles.actionButton}
-        onPress={() => {
-          // Navigate to the Goals tab
-          tabNavigation.navigate("Goals");
-        }}
+        onPress={navigateToCreateGoal}
       >
         <Text style={styles.actionButtonText}>Create New Goal</Text>
       </TouchableOpacity>
     </View>
   );
 
-  // Horizontal routine card render
-  const renderRoutineItem = ({ item }: { item: Routine }) => (
-    <TouchableOpacity
-      style={styles.routineCard}
-      onPress={() =>
-        Alert.alert("View Routine", `Viewing routine: ${item.title}`)
-      }
-      activeOpacity={0.8}
-    >
-      <View style={styles.routineCardContent}>
-        <View style={styles.routineCardHeader}>
-          <Text style={styles.routineCardTitle} numberOfLines={1}>
-            {item.title}
-          </Text>
-          <Text style={styles.routineCardFrequency}>{item.frequency}</Text>
-        </View>
+  // Render individual routine item with similar styling to goals
+  const renderRoutineItem = ({ item }: { item: Routine }) => {
+    // Get color based on routine type or use default
+    const routineColor = COLORS.accent1;
 
-        <View style={styles.routineProgressContainer}>
-          <View style={styles.routineProgressBar}>
-            <View
+    // Calculate progress percentage
+    const progressPercentage =
+      item.totalTasks > 0
+        ? Math.round((item.completedTasks / item.totalTasks) * 100)
+        : 0;
+
+    return (
+      <TouchableOpacity
+        style={[styles.routineCard, { borderLeftColor: routineColor }]}
+        onPress={() => {
+          // Navigate to the Goals tab with routine filter
+          tabNavigation.navigate("Goals", {
+            filterType: "routine",
+          });
+        }}
+        activeOpacity={0.8}
+      >
+        <View style={styles.routineCardContent}>
+          <View style={styles.routineCardHeader}>
+            <Text
               style={[
-                styles.routineProgressFill,
-                {
-                  width: `${(item.completedTasks / item.totalTasks) * 100}%`,
-                  backgroundColor:
-                    item.completedTasks === item.totalTasks
-                      ? COLORS.success
-                      : COLORS.primary,
-                },
+                styles.routineCardTitle,
+                item.completedTasks === item.totalTasks
+                  ? styles.completedText
+                  : {},
               ]}
-            />
+              numberOfLines={2}
+            >
+              {item.title}
+            </Text>
+            {/* Show frequency as a badge */}
+            <View
+              style={[styles.categoryBadge, { backgroundColor: routineColor }]}
+            >
+              <Text style={styles.categoryText}>{item.frequency}</Text>
+            </View>
           </View>
-          <Text style={styles.routineProgressText}>
-            {item.completedTasks}/{item.totalTasks}
-          </Text>
+
+          <View style={styles.routineFrequencyRow}>
+            <Ionicons
+              name="repeat-outline"
+              size={16}
+              color={COLORS.textSecondary}
+            />
+            <Text style={styles.routineFrequencyText}>{item.frequency}</Text>
+          </View>
+
+          <View style={styles.routineProgressContainer}>
+            <View style={styles.routineProgressBar}>
+              <View
+                style={[
+                  styles.routineProgressFill,
+                  {
+                    width: `${progressPercentage}%`,
+                    backgroundColor:
+                      item.completedTasks === item.totalTasks
+                        ? COLORS.success
+                        : routineColor,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={styles.routineProgressText}>
+              {item.completedTasks}/{item.totalTasks}
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            style={[
+              styles.checkButton,
+              item.completedTasks === item.totalTasks
+                ? styles.completedCheckButton
+                : {},
+            ]}
+            onPress={() => handleToggleRoutine(item.id)}
+            disabled={item.completedTasks === item.totalTasks}
+          >
+            {item.completedTasks === item.totalTasks ? (
+              <Ionicons
+                name="checkmark-circle"
+                size={28}
+                color={COLORS.success}
+              />
+            ) : (
+              <Ionicons
+                name="ellipse-outline"
+                size={28}
+                color={COLORS.textLight}
+              />
+            )}
+          </TouchableOpacity>
         </View>
-      </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   // Render horizontal routines list
   const renderHorizontalRoutinesList = () => (
@@ -429,10 +684,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
         <TouchableOpacity
           style={styles.viewAllButton}
           onPress={() =>
-            Alert.alert(
-              "View All Routines",
-              "All routines screen would open here"
-            )
+            tabNavigation.navigate("Goals", { filterType: "routine" })
           }
         >
           <Text style={styles.viewAllText}>View All</Text>
@@ -449,12 +701,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
 
       <TouchableOpacity
         style={styles.actionButton}
-        onPress={() =>
-          Alert.alert(
-            "Create Routine",
-            "Create new routine screen would open here"
-          )
-        }
+        onPress={() => {
+          // Navigate to create goal but set it as daily/routine
+          tabNavigation.navigate("Goals", {
+            openCreateGoal: true,
+            createAsRoutine: true,
+          });
+        }}
       >
         <Text style={styles.actionButtonText}>Create New Routine</Text>
       </TouchableOpacity>
@@ -549,12 +802,29 @@ const styles = StyleSheet.create({
   header: {
     padding: 16,
     marginTop: 20,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   companyName: {
     fontSize: 24,
     fontWeight: "bold",
     color: COLORS.primary,
     marginBottom: 4,
+  },
+  userCoinsContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.lightBackground,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  userCoinsText: {
+    marginLeft: 4,
+    fontSize: 16,
+    fontWeight: "bold",
+    color: COLORS.accent2,
   },
   progressSection: {
     padding: 16,
@@ -686,7 +956,6 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
     borderLeftWidth: 4,
-    borderLeftColor: COLORS.primary,
     overflow: "hidden",
   },
   goalCardContent: {
@@ -742,7 +1011,6 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
     borderLeftWidth: 4,
-    borderLeftColor: COLORS.accent1,
     overflow: "hidden",
   },
   routineCardContent: {
@@ -750,7 +1018,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   routineCardHeader: {
-    marginBottom: 12,
+    marginBottom: 8,
   },
   routineCardTitle: {
     fontSize: 18,
@@ -758,9 +1026,15 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     marginBottom: 4,
   },
-  routineCardFrequency: {
+  routineFrequencyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  routineFrequencyText: {
     fontSize: 14,
     color: COLORS.textSecondary,
+    marginLeft: 4,
   },
   routineProgressContainer: {
     flexDirection: "row",

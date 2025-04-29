@@ -10,41 +10,35 @@ export const fetchUserGoals = async (userId: string = 'default_user'): Promise<G
     if (!res.ok) throw new Error('Failed to fetch goals');
     const data = await res.json();
     
+    // Transform function to convert API response to Goal type
+    const transformGoal = (goal: any): Goal => ({
+      id: goal.goal_id || goal.id,
+      title: goal.title,
+      description: goal.description,
+      category: goal.category,
+      color: getCategoryColor(goal.category),
+      isCompleted: goal.is_completed === 1 || goal.isCompleted === true,
+      isDaily: goal.is_daily === 1 || goal.isDaily === true,
+      progress: goal.progress || 0,
+      startDate: goal.target_date || goal.startDate,
+      userId: goal.user_id || goal.userId,
+      coinReward: goal.coin_reward || goal.coinReward || 0,
+      routineDays: goal.routine_days || goal.routineDays || [], // Added for routine days
+      // Add the required type field - default to 'recurring' for daily goals, 'one-time' otherwise
+      type: goal.type || (goal.is_daily === 1 || goal.isDaily === true ? 'recurring' : 'one-time'),
+      // Add targetDate (same as startDate for backwards compatibility)
+      targetDate: goal.target_date || goal.targetDate || goal.startDate,
+    });
+    
     // Handle different response formats
     // If the response is already an array, return it
     if (Array.isArray(data)) {
-      return data.map(goal => ({
-        id: goal.goal_id || goal.id,
-        title: goal.title,
-        description: goal.description,
-        category: goal.category,
-        color: getCategoryColor(goal.category),
-        isCompleted: goal.is_completed === 1 || goal.isCompleted === true,
-        isDaily: goal.is_daily === 1 || goal.isDaily === true,
-        progress: goal.progress || 0,
-        startDate: goal.target_date || goal.startDate,
-        userId: goal.user_id || goal.userId,
-        coinReward: goal.coin_reward || goal.coinReward || 0,
-        routineDays: goal.routine_days || goal.routineDays || [] // Added for routine days
-      }));
+      return data.map(transformGoal);
     }
     
     // If it's in the { goals: [] } format
     if (data.goals && Array.isArray(data.goals)) {
-      return data.goals.map(goal => ({
-        id: goal.goal_id || goal.id,
-        title: goal.title,
-        description: goal.description,
-        category: goal.category,
-        color: getCategoryColor(goal.category),
-        isCompleted: goal.is_completed === 1 || goal.isCompleted === true,
-        isDaily: goal.is_daily === 1 || goal.isDaily === true,
-        progress: goal.progress || 0,
-        startDate: goal.target_date || goal.startDate,
-        userId: goal.user_id || goal.userId,
-        coinReward: goal.coin_reward || goal.coinReward || 0,
-        routineDays: goal.routine_days || goal.routineDays || [] // Added for routine days
-      }));
+      return data.goals.map(transformGoal);
     }
     
     // If no valid format is found
@@ -84,7 +78,11 @@ export const updateGoalProgress = async (goalId: number, progress: number): Prom
       startDate: goal.target_date || goal.startDate,
       userId: goal.user_id || goal.userId,
       coinReward: goal.coin_reward || goal.coinReward || 0,
-      routineDays: goal.routine_days || goal.routineDays || [] // Added for routine days
+      routineDays: goal.routine_days || goal.routineDays || [], // Added for routine days
+      // Add the required type field - default to 'recurring' for daily goals, 'one-time' otherwise
+      type: goal.type || (goal.is_daily === 1 || goal.isDaily === true ? 'recurring' : 'one-time'),
+      // Add targetDate (same as startDate for backwards compatibility)
+      targetDate: goal.target_date || goal.targetDate || goal.startDate,
     };
   } catch (err) {
     console.error('Error updating goal progress:', err);
@@ -98,6 +96,9 @@ export const createGoal = async (goal: Partial<Goal>, userId: string): Promise<G
     // Convert the routineDays array to a JSON string for the API
     const routineDaysString = goal.routineDays ? JSON.stringify(goal.routineDays) : null;
     
+    // Set a default type if not provided
+    const goalType = goal.type || (goal.isDaily ? 'recurring' : 'one-time');
+    
     const res = await fetch(`${API_URL}/goals`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -105,13 +106,14 @@ export const createGoal = async (goal: Partial<Goal>, userId: string): Promise<G
         user_id: userId,                         // fix snake_case for DB
         title: goal.title,
         description: goal.description || '',
-        target_date: goal.startDate || new Date().toISOString().split('T')[0],
+        target_date: goal.targetDate || goal.startDate || new Date().toISOString().split('T')[0],
         progress: goal.progress ?? 0,
         is_completed: goal.isCompleted ? 1 : 0,  // Convert to integer for DB
         is_daily: goal.isDaily ? 1 : 0,          // Convert to integer for DB
         category: goal.category || 'Personal',
         coin_reward: goal.coinReward ?? 10,      // Default reward value
-        routine_days: routineDaysString          // Added for routine days
+        routine_days: routineDaysString,         // Added for routine days
+        type: goalType,                          // Add type field
       }),
     });
 
@@ -137,7 +139,10 @@ export const createGoal = async (goal: Partial<Goal>, userId: string): Promise<G
       coinReward: createdGoal.coin_reward || createdGoal.coinReward || 0,
       routineDays: createdGoal.routine_days 
         ? JSON.parse(createdGoal.routine_days) 
-        : createdGoal.routineDays || [] // Parse routine days from JSON string
+        : createdGoal.routineDays || [], // Parse routine days from JSON string
+      type: createdGoal.type || (createdGoal.is_daily === 1 || createdGoal.isDaily === true 
+        ? 'recurring' : 'one-time'),
+      targetDate: createdGoal.target_date || createdGoal.targetDate || createdGoal.startDate,
     };
   } catch (err) {
     console.error('Error creating goal:', err);
@@ -178,12 +183,36 @@ export const updateGoalRoutineDays = async (goalId: number, routineDays: number[
       coinReward: goal.coin_reward || goal.coinReward || 0,
       routineDays: goal.routine_days 
         ? JSON.parse(goal.routine_days) 
-        : goal.routineDays || []
+        : goal.routineDays || [],
+      type: goal.type || (goal.is_daily === 1 || goal.isDaily === true ? 'recurring' : 'one-time'),
+      targetDate: goal.target_date || goal.targetDate || goal.startDate,
     };
   } catch (err) {
     console.error('Error updating routine days:', err);
     throw err;
   }
+};
+
+/**
+ * Determines if a goal can receive rewards when completed
+ * For one-time goals, they can only receive rewards if completed before expiration
+ * @param goal The goal to check
+ * @returns True if the goal can receive rewards, false otherwise
+ */
+export const canClaimRewardsForGoal = async (goal: Goal): Promise<boolean> => {
+  // For one-time goals, check if they're completed on or before the assigned day
+  if (goal.type === 'one-time') {
+    const today = new Date();
+    const goalDate = new Date(goal.targetDate || goal.startDate || Date.now());
+    
+    // If the goal was due in the past, don't allow claiming rewards
+    if (goalDate < today && goalDate.toDateString() !== today.toDateString()) {
+      return false;
+    }
+  }
+  
+  // All other goals (recurring) can claim rewards
+  return true;
 };
 
 // Get user's streak
@@ -227,12 +256,8 @@ export const getCategoryColor = (category?: string): string => {
 };
 
 // Update user coins
-export const updateUserCoins = async (amount: number): Promise<void> => {
+export const updateUserCoins = async (userId: string, amount: number): Promise<void> => {
   try {
-    // You would typically need a userId here, but for compatibility with your
-    // existing code, you might get it from the current auth context
-    const userId = 'default_user'; // In a real app, get this from auth context
-    
     await fetch(`${API_URL}/users/${userId}/futurecoins`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -245,16 +270,15 @@ export const updateUserCoins = async (amount: number): Promise<void> => {
 };
 
 // Update user XP
-export const updateUserXP = async (amount: number): Promise<any> => {
+export const updateUserXP = async (userId: string, amount: number, newLevel?: number): Promise<any> => {
   try {
-    // You would typically need a userId here, but for compatibility with your
-    // existing code, you might get it from the current auth context
-    const userId = 'default_user'; // In a real app, get this from auth context
-    
     const res = await fetch(`${API_URL}/users/${userId}/xp`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount }),
+      body: JSON.stringify({ 
+        amount,
+        level: newLevel 
+      }),
     });
     
     if (!res.ok) throw new Error('Failed to update XP');

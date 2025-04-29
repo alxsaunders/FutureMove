@@ -11,6 +11,17 @@ export interface User {
   experience: number;
   joinedDate: string;
 }
+export interface Streak {
+  streak_id: number;
+  user_id: string;
+  trackable_type: string;  // 'all', 'goal', 'routine'
+  trackable_id: number | null;  // null for 'all', ID of goal/routine otherwise
+  current_streak: number;
+  longest_streak: number;
+  last_completed_date: string;  // ISO date string
+  streak_start_date: string;    // ISO date string
+}
+
 
 // Goal-related types
 export interface Goal {
@@ -25,7 +36,9 @@ export interface Goal {
   startDate?: string;
   userId?: string;
   coinReward?: number;
-  routineDays?: number[]; // Added for day-specific routine functionality
+  routineDays?: number[]; 
+  type: 'recurring' | 'one-time';
+  targetDate?: string;// Added for day-specific routine functionality
 }
 
 export interface SubGoal {
@@ -44,6 +57,7 @@ export interface Routine {
   completedTasks: number;
   totalTasks: number;
   icon?: string | null;
+  category?: string;
 }
 
 // Community-related types
