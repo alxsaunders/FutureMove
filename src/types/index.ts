@@ -22,7 +22,14 @@ export interface Streak {
   streak_start_date: string;    // ISO date string
 }
 
-
+export interface Quote {
+  id?: number;       // Local ID for saved quotes
+  quote: string;     // The quote text (API returns as "quote")
+  text?: string;     // Alternative field name for quote content
+  author: string;    // The author of the quote
+  category?: string; // Optional category from the API
+  savedAt?: string;  // Timestamp for when the quote was saved as favorite
+}
 // Goal-related types
 export interface Goal {
   id: number;
@@ -95,12 +102,6 @@ export interface News {
   category: string;
 }
 
-export interface Quote {
-  id: number;
-  text: string;
-  author: string;
-  category?: string;
-}
 
 // Achievement and Rewards
 export interface Achievement {
