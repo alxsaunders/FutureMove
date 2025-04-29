@@ -50,6 +50,7 @@ type SectionType = {
   keyExtractor: (item: any) => string;
 };
 
+
 // Helper function to get API base URL
 const getApiBaseUrl = () => {
   if (Platform.OS === "android") {
@@ -516,7 +517,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   // Create header component with company name
   const renderHeader = () => (
     <View style={styles.header}>
-      <Text style={styles.companyName}>FutureMove</Text>
+      <Text style={styles.companyName}> FutureMove</Text>
       <View style={styles.userCoinsContainer}>
         <Ionicons name="wallet-outline" size={20} color={COLORS.accent2} />
         <Text style={styles.userCoinsText}>{userCoins}</Text>
@@ -922,6 +923,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   );
 };
 
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -939,9 +941,9 @@ const styles = StyleSheet.create({
   },
   companyName: {
     fontSize: 24,
-    fontWeight: "bold",
     color: COLORS.primary,
     fontFamily: "FutureMoveLogo",
+    marginLeft: 8,
     marginBottom: 4,
   },
   userCoinsContainer: {

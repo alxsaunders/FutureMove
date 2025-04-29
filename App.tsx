@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { createStackNavigator } from "@react-navigation/stack";
 import { StatusBar, View, Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import * as Font from "expo-font";
 
 // Context
 import { AuthProvider } from "./src/contexts/AuthContext";
@@ -34,6 +35,33 @@ const AppContent = () => {
 };
 
 const App = () => {
+  const [fontLoaded, setFontLoaded] = useState(false);
+
+  useEffect(() => {
+    async function loadFont() {
+      try {
+        await Font.loadAsync({
+          FutureMoveLogo: require("./src/assets/fonts/futuremovelogo.ttf"),
+        });
+        setFontLoaded(true);
+      } catch (error) {
+        console.warn("Error loading font:", error);
+        // Continue without the custom font
+        setFontLoaded(true);
+      }
+    }
+
+    loadFont();
+  }, []);
+
+  if (!fontLoaded) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+        <Text>Loading...</Text>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaProvider>
       <AuthProvider>
