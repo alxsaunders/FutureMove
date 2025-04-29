@@ -9,6 +9,7 @@ import {
   FlatList,
   SectionList,
   Dimensions,
+  Platform,
 } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { GoalsScreenNavigationProp, HomeScreenProps } from "../types/navigaton";
@@ -49,8 +50,65 @@ type SectionType = {
   keyExtractor: (item: any) => string;
 };
 
+// Helper function to get API base URL
+const getApiBaseUrl = () => {
+  if (Platform.OS === "android") {
+    return "http://10.0.2.2:3001/api";
+  } else {
+    // For iOS or development on Mac
+    return "http://localhost:3001/api";
+  }
+};
+
+// Helper function to update user stats in the database
+const updateUserStats = async (
+  userId: string,
+  xpToAdd: number,
+  coinsToAdd: number
+): Promise<any> => {
+  try {
+    const apiUrl = getApiBaseUrl();
+
+    const response = await fetch(`${apiUrl}/users/${userId}/stats`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        xp_points_to_add: xpToAdd,
+        future_coins_to_add: coinsToAdd,
+      }),
+    });
+
+    if (!response.ok) throw new Error("Failed to update user stats");
+    return await response.json();
+  } catch (error) {
+    console.error("Error updating user stats:", error);
+    throw error;
+  }
+};
+
+// Helper function to update user streak in the database
+const updateUserStreak = async (
+  userId: string,
+  increment: boolean = true
+): Promise<any> => {
+  try {
+    const apiUrl = getApiBaseUrl();
+
+    const response = await fetch(`${apiUrl}/users/${userId}/streak`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ increment }),
+    });
+
+    if (!response.ok) throw new Error("Failed to update user streak");
+    return await response.json();
+  } catch (error) {
+    console.error("Error updating user streak:", error);
+    throw error;
+  }
+};
+
 // Helper function to check if goal rewards can be claimed
-// This would normally be in GoalService.ts
 const canClaimRewardsForGoal = async (goal: Goal) => {
   // For one-time goals, check if they're completed on the assigned day
   if (goal.type === "one-time") {
@@ -153,12 +211,37 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
       const newsData = await fetchNews();
       setNews(newsData);
 
-      // Set user level and experience - updated to preserve route params
-      setUserLevel(route.params?.userLevel || currentUser?.level || userLevel);
-      setUserExp(route.params?.userExp || currentUser?.xp_points || userExp);
-      setUserCoins(
-        route.params?.userCoins || currentUser?.future_coins || userCoins
-      );
+      // Fetch user stats from the database
+      try {
+        const apiUrl = getApiBaseUrl();
+        const response = await fetch(`${apiUrl}/users/${userId}`);
+
+        if (response.ok) {
+          const userData = await response.json();
+          setUserLevel(userData.level || userLevel);
+          setUserExp(userData.xp_points || userExp);
+          setUserCoins(userData.future_coins || userCoins);
+
+          // Fetch streak data
+          const streakResponse = await fetch(
+            `${apiUrl}/users/${userId}/streak`
+          );
+          if (streakResponse.ok) {
+            const streakData = await streakResponse.json();
+            setStreakCount(streakData.current_streak || streakCount);
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching user data from database:", error);
+        // Fall back to route params or current state
+        setUserLevel(
+          route.params?.userLevel || currentUser?.level || userLevel
+        );
+        setUserExp(route.params?.userExp || currentUser?.xp_points || userExp);
+        setUserCoins(
+          route.params?.userCoins || currentUser?.future_coins || userCoins
+        );
+      }
     } catch (error) {
       console.error("Error fetching data:", error);
     } finally {
@@ -166,42 +249,26 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
     }
   };
 
-  // Mock function to update user streak
-  // This would normally be in a service
-  const updateStreak = async () => {
-    // This would update streak in the database
-    // For now just increment the local state
-    setStreakCount((prev) => prev + 1);
-  };
+  // Function to handle level up logic
+  const handleLevelUp = (newXP: number, currentLevel: number) => {
+    let newLevel = currentLevel;
+    let finalXP = newXP;
 
-  // Mock function to handle XP gains
-  const handleXpGain = async (xpAmount: number) => {
-    try {
-      // Get current XP and level
-      const newXP = userExp + xpAmount;
-      let newLevel = userLevel;
+    // Check if user leveled up (every 100 XP)
+    if (newXP >= 100) {
+      const levelsGained = Math.floor(newXP / 100);
+      newLevel += levelsGained;
+      finalXP = newXP % 100;
 
-      // Check if user leveled up (every 100 XP)
-      if (newXP >= 100) {
-        const levelsGained = Math.floor(newXP / 100);
-        newLevel += levelsGained;
-
-        // Show level up alert
-        Alert.alert(
-          "Level Up!",
-          `Congratulations! You've reached level ${newLevel}!`,
-          [{ text: "Awesome!", style: "default" }]
-        );
-
-        setUserLevel(newLevel);
-        setUserExp(newXP % 100);
-      } else {
-        // Just update XP
-        setUserExp(newXP);
-      }
-    } catch (error) {
-      console.error("Error updating XP:", error);
+      // Show level up alert
+      Alert.alert(
+        "Level Up!",
+        `Congratulations! You've reached level ${newLevel}!`,
+        [{ text: "Awesome!", style: "default" }]
+      );
     }
+
+    return { newLevel, finalXP };
   };
 
   // Load the quote only once (on initial mount)
@@ -222,7 +289,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   }, [quoteLoaded]);
 
   // Use useFocusEffect to refresh data whenever the screen comes into focus
-  // Updated dependency array to include route params
   useFocusEffect(
     useCallback(() => {
       // Fetch data when screen comes into focus (except quote)
@@ -241,7 +307,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   );
 
   // Initial data load on mount
-  // Updated dependency array to include route params
   useEffect(() => {
     fetchUserData();
   }, [
@@ -273,21 +338,54 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
         const canClaimRewards = await canClaimRewardsForGoal(goalToToggle);
 
         if (canClaimRewards) {
-          // Award XP
-          await handleXpGain(GOAL_COMPLETION_XP);
+          try {
+            // Update database with XP and coins
+            const updatedStats = await updateUserStats(
+              userId,
+              GOAL_COMPLETION_XP,
+              GOAL_COMPLETION_COINS
+            );
 
-          // Award coins
-          setUserCoins((prev) => prev + GOAL_COMPLETION_COINS);
+            // Update streak in database
+            const updatedStreak = await updateUserStreak(userId);
 
-          // Update streak data
-          await updateStreak();
+            // Process level-up if needed
+            const levelUpResult = handleLevelUp(
+              updatedStats.xp_points,
+              updatedStats.level
+            );
 
-          // Show completion message
-          Alert.alert(
-            "Goal Completed!",
-            `Great job! You've earned ${GOAL_COMPLETION_XP} XP and ${GOAL_COMPLETION_COINS} coins.`,
-            [{ text: "Nice!", style: "default" }]
-          );
+            // Update local state with values from database
+            setUserLevel(levelUpResult.newLevel);
+            setUserExp(levelUpResult.finalXP);
+            setUserCoins(updatedStats.future_coins);
+            setStreakCount(updatedStreak.current_streak || streakCount + 1);
+
+            // Show completion message
+            Alert.alert(
+              "Goal Completed!",
+              `Great job! You've earned ${GOAL_COMPLETION_XP} XP and ${GOAL_COMPLETION_COINS} coins.`,
+              [{ text: "Nice!", style: "default" }]
+            );
+          } catch (error) {
+            console.error("Error updating user stats in database:", error);
+
+            // Fall back to local state updates if database update fails
+            const newXP = userExp + GOAL_COMPLETION_XP;
+            const levelUpResult = handleLevelUp(newXP, userLevel);
+
+            setUserLevel(levelUpResult.newLevel);
+            setUserExp(levelUpResult.finalXP);
+            setUserCoins(userCoins + GOAL_COMPLETION_COINS);
+            setStreakCount(streakCount + 1);
+
+            // Show completion message
+            Alert.alert(
+              "Goal Completed!",
+              `Great job! You've earned ${GOAL_COMPLETION_XP} XP and ${GOAL_COMPLETION_COINS} coins.`,
+              [{ text: "Nice!", style: "default" }]
+            );
+          }
         }
       }
 
@@ -347,21 +445,54 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
 
       // If routine is now complete, handle rewards
       if (willBeCompleted) {
-        // Award XP
-        await handleXpGain(ROUTINE_COMPLETION_XP);
+        try {
+          // Update database with XP and coins
+          const updatedStats = await updateUserStats(
+            userId,
+            ROUTINE_COMPLETION_XP,
+            ROUTINE_COMPLETION_COINS
+          );
 
-        // Award coins
-        setUserCoins((prev) => prev + ROUTINE_COMPLETION_COINS);
+          // Update streak in database
+          const updatedStreak = await updateUserStreak(userId);
 
-        // Update streak
-        await updateStreak();
+          // Process level-up if needed
+          const levelUpResult = handleLevelUp(
+            updatedStats.xp_points,
+            updatedStats.level
+          );
 
-        // Show completion message
-        Alert.alert(
-          "Routine Completed!",
-          `Well done! You've earned ${ROUTINE_COMPLETION_XP} XP and ${ROUTINE_COMPLETION_COINS} coins.`,
-          [{ text: "Great!", style: "default" }]
-        );
+          // Update local state with values from database
+          setUserLevel(levelUpResult.newLevel);
+          setUserExp(levelUpResult.finalXP);
+          setUserCoins(updatedStats.future_coins);
+          setStreakCount(updatedStreak.current_streak || streakCount + 1);
+
+          // Show completion message
+          Alert.alert(
+            "Routine Completed!",
+            `Well done! You've earned ${ROUTINE_COMPLETION_XP} XP and ${ROUTINE_COMPLETION_COINS} coins.`,
+            [{ text: "Great!", style: "default" }]
+          );
+        } catch (error) {
+          console.error("Error updating user stats in database:", error);
+
+          // Fall back to local state updates if database update fails
+          const newXP = userExp + ROUTINE_COMPLETION_XP;
+          const levelUpResult = handleLevelUp(newXP, userLevel);
+
+          setUserLevel(levelUpResult.newLevel);
+          setUserExp(levelUpResult.finalXP);
+          setUserCoins(userCoins + ROUTINE_COMPLETION_COINS);
+          setStreakCount(streakCount + 1);
+
+          // Show completion message
+          Alert.alert(
+            "Routine Completed!",
+            `Well done! You've earned ${ROUTINE_COMPLETION_XP} XP and ${ROUTINE_COMPLETION_COINS} coins.`,
+            [{ text: "Great!", style: "default" }]
+          );
+        }
       }
 
       // Refresh data to show updated state
@@ -810,6 +941,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: "bold",
     color: COLORS.primary,
+    fontFamily: "FutureMoveLogo",
     marginBottom: 4,
   },
   userCoinsContainer: {
