@@ -517,7 +517,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   // Create header component with company name
   const renderHeader = () => (
     <View style={styles.header}>
-      <Text style={styles.companyName}> FutureMove</Text>
+      <Text style={styles.companyName}> Future Move</Text>
       <View style={styles.userCoinsContainer}>
         <Ionicons name="wallet-outline" size={20} color={COLORS.accent2} />
         <Text style={styles.userCoinsText}>{userCoins}</Text>
@@ -530,7 +530,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
     <View style={styles.progressSection}>
       {/* Welcome and Streak */}
       <View style={styles.welcomeRow}>
-        <Text style={styles.welcomeText}>Welcome Back, {username}!</Text>
+        <Text style={styles.welcomeText}>
+          Welcome Back, <Text style={styles.username}>{username}!</Text>
+        </Text>
         <View style={styles.streakContainer}>
           <Ionicons name="flame" size={24} color={COLORS.accent2} />
           <Text style={styles.streakText}>{streakCount}</Text>
@@ -931,6 +933,10 @@ const styles = StyleSheet.create({
   },
   sectionListContent: {
     paddingBottom: 20,
+  },
+  username: {
+    color: COLORS.primary,
+    fontWeight: "bold",
   },
   header: {
     padding: 16,
