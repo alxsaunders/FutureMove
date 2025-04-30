@@ -65,9 +65,6 @@ function MyTabBar({ state, descriptors, navigation }) {
           }
         };
 
-        // Style differently based on which tab (middle tab gets special treatment)
-        const isMiddleTab = index === 2; // Community is in the middle (index 2)
-
         return (
           <TouchableOpacity
             key={index}
@@ -76,37 +73,20 @@ function MyTabBar({ state, descriptors, navigation }) {
             accessibilityLabel={options.tabBarAccessibilityLabel}
             testID={options.tabBarTestID}
             onPress={onPress}
-            style={[
-              styles.tabButton,
-              isMiddleTab ? styles.middleTabButton : null,
-            ]}
+            style={styles.tabButton}
           >
             <View
               style={[
-                isMiddleTab ? styles.middleTabContainer : styles.tabContainer,
+                styles.tabContainer,
                 isFocused ? styles.focusedTab : null,
               ]}
             >
-              <Image
-                source={iconSource}
-                style={[
-                  isMiddleTab ? styles.middleTabIcon : styles.tabIcon,
-                  isFocused && styles.focusedIcon,
-                ]}
-                // No tintColor change when active
-                tintColor={isMiddleTab ? "#FFFFFF" : undefined}
-              />
+              <Image source={iconSource} style={styles.tabIcon} />
 
               {/* Show text for all tabs when active, positioned below the icon */}
               {isFocused && (
-                <Text
-                  numberOfLines={1}
-                  style={[
-                    styles.tabLabelText,
-                    isMiddleTab ? styles.middleTabLabelText : null,
-                  ]}
-                >
-                  {isMiddleTab ? "Community" : label}
+                <Text numberOfLines={1} style={styles.tabLabelText}>
+                  {label}
                 </Text>
               )}
             </View>
@@ -139,19 +119,15 @@ const BottomTabNavigator = () => {
 const styles = StyleSheet.create({
   tabBarContainer: {
     flexDirection: "row",
-    height: 80,
+    height: 70,
     backgroundColor: "#FFFFFF",
     borderTopWidth: 1,
     borderTopColor: "#E0E0E0",
     justifyContent: "space-around",
-    alignItems: "flex-end",
-    paddingBottom: 20,
+    alignItems: "center",
+    paddingBottom: 10,
   },
   tabButton: {
-    flex: 1,
-    alignItems: "center",
-  },
-  middleTabButton: {
     flex: 1,
     alignItems: "center",
   },
@@ -160,40 +136,15 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: 8,
     width: 70,
-    paddingBottom: 10,
-  },
-  middleTabContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#3B82F6",
-    borderRadius: 35,
-    width: 56,
-    height: 56,
-    bottom: 15, // This creates the "raised" effect
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 3,
   },
   tabIcon: {
     width: 30,
     height: 30,
     resizeMode: "contain",
   },
-  middleTabIcon: {
-    width: 30,
-    height: 30,
-    resizeMode: "contain",
-    tintColor: "#FFFFFF", // Makes the icon white for visibility
-  },
-  focusedIcon: {
-    transform: [{ scale: 1 }], // Slightly enlarge the icon when active
-  },
   focusedTab: {
-    
+    borderTopWidth: 2,
     borderTopColor: "#6A5ACD",
-    
   },
   tabLabelText: {
     color: "#6A5ACD",
@@ -201,12 +152,6 @@ const styles = StyleSheet.create({
     marginTop: 3,
     fontWeight: "500",
     textAlign: "center",
-  },
-  middleTabLabelText: {
-    color: "#6A5ACD", // Same color as other tab labels
-    position: "absolute",
-    bottom: -16, // Position the text below the raised button
-    width: 70, // Give enough width for the text
   },
 });
 
