@@ -66,6 +66,8 @@ export interface Routine {
   totalTasks: number;
   icon?: string | null;
   category?: string;
+   is_daily?: number;
+  routine_days?: number[];
 }
 
 // Community-related types

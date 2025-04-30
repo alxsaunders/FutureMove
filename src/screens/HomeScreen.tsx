@@ -10,6 +10,8 @@ import {
   SectionList,
   Dimensions,
   Platform,
+  ImageBackground,
+  Image,
 } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { GoalsScreenNavigationProp, HomeScreenProps } from "../types/navigaton";
@@ -53,6 +55,16 @@ type SectionType = {
   data: any[];
   renderItem: (item: any) => React.ReactElement;
   keyExtractor: (item: any) => string;
+};
+
+// Category background images mapping
+const CATEGORY_BACKGROUNDS: Record<string, any> = {
+  Personal: require("../assets/images/personal_background.png"),
+  Work: require("../assets/images/work_background.png"),
+  Learning: require("../assets/images/learning_background.png"),
+  Health: require("../assets/images/health_background.png"),
+  Repair: require("../assets/images/repair_background.png"),
+  Finance: require("../assets/images/finance_background.png"),
 };
 
 // Helper function to get API base URL
@@ -156,6 +168,40 @@ const STREAK_MILESTONE_XP = 25; // XP for reaching streak milestones (7, 30, etc
 const GOAL_COMPLETION_COINS = 5;
 const ROUTINE_COMPLETION_COINS = 2;
 const STREAK_MILESTONE_COINS = 20;
+
+// Helper function to get background image for a category
+const getCategoryBackground = (category: string) => {
+  // Default to Personal if category doesn't exist in our mapping
+  return CATEGORY_BACKGROUNDS[category] || CATEGORY_BACKGROUNDS["Personal"];
+};
+
+// UPDATED: Helper function to format routine frequency label for weekly display
+const formatRoutineFrequency = (
+  frequency: string,
+  completions: number,
+  routine_days?: number[]
+): string => {
+  // For weekly routines, show current progress out of total per week
+  if (routine_days && routine_days.length > 0) {
+    return `0/${routine_days.length} weekly`;
+  }
+
+  // If it includes "times" already, just return the frequency
+  if (
+    frequency.toLowerCase().includes("times") ||
+    frequency.toLowerCase().includes("daily") ||
+    frequency.toLowerCase().includes("weekly")
+  ) {
+    return frequency;
+  }
+
+  // Check if it's a custom frequency
+  if (frequency.toLowerCase() === "custom") {
+    return `0/${completions} weekly`;
+  }
+
+  return frequency;
+};
 
 const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   // Use tabNavigation for navigating to bottom tab screens
@@ -503,89 +549,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
     }
   };
 
-  // Toggle routine completion
-  const handleToggleRoutine = async (routineId: number) => {
-    try {
-      // Ensure we have the latest Firebase user ID
-      const firebaseUserId = auth.currentUser?.uid;
-      const effectiveUserId = firebaseUserId || userId;
-
-      // Find the routine
-      const routineToToggle = routines.find(
-        (routine) => routine.id === routineId
-      );
-      if (!routineToToggle) return;
-
-      // Check if this is a completion (all tasks complete)
-      const willBeCompleted =
-        routineToToggle.completedTasks + 1 === routineToToggle.totalTasks;
-
-      // Toggle the routine completion via service
-      await toggleRoutineCompletion(routineId);
-
-      // If routine is now complete, handle rewards
-      if (willBeCompleted) {
-        try {
-          // Update database with XP and coins
-          const updatedStats = await updateUserStats(
-            effectiveUserId,
-            ROUTINE_COMPLETION_XP,
-            ROUTINE_COMPLETION_COINS
-          );
-
-          // Update streak in database
-          const updatedStreak = await updateUserStreak(effectiveUserId);
-
-          // Process level-up if needed
-          const levelUpResult = handleLevelUp(
-            updatedStats.xp_points,
-            updatedStats.level
-          );
-
-          // Update local state with values from database
-          setUserLevel(levelUpResult.newLevel);
-          setUserExp(levelUpResult.finalXP);
-          setUserCoins(updatedStats.future_coins);
-          setStreakCount(updatedStreak.current_streak || streakCount + 1);
-
-          // Show completion message
-          Alert.alert(
-            "Routine Completed!",
-            `Well done! You've earned ${ROUTINE_COMPLETION_XP} XP and ${ROUTINE_COMPLETION_COINS} coins.`,
-            [{ text: "Great!", style: "default" }]
-          );
-        } catch (error) {
-          console.error("Error updating user stats in database:", error);
-
-          // Fall back to local state updates if database update fails
-          const newXP = userExp + ROUTINE_COMPLETION_XP;
-          const levelUpResult = handleLevelUp(newXP, userLevel);
-
-          setUserLevel(levelUpResult.newLevel);
-          setUserExp(levelUpResult.finalXP);
-          setUserCoins(userCoins + ROUTINE_COMPLETION_COINS);
-          setStreakCount(streakCount + 1);
-
-          // Show completion message
-          Alert.alert(
-            "Routine Completed!",
-            `Well done! You've earned ${ROUTINE_COMPLETION_XP} XP and ${ROUTINE_COMPLETION_COINS} coins.`,
-            [{ text: "Great!", style: "default" }]
-          );
-        }
-      }
-
-      // Refresh data to show updated state
-      fetchUserData();
-    } catch (error) {
-      console.error("Error toggling routine completion:", error);
-      Alert.alert("Error", "Failed to update routine. Please try again.");
-    }
-  };
-
   // Navigation functions
   const navigateToGoalsScreen = () => {
-    tabNavigation.navigate("Goals");
+    tabNavigation.navigate("Goals", {});
   };
 
   const navigateToCreateGoal = () => {
@@ -593,12 +559,15 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
     tabNavigation.navigate("Goals", { openCreateGoal: true });
   };
 
-  // Create header component with company name
+  // UPDATED: Create header component with company name and larger coin icon
   const renderHeader = () => (
     <View style={styles.header}>
       <Text style={styles.companyName}> Future Move</Text>
       <View style={styles.userCoinsContainer}>
-        <Ionicons name="wallet-outline" size={20} color={COLORS.accent2} />
+        <Image
+          source={require("../assets/images/future_coin.png")}
+          style={styles.coinIcon}
+        />
         <Text style={styles.userCoinsText}>{userCoins}</Text>
       </View>
     </View>
@@ -649,82 +618,88 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   );
 
   // Daily quote component
-  const renderDailyQuote = () => (
-    <DailyQuote quote={quote?.text} author={quote?.author} />
-  );
+  const renderDailyQuote = () => {
+    // Ensure we have string values for text and author
+    const quoteText = quote?.text !== undefined ? quote.text : "";
+    const quoteAuthor = quote?.author !== undefined ? quote.author : "";
 
-  // Render individual goal item for goals section (horizontal card)
-  const renderGoalItem = ({ item }: { item: Goal }) => (
-    <TouchableOpacity
-      style={[
-        styles.goalCard,
-        { borderLeftColor: item.color || COLORS.primary },
-      ]}
-      onPress={() => {
-        // Navigate to the Goals tab with specific goal ID
-        tabNavigation.navigate("Goals", { viewGoalId: item.id });
-      }}
-      activeOpacity={0.8}
-    >
-      <View style={styles.goalCardContent}>
-        <View style={styles.goalCardHeader}>
-          <Text
-            style={[
-              styles.goalCardTitle,
-              item.isCompleted ? styles.completedText : {},
-            ]}
-            numberOfLines={2}
-          >
-            {item.title}
-          </Text>
-          {item.category && (
-            <View
-              style={[
-                styles.categoryBadge,
-                { backgroundColor: item.color || COLORS.primary },
-              ]}
-            >
-              <Text style={styles.categoryText}>{item.category}</Text>
-            </View>
-          )}
-        </View>
+    return <DailyQuote quote={quoteText} author={quoteAuthor} />;
+  };
 
-        {item.description && (
-          <Text
-            style={[
-              styles.goalCardDescription,
-              item.isCompleted ? styles.completedText : {},
-            ]}
-            numberOfLines={3}
-          >
-            {item.description}
-          </Text>
-        )}
+  // UPDATED: Render individual goal item for goals section with improved background
+  const renderGoalItem = ({ item }: { item: Goal }) => {
+    // Get background image based on category
+    const backgroundImage = getCategoryBackground(item.category);
 
-        <TouchableOpacity
-          style={[
-            styles.checkButton,
-            item.isCompleted ? styles.completedCheckButton : {},
-          ]}
-          onPress={() => toggleGoalCompletion(item.id)}
+    return (
+      <TouchableOpacity
+        style={[
+          styles.goalCard,
+          { borderLeftColor: item.color || COLORS.primary },
+        ]}
+        onPress={() => {
+          // Navigate to the Goals tab with specific goal ID
+          tabNavigation.navigate("Goals", { viewGoalId: item.id });
+        }}
+        activeOpacity={0.8}
+      >
+        <ImageBackground
+          source={backgroundImage}
+          style={styles.goalCardBackground}
+          imageStyle={styles.goalCardBackgroundImage}
         >
-          {item.isCompleted ? (
-            <Ionicons
-              name="checkmark-circle"
-              size={28}
-              color={COLORS.success}
-            />
-          ) : (
-            <Ionicons
-              name="ellipse-outline"
-              size={28}
-              color={COLORS.textLight}
-            />
-          )}
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
-  );
+          {/* Add a semi-transparent overlay to darken the image */}
+          <View style={styles.cardOverlay}>
+            <View style={styles.goalCardContent}>
+              <View style={styles.goalCardHeader}>
+                <Text
+                  style={[
+                    styles.goalCardTitle,
+                    item.isCompleted ? styles.completedText : {},
+                  ]}
+                  numberOfLines={2}
+                >
+                  {item.title}
+                </Text>
+                {item.category && (
+                  <View
+                    style={[
+                      styles.categoryBadge,
+                      { backgroundColor: item.color || COLORS.primary },
+                    ]}
+                  >
+                    <Text style={styles.categoryText}>{item.category}</Text>
+                  </View>
+                )}
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.checkButton,
+                  item.isCompleted ? styles.completedCheckButton : {},
+                ]}
+                onPress={() => toggleGoalCompletion(item.id)}
+              >
+                {item.isCompleted ? (
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={24}
+                    color={COLORS.success}
+                  />
+                ) : (
+                  <Ionicons
+                    name="ellipse-outline"
+                    size={24}
+                    color={COLORS.white}
+                  />
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </ImageBackground>
+      </TouchableOpacity>
+    );
+  };
 
   // Render horizontal goal list
   const renderHorizontalGoalList = () => (
@@ -773,10 +748,14 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
     </View>
   );
 
-  // Render individual routine item with similar styling to goals
+  // UPDATED: Render individual routine item with weekly progress format
+  // Show category instead of frequency and display "0/X weekly" format
   const renderRoutineItem = ({ item }: { item: Routine }) => {
     // Get color based on routine type or use default
     const routineColor = COLORS.accent1;
+
+    // Use dedicated routine background
+    const backgroundImage = require("../assets/images/routinepic.png");
 
     // Calculate progress percentage
     const progressPercentage =
@@ -784,92 +763,89 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
         ? Math.round((item.completedTasks / item.totalTasks) * 100)
         : 0;
 
+    // UPDATED: Format the routine to show weekly progress
+    // Type assertion to handle missing properties from the Routine type
+    const routineExt = item as any;
+
+    // Check if the routine has routine_days property or if it's a daily routine
+    const routine_days =
+      routineExt.is_daily === 1
+        ? []
+        : (routineExt.routine_days as number[] | undefined);
+
+    const formattedFrequency = formatRoutineFrequency(
+      item.frequency,
+      item.totalTasks,
+      routine_days
+    );
+
     return (
       <TouchableOpacity
         style={[styles.routineCard, { borderLeftColor: routineColor }]}
         onPress={() => {
-          // Navigate to the Goals tab with routine filter
+          // Navigate to the Goals tab with routine filter and selected routine
           tabNavigation.navigate("Goals", {
             filterType: "routine",
+            // Use a property name that exists in your navigation types
+            viewGoalId: item.id, // Using viewGoalId since it's in your navigation type
           });
         }}
         activeOpacity={0.8}
       >
-        <View style={styles.routineCardContent}>
-          <View style={styles.routineCardHeader}>
-            <Text
-              style={[
-                styles.routineCardTitle,
-                item.completedTasks === item.totalTasks
-                  ? styles.completedText
-                  : {},
-              ]}
-              numberOfLines={2}
-            >
-              {item.title}
-            </Text>
-            {/* Show frequency as a badge */}
-            <View
-              style={[styles.categoryBadge, { backgroundColor: routineColor }]}
-            >
-              <Text style={styles.categoryText}>{item.frequency}</Text>
+        <ImageBackground
+          source={backgroundImage}
+          style={styles.goalCardBackground}
+          imageStyle={styles.goalCardBackgroundImage}
+        >
+          {/* Add a semi-transparent overlay to darken the image */}
+          <View style={styles.cardOverlay}>
+            <View style={styles.routineCardContent}>
+              <View style={styles.routineCardHeader}>
+                <Text
+                  style={[
+                    styles.routineCardTitle,
+                    item.completedTasks === item.totalTasks
+                      ? styles.completedText
+                      : {},
+                  ]}
+                  numberOfLines={1}
+                >
+                  {item.title}
+                </Text>
+                {/* Show category instead of frequency */}
+                <View
+                  style={[
+                    styles.categoryBadge,
+                    { backgroundColor: routineColor },
+                  ]}
+                >
+                  <Text style={styles.categoryText}>{item.category}</Text>
+                </View>
+              </View>
+
+              <View style={styles.routineProgressBarContainer}>
+                <View style={styles.routineProgressBar}>
+                  <View
+                    style={[
+                      styles.routineProgressFill,
+                      {
+                        width: `${progressPercentage}%`,
+                        backgroundColor:
+                          item.completedTasks === item.totalTasks
+                            ? COLORS.success
+                            : routineColor,
+                      },
+                    ]}
+                  />
+                </View>
+                {/* Update to show weekly format */}
+                <Text style={styles.routineProgressText}>
+                  {formattedFrequency}
+                </Text>
+              </View>
             </View>
           </View>
-
-          <View style={styles.routineFrequencyRow}>
-            <Ionicons
-              name="repeat-outline"
-              size={16}
-              color={COLORS.textSecondary}
-            />
-            <Text style={styles.routineFrequencyText}>{item.frequency}</Text>
-          </View>
-
-          <View style={styles.routineProgressContainer}>
-            <View style={styles.routineProgressBar}>
-              <View
-                style={[
-                  styles.routineProgressFill,
-                  {
-                    width: `${progressPercentage}%`,
-                    backgroundColor:
-                      item.completedTasks === item.totalTasks
-                        ? COLORS.success
-                        : routineColor,
-                  },
-                ]}
-              />
-            </View>
-            <Text style={styles.routineProgressText}>
-              {item.completedTasks}/{item.totalTasks}
-            </Text>
-          </View>
-
-          <TouchableOpacity
-            style={[
-              styles.checkButton,
-              item.completedTasks === item.totalTasks
-                ? styles.completedCheckButton
-                : {},
-            ]}
-            onPress={() => handleToggleRoutine(item.id)}
-            disabled={item.completedTasks === item.totalTasks}
-          >
-            {item.completedTasks === item.totalTasks ? (
-              <Ionicons
-                name="checkmark-circle"
-                size={28}
-                color={COLORS.success}
-              />
-            ) : (
-              <Ionicons
-                name="ellipse-outline"
-                size={28}
-                color={COLORS.textLight}
-              />
-            )}
-          </TouchableOpacity>
-        </View>
+        </ImageBackground>
       </TouchableOpacity>
     );
   };
@@ -1034,13 +1010,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: COLORS.lightBackground,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 18,
+  },
+  coinIcon: {
+    width: 32, // UPDATED: Increased size from 24
+    height: 32, // UPDATED: Increased size from 24
+    marginRight: 8,
   },
   userCoinsText: {
-    marginLeft: 4,
-    fontSize: 16,
+    fontSize: 18, // UPDATED: Increased from 16
     fontWeight: "bold",
     color: COLORS.accent2,
   },
@@ -1163,8 +1143,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 16,
   },
+  // Updated card styles with background
   goalCard: {
     width: CARD_WIDTH,
+    height: 120, // Reduced height to be more compact
     backgroundColor: COLORS.cardBackground,
     borderRadius: 16,
     marginRight: CARD_SPACING,
@@ -1176,24 +1158,36 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     overflow: "hidden",
   },
-  goalCardContent: {
-    padding: 16,
+  goalCardBackground: {
+    width: "100%",
+    height: "100%",
+  },
+  goalCardBackgroundImage: {
+    borderRadius: 12,
+  },
+  cardOverlay: {
     flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)", // Darker overlay for better visibility
+    borderRadius: 12,
+  },
+  goalCardContent: {
+    padding: 12,
+    flex: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   goalCardHeader: {
-    marginBottom: 8,
+    flex: 1,
   },
   goalCardTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "600",
-    color: COLORS.text,
+    color: COLORS.white,
     marginBottom: 4,
-  },
-  goalCardDescription: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginBottom: 12,
-    flex: 1,
+    textShadowColor: "rgba(0, 0, 0, 0.8)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   categoryBadge: {
     alignSelf: "flex-start",
@@ -1208,18 +1202,22 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
   completedText: {
-    color: COLORS.textSecondary,
+    color: "rgba(255,255,255,0.6)",
     textDecorationLine: "line-through",
   },
   checkButton: {
-    alignSelf: "flex-end",
     padding: 5,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    borderRadius: 20,
   },
   completedCheckButton: {
     opacity: 0.9,
   },
+
+  // Routine card specific styles - UPDATED
   routineCard: {
     width: CARD_WIDTH,
+    height: 120, // Match goal card height
     backgroundColor: COLORS.cardBackground,
     borderRadius: 16,
     marginRight: CARD_SPACING,
@@ -1232,37 +1230,37 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   routineCardContent: {
-    padding: 16,
+    padding: 12,
     flex: 1,
+    justifyContent: "space-between", // Space out header and progress bar
   },
   routineCardHeader: {
-    marginBottom: 8,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 24, // More space between header and progress bar
   },
   routineCardTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "600",
-    color: COLORS.text,
-    marginBottom: 4,
+    color: COLORS.white,
+    flex: 1,
+    textShadowColor: "rgba(0, 0, 0, 0.8)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
-  routineFrequencyRow: {
+  routineProgressBarContainer: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 8,
-  },
-  routineFrequencyText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginLeft: 4,
-  },
-  routineProgressContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 8,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    padding: 8,
+    borderRadius: 8,
+    marginTop: "auto", // Push to bottom of card
   },
   routineProgressBar: {
     flex: 1,
     height: 8,
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
     borderRadius: 4,
     marginRight: 8,
     overflow: "hidden",
@@ -1274,8 +1272,8 @@ const styles = StyleSheet.create({
   routineProgressText: {
     fontSize: 14,
     fontWeight: "500",
-    color: COLORS.textSecondary,
-    width: 36,
+    color: COLORS.white,
+    width: 80, // UPDATED: Increased from 36 to accommodate "0/X weekly" text
     textAlign: "right",
   },
   noGoalsText: {
