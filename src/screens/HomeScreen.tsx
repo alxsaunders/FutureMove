@@ -57,6 +57,16 @@ type SectionType = {
   keyExtractor: (item: any) => string;
 };
 
+// Extended Routine type to include the properties we need
+interface ExtendedRoutine extends Routine {
+  routine_days?: number[];
+  category: string;
+  isCompleted?: boolean;
+  completedTasks?: number;
+  totalTasks?: number;
+  frequency?: string;
+}
+
 // Category background images mapping
 const CATEGORY_BACKGROUNDS: Record<string, any> = {
   Personal: require("../assets/images/personal_background.png"),
@@ -175,32 +185,25 @@ const getCategoryBackground = (category: string) => {
   return CATEGORY_BACKGROUNDS[category] || CATEGORY_BACKGROUNDS["Personal"];
 };
 
-// UPDATED: Helper function to format routine frequency label for weekly display
-const formatRoutineFrequency = (
-  frequency: string,
-  completions: number,
-  routine_days?: number[]
-): string => {
-  // For weekly routines, show current progress out of total per week
-  if (routine_days && routine_days.length > 0) {
-    return `0/${routine_days.length} weekly`;
+// UPDATED: Helper function to parse routine days array from goal data
+const parseRoutineDays = (goal: any): number[] => {
+  let routineDays: number[] = [];
+
+  // Check if we have routine_days as a string that needs parsing
+  if (goal.routine_days) {
+    if (typeof goal.routine_days === "string") {
+      try {
+        routineDays = JSON.parse(goal.routine_days);
+      } catch (e) {
+        console.error("Error parsing routine days:", e);
+        routineDays = [];
+      }
+    } else if (Array.isArray(goal.routine_days)) {
+      routineDays = goal.routine_days;
+    }
   }
 
-  // If it includes "times" already, just return the frequency
-  if (
-    frequency.toLowerCase().includes("times") ||
-    frequency.toLowerCase().includes("daily") ||
-    frequency.toLowerCase().includes("weekly")
-  ) {
-    return frequency;
-  }
-
-  // Check if it's a custom frequency
-  if (frequency.toLowerCase() === "custom") {
-    return `0/${completions} weekly`;
-  }
-
-  return frequency;
+  return routineDays;
 };
 
 const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
@@ -222,7 +225,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [allGoals, setAllGoals] = useState<Goal[]>([]);
   const [todayGoals, setTodayGoals] = useState<Goal[]>([]);
-  const [routines, setRoutines] = useState<Routine[]>([]);
+  const [routines, setRoutines] = useState<ExtendedRoutine[]>([]);
   const [news, setNews] = useState<News[]>([]);
   const [overallProgress, setOverallProgress] = useState(0);
 
@@ -286,7 +289,27 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
 
       // Get user routines
       const routinesData = await fetchUserRoutines(effectiveUserId);
-      setRoutines(routinesData);
+
+      // UPDATED: Process routines to include routine_days and category
+      const processedRoutines = routinesData.map((routine) => {
+        // Find matching goal to get routine_days data and category
+        const matchingGoal = goalsData.find(
+          (goal) =>
+            (goal as any).id === routine.id ||
+            (goal as any).goal_id === routine.id
+        );
+
+        // Parse routine days from the matching goal
+        const routineDays = matchingGoal ? parseRoutineDays(matchingGoal) : [];
+
+        return {
+          ...routine,
+          category: matchingGoal?.category || "Personal",
+          routine_days: routineDays,
+        };
+      });
+
+      setRoutines(processedRoutines);
 
       // Get relevant news
       const newsData = await fetchNews();
@@ -549,6 +572,93 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
     }
   };
 
+  // UPDATED: Toggle routine completion function without checkboxes
+  const toggleRoutineCompletion = async (routineId: number) => {
+    try {
+      console.log(`Toggling routine completion for ID: ${routineId}`);
+
+      // Ensure we have the latest Firebase user ID
+      const firebaseUserId = auth.currentUser?.uid;
+      const effectiveUserId = firebaseUserId || userId;
+
+      // Find the routine we're toggling
+      const routineToToggle = routines.find(
+        (routine) => routine.id === routineId
+      );
+
+      if (!routineToToggle) {
+        console.log(`Routine not found with ID: ${routineId}`);
+        return;
+      }
+
+      // Calculate new completion state
+      const newIsCompleted = !routineToToggle.isCompleted;
+
+      // Update the routine in the database
+      await updateGoalProgress(routineId, newIsCompleted ? 100 : 0);
+
+      // If this is a completion (not unchecking), handle rewards
+      if (newIsCompleted) {
+        try {
+          // Update database with XP and coins
+          const updatedStats = await updateUserStats(
+            effectiveUserId,
+            ROUTINE_COMPLETION_XP,
+            ROUTINE_COMPLETION_COINS
+          );
+
+          // Process level-up if needed
+          const levelUpResult = handleLevelUp(
+            updatedStats.xp_points,
+            updatedStats.level
+          );
+
+          // Update local state with values from database
+          setUserLevel(levelUpResult.newLevel);
+          setUserExp(levelUpResult.finalXP);
+          setUserCoins(updatedStats.future_coins);
+
+          // Show completion message
+          Alert.alert(
+            "Routine Completed!",
+            `Great job! You've earned ${ROUTINE_COMPLETION_XP} XP and ${ROUTINE_COMPLETION_COINS} coins.`,
+            [{ text: "Nice!", style: "default" }]
+          );
+        } catch (error) {
+          console.error("Error updating user stats in database:", error);
+
+          // Fall back to local state updates if database update fails
+          const newXP = userExp + ROUTINE_COMPLETION_XP;
+          const levelUpResult = handleLevelUp(newXP, userLevel);
+
+          setUserLevel(levelUpResult.newLevel);
+          setUserExp(levelUpResult.finalXP);
+          setUserCoins(userCoins + ROUTINE_COMPLETION_COINS);
+        }
+      }
+
+      // Optimistically update the UI
+      setRoutines((prevRoutines) => {
+        return prevRoutines.map((routine) => {
+          if (routine.id === routineId) {
+            return {
+              ...routine,
+              isCompleted: newIsCompleted,
+              completedTasks: newIsCompleted ? 1 : 0,
+            };
+          }
+          return routine;
+        });
+      });
+    } catch (error) {
+      console.error("Error toggling routine completion:", error);
+      Alert.alert("Error", "Failed to update routine. Please try again.");
+
+      // If there was an error, refresh the data
+      fetchUserData();
+    }
+  };
+
   // Navigation functions
   const navigateToGoalsScreen = () => {
     tabNavigation.navigate("Goals", {});
@@ -748,46 +858,32 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
     </View>
   );
 
-  // UPDATED: Render individual routine item with weekly progress format
-  // Show category instead of frequency and display "0/X weekly" format
-  const renderRoutineItem = ({ item }: { item: Routine }) => {
-    // Get color based on routine type or use default
-    const routineColor = COLORS.accent1;
+  // UPDATED: Render individual routine item with improved day count display
+  const renderRoutineItem = ({ item }: { item: ExtendedRoutine }) => {
+    // Get color based on routine category
+    const categoryColor = getCategoryColor(item.category) || COLORS.accent1;
 
     // Use dedicated routine background
     const backgroundImage = require("../assets/images/routinepic.png");
 
-    // Calculate progress percentage
-    const progressPercentage =
-      item.totalTasks > 0
-        ? Math.round((item.completedTasks / item.totalTasks) * 100)
-        : 0;
+    // Get routine days
+    const routineDays = item.routine_days || [];
 
-    // UPDATED: Format the routine to show weekly progress
-    // Type assertion to handle missing properties from the Routine type
-    const routineExt = item as any;
+    // Determine the day count for display
+    const totalDays = routineDays.length > 0 ? routineDays.length : 1;
+    const completedDays = item.isCompleted ? 1 : 0;
 
-    // Check if the routine has routine_days property or if it's a daily routine
-    const routine_days =
-      routineExt.is_daily === 1
-        ? []
-        : (routineExt.routine_days as number[] | undefined);
-
-    const formattedFrequency = formatRoutineFrequency(
-      item.frequency,
-      item.totalTasks,
-      routine_days
-    );
+    // Calculate progress percentage based on completion
+    const progressPercentage = item.isCompleted ? 100 : 0;
 
     return (
       <TouchableOpacity
-        style={[styles.routineCard, { borderLeftColor: routineColor }]}
+        style={[styles.routineCard, { borderLeftColor: categoryColor }]}
         onPress={() => {
           // Navigate to the Goals tab with routine filter and selected routine
           tabNavigation.navigate("Goals", {
             filterType: "routine",
-            // Use a property name that exists in your navigation types
-            viewGoalId: item.id, // Using viewGoalId since it's in your navigation type
+            viewGoalId: item.id,
           });
         }}
         activeOpacity={0.8}
@@ -804,19 +900,17 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
                 <Text
                   style={[
                     styles.routineCardTitle,
-                    item.completedTasks === item.totalTasks
-                      ? styles.completedText
-                      : {},
+                    item.isCompleted ? styles.completedText : {},
                   ]}
                   numberOfLines={1}
                 >
                   {item.title}
                 </Text>
-                {/* Show category instead of frequency */}
+                {/* Show category badge */}
                 <View
                   style={[
                     styles.categoryBadge,
-                    { backgroundColor: routineColor },
+                    { backgroundColor: categoryColor },
                   ]}
                 >
                   <Text style={styles.categoryText}>{item.category}</Text>
@@ -830,17 +924,16 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
                       styles.routineProgressFill,
                       {
                         width: `${progressPercentage}%`,
-                        backgroundColor:
-                          item.completedTasks === item.totalTasks
-                            ? COLORS.success
-                            : routineColor,
+                        backgroundColor: item.isCompleted
+                          ? COLORS.success
+                          : categoryColor,
                       },
                     ]}
                   />
                 </View>
-                {/* Update to show weekly format */}
+                {/* Display simplified day count */}
                 <Text style={styles.routineProgressText}>
-                  {formattedFrequency}
+                  {completedDays}/{totalDays}
                 </Text>
               </View>
             </View>
@@ -1238,7 +1331,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 24, // More space between header and progress bar
+    marginBottom: 16, // Space between header and progress bar
   },
   routineCardTitle: {
     fontSize: 16,
@@ -1255,7 +1348,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255, 255, 255, 0.2)",
     padding: 8,
     borderRadius: 8,
-    marginTop: "auto", // Push to bottom of card
   },
   routineProgressBar: {
     flex: 1,
@@ -1273,7 +1365,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "500",
     color: COLORS.white,
-    width: 80, // UPDATED: Increased from 36 to accommodate "0/X weekly" text
+    width: 36,
     textAlign: "right",
   },
   noGoalsText: {
