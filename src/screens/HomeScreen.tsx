@@ -32,10 +32,15 @@ import {
   isRoutineActiveToday,
 } from "../services/RoutineService";
 import { fetchNews } from "../services/NewsService";
+import {
+  fetchUserStreak,
+  checkAndUpdateStreak,
+} from "../services/StreakService";
 import { Goal, Routine, News, Quote } from "../types";
 import { COLORS } from "../common/constants/colors";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../contexts/AuthContext";
+import { auth } from "../config/firebase"; // Import Firebase auth
 
 // Get screen width for card sizing
 const { width } = Dimensions.get("window");
@@ -49,7 +54,6 @@ type SectionType = {
   renderItem: (item: any) => React.ReactElement;
   keyExtractor: (item: any) => string;
 };
-
 
 // Helper function to get API base URL
 const getApiBaseUrl = () => {
@@ -68,11 +72,23 @@ const updateUserStats = async (
   coinsToAdd: number
 ): Promise<any> => {
   try {
+    // Ensure we have a valid user ID from Firebase
+    if (!userId || userId === "default_user") {
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error("No authenticated user found");
+      }
+      userId = currentUser.uid;
+    }
+
     const apiUrl = getApiBaseUrl();
 
     const response = await fetch(`${apiUrl}/users/${userId}/stats`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${await auth.currentUser?.getIdToken()}`,
+      },
       body: JSON.stringify({
         xp_points_to_add: xpToAdd,
         future_coins_to_add: coinsToAdd,
@@ -93,11 +109,23 @@ const updateUserStreak = async (
   increment: boolean = true
 ): Promise<any> => {
   try {
+    // Ensure we have a valid user ID from Firebase
+    if (!userId || userId === "default_user") {
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error("No authenticated user found");
+      }
+      userId = currentUser.uid;
+    }
+
     const apiUrl = getApiBaseUrl();
 
     const response = await fetch(`${apiUrl}/users/${userId}/streak`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${await auth.currentUser?.getIdToken()}`,
+      },
       body: JSON.stringify({ increment }),
     });
 
@@ -109,20 +137,15 @@ const updateUserStreak = async (
   }
 };
 
-// Helper function to check if goal rewards can be claimed
+// UPDATED: Helper function to check if goal rewards can be claimed
+// Now allows all goals to receive rewards regardless of due date
 const canClaimRewardsForGoal = async (goal: Goal) => {
-  // For one-time goals, check if they're completed on the assigned day
-  if (goal.type === "one-time") {
-    const today = new Date();
-    const goalDate = new Date(goal.targetDate || Date.now());
+  console.log(
+    `Checking rewards eligibility for goal: ${goal.title}, Type: ${goal.type}`
+  );
 
-    // If the goal was due in the past, don't allow claiming rewards
-    if (goalDate < today && goalDate.toDateString() !== today.toDateString()) {
-      return false;
-    }
-  }
-
-  // All other goals can claim rewards
+  // Allow rewards for all goals regardless of completion date or type
+  console.log(`Goal is eligible for rewards: all goals can earn rewards`);
   return true;
 };
 
@@ -139,10 +162,15 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   const tabNavigation = useNavigation<GoalsScreenNavigationProp>();
 
   const { currentUser } = useAuth();
-  const userId = currentUser?.id || "default_user";
+  // Get Firebase user ID, with fallback
+  const userId = auth.currentUser?.uid || currentUser?.id || "default_user";
 
   // Updated to prioritize route params for username
-  const username = route.params?.username || currentUser?.name || "User";
+  const username =
+    route.params?.username ||
+    currentUser?.name ||
+    auth.currentUser?.displayName ||
+    "User";
 
   // Updated state initialization to use route params first
   const [quote, setQuote] = useState<Quote | null>(null);
@@ -177,6 +205,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
     try {
       setIsRefreshing(true);
 
+      // Ensure we have the latest Firebase user ID
+      const firebaseUserId = auth.currentUser?.uid;
+      const effectiveUserId = firebaseUserId || userId;
+
+      console.log(`Fetching data for user: ${effectiveUserId}`);
+
       // Get all user goals
       const goalsData = await fetchUserGoals();
       setAllGoals(goalsData);
@@ -205,7 +239,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
       setOverallProgress(progressPercentage);
 
       // Get user routines
-      const routinesData = await fetchUserRoutines(userId);
+      const routinesData = await fetchUserRoutines(effectiveUserId);
       setRoutines(routinesData);
 
       // Get relevant news
@@ -215,7 +249,18 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
       // Fetch user stats from the database
       try {
         const apiUrl = getApiBaseUrl();
-        const response = await fetch(`${apiUrl}/users/${userId}`);
+        const idToken = await auth.currentUser?.getIdToken();
+        const headers: HeadersInit = {
+          "Content-Type": "application/json",
+        };
+
+        if (idToken) {
+          headers["Authorization"] = `Bearer ${idToken}`;
+        }
+
+        const response = await fetch(`${apiUrl}/users/${effectiveUserId}`, {
+          headers,
+        });
 
         if (response.ok) {
           const userData = await response.json();
@@ -223,14 +268,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
           setUserExp(userData.xp_points || userExp);
           setUserCoins(userData.future_coins || userCoins);
 
-          // Fetch streak data
-          const streakResponse = await fetch(
-            `${apiUrl}/users/${userId}/streak`
-          );
-          if (streakResponse.ok) {
-            const streakData = await streakResponse.json();
-            setStreakCount(streakData.current_streak || streakCount);
-          }
+          // Fetch streak data using the dedicated streak service
+          const streakData = await fetchUserStreak(effectiveUserId);
+          setStreakCount(streakData.current_streak || 0);
+
+          // Check if streak needs to be updated (new day, etc)
+          await checkAndUpdateStreak(effectiveUserId);
         }
       } catch (error) {
         console.error("Error fetching user data from database:", error);
@@ -289,6 +332,22 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
     loadQuote();
   }, [quoteLoaded]);
 
+  // Listen for Firebase auth state changes
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) {
+        console.log(`Firebase auth state changed, user: ${user.uid}`);
+        // User is signed in, refresh data
+        fetchUserData();
+      } else {
+        console.log("No user is signed in with Firebase");
+      }
+    });
+
+    // Cleanup subscription on unmount
+    return () => unsubscribe();
+  }, []);
+
   // Use useFocusEffect to refresh data whenever the screen comes into focus
   useFocusEffect(
     useCallback(() => {
@@ -318,75 +377,91 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
     route.params?.streakCount,
   ]);
 
-  // Toggle goal completion with database update
+  // UPDATED: Toggle goal completion with database update
+  // Now rewards all completed goals
   const toggleGoalCompletion = async (goalId: number) => {
     try {
+      console.log(`Toggling goal completion for goal ID: ${goalId}`);
+
+      // Ensure we have the latest Firebase user ID
+      const firebaseUserId = auth.currentUser?.uid;
+      const effectiveUserId = firebaseUserId || userId;
+
       // Find the goal we're toggling
       const goalToToggle = todayGoals.find((goal) => goal.id === goalId);
 
-      if (!goalToToggle) return;
+      if (!goalToToggle) {
+        console.log(`Goal not found with ID: ${goalId}`);
+        return;
+      }
+
+      console.log(
+        `Found goal: ${goalToToggle.title}, Type: ${goalToToggle.type}`
+      );
 
       // Calculate new progress value
       const newProgress = !goalToToggle.isCompleted ? 100 : 0;
       const wasCompleted = goalToToggle.isCompleted;
+
+      console.log(
+        `Current progress: ${goalToToggle.progress}, New progress: ${newProgress}`
+      );
 
       // Update the goal in the database
       await updateGoalProgress(goalId, newProgress);
 
       // If this is a completion (not unchecking), handle rewards
       if (!wasCompleted && newProgress === 100) {
-        // Check if user can claim rewards for this goal (one-day goals can't be claimed if expired)
-        const canClaimRewards = await canClaimRewardsForGoal(goalToToggle);
+        console.log(`Goal is being completed, granting rewards`);
 
-        if (canClaimRewards) {
-          try {
-            // Update database with XP and coins
-            const updatedStats = await updateUserStats(
-              userId,
-              GOAL_COMPLETION_XP,
-              GOAL_COMPLETION_COINS
-            );
+        try {
+          console.log(`Updating user stats for user: ${effectiveUserId}`);
+          // Update database with XP and coins
+          const updatedStats = await updateUserStats(
+            effectiveUserId,
+            GOAL_COMPLETION_XP,
+            GOAL_COMPLETION_COINS
+          );
 
-            // Update streak in database
-            const updatedStreak = await updateUserStreak(userId);
+          // Update streak in database
+          const updatedStreak = await updateUserStreak(effectiveUserId);
 
-            // Process level-up if needed
-            const levelUpResult = handleLevelUp(
-              updatedStats.xp_points,
-              updatedStats.level
-            );
+          // Process level-up if needed
+          const levelUpResult = handleLevelUp(
+            updatedStats.xp_points,
+            updatedStats.level
+          );
 
-            // Update local state with values from database
-            setUserLevel(levelUpResult.newLevel);
-            setUserExp(levelUpResult.finalXP);
-            setUserCoins(updatedStats.future_coins);
-            setStreakCount(updatedStreak.current_streak || streakCount + 1);
+          // Update local state with values from database
+          setUserLevel(levelUpResult.newLevel);
+          setUserExp(levelUpResult.finalXP);
+          setUserCoins(updatedStats.future_coins);
+          setStreakCount(updatedStreak.current_streak || streakCount + 1);
 
-            // Show completion message
-            Alert.alert(
-              "Goal Completed!",
-              `Great job! You've earned ${GOAL_COMPLETION_XP} XP and ${GOAL_COMPLETION_COINS} coins.`,
-              [{ text: "Nice!", style: "default" }]
-            );
-          } catch (error) {
-            console.error("Error updating user stats in database:", error);
+          // Show completion message
+          Alert.alert(
+            "Goal Completed!",
+            `Great job! You've earned ${GOAL_COMPLETION_XP} XP and ${GOAL_COMPLETION_COINS} coins.`,
+            [{ text: "Nice!", style: "default" }]
+          );
+        } catch (error) {
+          console.error("Error updating user stats in database:", error);
 
-            // Fall back to local state updates if database update fails
-            const newXP = userExp + GOAL_COMPLETION_XP;
-            const levelUpResult = handleLevelUp(newXP, userLevel);
+          // Fall back to local state updates if database update fails
+          const newXP = userExp + GOAL_COMPLETION_XP;
+          const levelUpResult = handleLevelUp(newXP, userLevel);
 
-            setUserLevel(levelUpResult.newLevel);
-            setUserExp(levelUpResult.finalXP);
-            setUserCoins(userCoins + GOAL_COMPLETION_COINS);
-            setStreakCount(streakCount + 1);
+          setUserLevel(levelUpResult.newLevel);
+          setUserExp(levelUpResult.finalXP);
+          setUserCoins(userCoins + GOAL_COMPLETION_COINS);
+          setStreakCount(streakCount + 1);
 
-            // Show completion message
-            Alert.alert(
-              "Goal Completed!",
-              `Great job! You've earned ${GOAL_COMPLETION_XP} XP and ${GOAL_COMPLETION_COINS} coins.`,
-              [{ text: "Nice!", style: "default" }]
-            );
-          }
+          // Show completion message
+          Alert.alert(
+            "Goal Completed!",
+            `Great job! You've earned ${GOAL_COMPLETION_XP} XP and ${GOAL_COMPLETION_COINS} coins.`,
+            [{ text: "Nice!", style: "default" }]
+          );
         }
       }
 
@@ -431,6 +506,10 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   // Toggle routine completion
   const handleToggleRoutine = async (routineId: number) => {
     try {
+      // Ensure we have the latest Firebase user ID
+      const firebaseUserId = auth.currentUser?.uid;
+      const effectiveUserId = firebaseUserId || userId;
+
       // Find the routine
       const routineToToggle = routines.find(
         (routine) => routine.id === routineId
@@ -449,13 +528,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
         try {
           // Update database with XP and coins
           const updatedStats = await updateUserStats(
-            userId,
+            effectiveUserId,
             ROUTINE_COMPLETION_XP,
             ROUTINE_COMPLETION_COINS
           );
 
           // Update streak in database
-          const updatedStreak = await updateUserStreak(userId);
+          const updatedStreak = await updateUserStreak(effectiveUserId);
 
           // Process level-up if needed
           const levelUpResult = handleLevelUp(
@@ -924,7 +1003,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
     </SafeAreaView>
   );
 };
-
 
 const styles = StyleSheet.create({
   container: {

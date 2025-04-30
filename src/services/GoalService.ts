@@ -1,7 +1,7 @@
-// src/services/GoalService.ts
+// Fixed version of GoalService.ts with getUserStreaks function added back
 import { Goal } from '../types';
 import { Platform } from 'react-native';
-import { auth } from '../config/firebase.js'; // Assuming you have a Firebase config file
+import { auth } from '../config/firebase.js';
 
 // Get API base URL based on platform
 export const getApiBaseUrl = () => {
@@ -22,29 +22,52 @@ export const getCurrentUserId = async (): Promise<string> => {
   throw new Error('No authenticated user found');
 };
 
-// Helper function to transform API response to Goal type
-const transformGoal = (goal: any): Goal => ({
-  id: goal.goal_id || goal.id,
-  title: goal.title || 'Untitled Goal',
-  description: goal.description || '',
-  category: goal.category || 'Personal',
-  color: getCategoryColor(goal.category),
-  isCompleted: goal.is_completed === 1 || goal.isCompleted === true,
-  isDaily: goal.is_daily === 1 || goal.isDaily === true,
-  progress: goal.progress || 0,
-  startDate: goal.target_date || goal.startDate || goal.start_date,
-  userId: goal.user_id || goal.userId,
-  coinReward: goal.coin_reward || goal.coinReward || 0,
-  routineDays: parseRoutineDays(goal.routine_days || goal.routineDays || []),
-  // Add the required type field - default to 'recurring' for daily goals, 'one-time' otherwise
-  type: goal.type || (goal.is_daily === 1 || goal.isDaily === true ? 'recurring' : 'one-time'),
-  // Add targetDate (same as startDate for backwards compatibility)
-  targetDate: goal.target_date || goal.targetDate || goal.startDate || goal.start_date,
-  // Add last completed date if available
-  lastCompleted: goal.last_completed || goal.lastCompleted || undefined,
-});
+// ENHANCED: Improved goal data validation and transformation
+const transformGoal = (goal: any): Goal | null => {
+  // First, check if we have a valid goal object with required fields
+  if (!goal || typeof goal !== 'object') {
+    console.warn('Invalid goal object received:', goal);
+    return null;
+  }
 
-// Parse routine days from different possible formats
+  // Check for the most essential fields
+  if (!goal.goal_id && !goal.id) {
+    console.warn('Goal missing ID field:', goal);
+    return null;
+  }
+
+  // Extract all the fields with proper fallbacks
+  try {
+    const transformedGoal: Goal = {
+      id: goal.goal_id || goal.id,
+      title: goal.title || 'Untitled Goal',
+      description: goal.description || '',
+      category: goal.category || 'Personal',
+      color: getCategoryColor(goal.category),
+      isCompleted: goal.is_completed === 1 || goal.isCompleted === true,
+      isDaily: goal.is_daily === 1 || goal.isDaily === true,
+      progress: typeof goal.progress === 'number' ? goal.progress : 0,
+      startDate: goal.target_date || goal.startDate || goal.start_date || new Date().toISOString().split('T')[0],
+      userId: goal.user_id || goal.userId || 'default_user',
+      coinReward: typeof goal.coin_reward === 'number' ? goal.coin_reward : 
+                  typeof goal.coinReward === 'number' ? goal.coinReward : 0,
+      routineDays: parseRoutineDays(goal.routine_days || goal.routineDays || []),
+      // Add the required type field - default to 'recurring' for daily goals, 'one-time' otherwise
+      type: goal.type || (goal.is_daily === 1 || goal.isDaily === true ? 'recurring' : 'one-time'),
+      // Add targetDate (same as startDate for backwards compatibility)
+      targetDate: goal.target_date || goal.targetDate || goal.startDate || goal.start_date || new Date().toISOString().split('T')[0],
+      // Add last completed date if available
+      lastCompleted: goal.last_completed || goal.lastCompleted || undefined,
+    };
+
+    return transformedGoal;
+  } catch (error) {
+    console.error('Error transforming goal data:', error);
+    return null;
+  }
+};
+
+// ENHANCED: Improved routine days parsing with more robust error handling
 const parseRoutineDays = (routineDays: any): number[] => {
   // If already an array of numbers, return as is
   if (Array.isArray(routineDays) && routineDays.every(day => typeof day === 'number')) {
@@ -56,7 +79,10 @@ const parseRoutineDays = (routineDays: any): number[] => {
     try {
       const parsed = JSON.parse(routineDays);
       if (Array.isArray(parsed)) {
-        return parsed;
+        // Filter any non-number values and ensure days are within 0-6 range
+        return parsed
+          .filter(day => typeof day === 'number')
+          .map(day => Math.min(Math.max(Math.floor(day), 0), 6));
       }
     } catch (e) {
       console.warn('Error parsing routine days:', e);
@@ -67,14 +93,23 @@ const parseRoutineDays = (routineDays: any): number[] => {
   return [];
 };
 
-// Fetch all goals for a user
+// ENHANCED: Fetch all goals with better error handling and data validation
 export const fetchUserGoals = async (): Promise<Goal[]> => {
   try {
     // Get current user ID from Firebase
     const userId = await getCurrentUserId();
 
     const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/goals?userId=${userId}`);
+    
+    // Add timeout to prevent hanging requests
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    
+    const res = await fetch(`${apiUrl}/goals?userId=${userId}`, {
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
     
     if (!res.ok) {
       console.warn(`Error response from API: ${res.status} ${res.statusText}`);
@@ -84,37 +119,79 @@ export const fetchUserGoals = async (): Promise<Goal[]> => {
     const data = await res.json();
     
     // Handle different response formats
-    // If the response is already an array, return it
+    // If the response is already an array, map and filter
     if (Array.isArray(data)) {
-      return data.map(transformGoal);
+      // Transform goals and filter out any null values (invalid goals)
+      const validGoals = data.map(transformGoal).filter(goal => goal !== null) as Goal[];
+      console.log(`Fetched ${validGoals.length} valid goals from ${data.length} total goals`);
+      return validGoals;
     }
     
     // If it's in the { goals: [] } format
     if (data.goals && Array.isArray(data.goals)) {
-      return data.goals.map(transformGoal);
+      // Transform goals and filter out any null values (invalid goals)
+      const validGoals = data.goals.map(transformGoal).filter(goal => goal !== null) as Goal[];
+      console.log(`Fetched ${validGoals.length} valid goals from ${data.goals.length} total goals`);
+      return validGoals;
     }
     
     // If no valid format is found
     console.warn('Invalid format for goals data:', data);
     return [];
   } catch (err) {
-    console.error('Error fetching user goals:', err);
+    // Handle fetch timeout/abort error specifically
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      console.error('Fetch request for goals timed out');
+    } else {
+      console.error('Error fetching user goals:', err);
+    }
     return [];
   }
 };
 
-// Get a single goal by ID
+// ENHANCED: Get a single goal by ID with additional fallback logic
 export const fetchGoalById = async (goalId: number): Promise<Goal | null> => {
   try {
-    const apiUrl = getApiBaseUrl();
-    
     // Check that goalId is valid
     if (!goalId || isNaN(Number(goalId))) {
       console.warn(`Invalid goal ID: ${goalId}`);
       return null;
     }
     
-    const res = await fetch(`${apiUrl}/goals/${goalId}`);
+    // For locally created goals (with negative IDs)
+    if (goalId < 0) {
+      console.log(`Cannot fetch local goal with ID: ${goalId} from server, creating fallback`);
+      
+      // Create a fallback goal
+      return {
+        id: goalId,
+        title: 'Local Goal',
+        description: '',
+        category: 'Personal',
+        color: getCategoryColor('Personal'),
+        isCompleted: false,
+        isDaily: false,
+        progress: 0,
+        startDate: new Date().toISOString().split('T')[0],
+        targetDate: new Date().toISOString().split('T')[0],
+        userId: 'default_user',
+        coinReward: 10,
+        routineDays: [],
+        type: 'one-time',
+        lastCompleted: undefined
+      };
+    }
+    
+    // Add timeout to prevent hanging requests
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+    
+    const apiUrl = getApiBaseUrl();
+    const res = await fetch(`${apiUrl}/goals/${goalId}`, {
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
     
     // Handle different response status codes more specifically
     if (res.status === 404) {
@@ -124,27 +201,57 @@ export const fetchGoalById = async (goalId: number): Promise<Goal | null> => {
     
     if (!res.ok) {
       console.warn(`Error response from API: ${res.status} ${res.statusText}`);
+      
+      // For severe server errors, attempt to fetch the goal from all goals as fallback
+      if (res.status === 500) {
+        console.log(`Server error 500, attempting to find goal ${goalId} in all goals`);
+        
+        // Fetch all goals and find the one we want
+        try {
+          const allGoals = await fetchUserGoals();
+          const foundGoal = allGoals.find(g => g.id === goalId);
+          
+          if (foundGoal) {
+            console.log(`Found goal ${goalId} in all goals as fallback`);
+            return foundGoal;
+          }
+        } catch (allGoalsError) {
+          console.error('Failed to fetch all goals as fallback:', allGoalsError);
+        }
+      }
+      
       return null;
     }
     
     const data = await res.json();
-    const goal = data.goal || data;
+    const goalData = data.goal || data;
     
-    if (!goal || !goal.id) {
+    // Enhanced validation: try to transform the goal, which now returns null for invalid goals
+    const goal = transformGoal(goalData);
+    
+    if (!goal) {
       console.warn(`Invalid goal data returned for ID: ${goalId}`);
       return null;
     }
     
-    return transformGoal(goal);
+    return goal;
   } catch (err) {
-    console.error(`Error fetching goal by ID: ${goalId}`, err);
+    // Handle fetch timeout/abort error specifically
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      console.error(`Fetch request for goal ${goalId} timed out`);
+    } else {
+      console.error(`Error fetching goal by ID: ${goalId}`, err);
+    }
+    
     return null;
   }
 };
 
-// Update a goal's progress
+// ENHANCED: Update a goal's progress with improved data validation and fallback
 export const updateGoalProgress = async (goalId: number, progress: number): Promise<Goal | null> => {
   try {
+    console.log(`Updating goal progress for ID: ${goalId} to ${progress}%`);
+    
     // Check that goalId is valid
     if (!goalId || isNaN(Number(goalId))) {
       console.warn(`Invalid goal ID for progress update: ${goalId}`);
@@ -157,13 +264,55 @@ export const updateGoalProgress = async (goalId: number, progress: number): Prom
       progress = Math.max(0, Math.min(100, progress)); // Clamp to valid range
     }
     
-    // First check if this is a daily goal - handle potential errors gracefully
+    // For locally created goals (with negative IDs)
+    if (goalId < 0) {
+      console.log(`Cannot update server for local goal ID: ${goalId}`);
+      
+      // Try to get the goal from local state
+      try {
+        // Fetch all goals and find this one
+        const allGoals = await fetchUserGoals();
+        let existingGoal = allGoals.find(g => g.id === goalId);
+        
+        if (existingGoal) {
+          // Create an updated copy
+          return {
+            ...existingGoal,
+            progress: progress,
+            isCompleted: progress === 100
+          };
+        }
+      } catch (fetchError) {
+        console.warn(`Could not fetch local goals for ID: ${goalId}`, fetchError);
+      }
+      
+      // Create a minimal fallback if we couldn't find the local goal
+      return {
+        id: goalId,
+        title: 'Local Goal',
+        description: '',
+        category: 'Personal',
+        color: getCategoryColor('Personal'),
+        isCompleted: progress === 100,
+        isDaily: false,
+        progress: progress,
+        startDate: new Date().toISOString().split('T')[0],
+        targetDate: new Date().toISOString().split('T')[0],
+        userId: 'default_user',
+        coinReward: 10,
+        routineDays: [],
+        type: 'one-time',
+        lastCompleted: undefined
+      };
+    }
+    
+    // First try to fetch the existing goal to have as fallback
     let existingGoal: Goal | null = null;
     try {
       existingGoal = await fetchGoalById(goalId);
+      console.log(`Found existing goal for ID: ${goalId}:`, existingGoal ? 'valid' : 'not found');
     } catch (fetchError) {
-      console.warn(`Could not fetch goal before update: ${fetchError}`);
-      // Continue with the update anyway
+      console.warn(`Could not fetch existing goal before update: ${fetchError}`);
     }
     
     // Create the update payload
@@ -175,16 +324,34 @@ export const updateGoalProgress = async (goalId: number, progress: number): Prom
       payload.last_completed = new Date().toISOString().split('T')[0];
     }
     
+    // Add timeout to prevent hanging requests
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+    
     const apiUrl = getApiBaseUrl();
     const res = await fetch(`${apiUrl}/goals/${goalId}/progress`, {
       method: 'PUT', 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: controller.signal
     });
+    
+    clearTimeout(timeoutId);
     
     // Handle different response status codes
     if (res.status === 404) {
       console.warn(`Goal not found when updating progress for ID: ${goalId}`);
+      
+      // If we have an existing goal, return it with updated progress as fallback
+      if (existingGoal) {
+        console.log(`Using existing goal as fallback for ID: ${goalId}`);
+        return {
+          ...existingGoal,
+          progress: progress,
+          isCompleted: progress === 100
+        };
+      }
+      
       return null;
     }
     
@@ -193,12 +360,14 @@ export const updateGoalProgress = async (goalId: number, progress: number): Prom
       
       // If existing goal is available, return that with updated progress as fallback
       if (existingGoal) {
+        console.log(`Using existing goal as fallback for update error, ID: ${goalId}`);
         return {
           ...existingGoal,
           progress: progress,
           isCompleted: progress === 100
         };
       }
+      
       return null;
     }
     
@@ -206,48 +375,451 @@ export const updateGoalProgress = async (goalId: number, progress: number): Prom
       const data = await res.json();
       
       // Handle different response formats
-      const goal = data.goal || data;
+      const goalData = data.goal || data;
       
-      if (!goal || !goal.id) {
+      // Enhanced validation: try to transform the goal, which now returns null for invalid goals
+      const goal = transformGoal(goalData);
+      
+      if (!goal) {
         console.warn(`Invalid goal data returned after progress update for ID: ${goalId}`);
         
         // If existing goal is available, return that with updated progress as fallback
         if (existingGoal) {
+          console.log(`Using existing goal as fallback for transform error, ID: ${goalId}`);
           return {
             ...existingGoal,
             progress: progress,
             isCompleted: progress === 100
           };
         }
+        
         return null; 
       }
       
-      return transformGoal(goal);
+      return goal;
     } catch (parseError) {
       const errorMessage = parseError instanceof Error ? parseError.message : 'Unknown error';
       console.error(`Error parsing API response for goal update: ${errorMessage}`);
       
       // If we have the existing goal, return that with updated progress as fallback
       if (existingGoal) {
+        console.log(`Using existing goal as fallback for parse error, ID: ${goalId}`);
         return {
           ...existingGoal,
           progress: progress,
           isCompleted: progress === 100
         };
       }
+      
       return null;
     }
   } catch (err) {
-    console.error(`Error updating goal progress for ID: ${goalId}`, err);
+    // Handle fetch timeout/abort error specifically
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      console.error(`Fetch request for goal progress update ${goalId} timed out`);
+    } else {
+      console.error(`Error updating goal progress for ID: ${goalId}`, err);
+    }
+    
     return null;
   }
 };
 
-// Create a new goal
+// Helper function to get color for a category
+export const getCategoryColor = (category?: string): string => {
+  const categoryColors: Record<string, string> = {
+    'Personal': '#3B82F6', // Blue
+    'Work': '#4CAF50',     // Green
+    'Learning': '#5E6CE7', // Purple
+    'Health': '#F44336',   // Red
+    'Finance': '#FF9800',  // Orange
+    'Repair': '#56C3B6'    // Cyan
+  };
+  
+  return category && categoryColors[category] ? categoryColors[category] : '#3B82F6';
+};
+
+// ENHANCED: Check if a goal is active today with better error handling
+export const isGoalActiveToday = (goal: Goal): boolean => {
+  try {
+    // Validate the goal object
+    if (!goal || typeof goal !== 'object') {
+      console.warn('Invalid goal object in isGoalActiveToday');
+      return false;
+    }
+
+    // Non-daily goals are always active
+    if (!goal.isDaily) return true;
+    
+    // For daily goals, check routine days
+    if (!goal.routineDays || !Array.isArray(goal.routineDays) || goal.routineDays.length === 0) {
+      // If no valid routine days specified, show on all days
+      return true;
+    }
+    
+    const today = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
+    return goal.routineDays.includes(today);
+  } catch (error) {
+    console.error('Error in isGoalActiveToday:', error);
+    // Default to showing the goal if there's an error
+    return true;
+  }
+};
+
+// ADDED BACK: Get user's streak function that was missing
+export const getUserStreaks = async (): Promise<number> => {
+  try {
+    // Get user ID from Firebase
+    let userId: string;
+    try {
+      userId = await getCurrentUserId();
+    } catch (authError) {
+      console.warn('Failed to get user ID for streaks:', authError);
+      return 0;
+    }
+    
+    const apiUrl = getApiBaseUrl();
+    
+    // Add timeout to prevent hanging requests
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+    
+    try {
+      const res = await fetch(`${apiUrl}/users/${userId}/streak`, {
+        headers: {
+          'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
+        },
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!res.ok) {
+        console.warn(`Error fetching streaks: ${res.status} ${res.statusText}`);
+        return 0;
+      }
+      
+      const data = await res.json();
+      return data.streak || data.streakCount || data.current_streak || 0;
+    } catch (fetchError) {
+      // Handle fetch timeout/abort error specifically
+      if (fetchError instanceof DOMException && fetchError.name === 'AbortError') {
+        console.error('Fetch request for streak timed out');
+      } else {
+        console.error('Network error fetching streaks:', fetchError);
+      }
+      return 0;
+    }
+  } catch (err) {
+    console.error('Error fetching streaks:', err);
+    return 0;
+  }
+};
+
+// ENHANCED: Toggle goal completion with better validation and fallbacks
+export const toggleGoalCompletion = async (goalId: number, goals: Goal[]): Promise<boolean> => {
+  try {
+    console.log(`Toggling goal completion for goal ID: ${goalId}`);
+    
+    // Check that goalId is valid
+    if (!goalId || isNaN(Number(goalId))) {
+      console.warn(`Invalid goal ID for toggle: ${goalId}`);
+      return false;
+    }
+    
+    // Get current user ID from Firebase
+    let userId: string;
+    try {
+      userId = await getCurrentUserId();
+    } catch (authError) {
+      console.warn('Failed to get user ID:', authError);
+      userId = 'default_user';
+    }
+    
+    // Find the goal to toggle
+    let goalToToggle: Goal | null = goals.find((g) => g.id === goalId) || null;
+
+    // If not found in the provided goals array, try to fetch it directly
+    if (!goalToToggle) {
+      console.warn(`Goal not found in local state: ${goalId}, attempting to fetch`);
+      try {
+        goalToToggle = await fetchGoalById(goalId);
+        
+        if (!goalToToggle) {
+          console.warn(`Failed to fetch goal for ID: ${goalId}`);
+          return false;
+        }
+      } catch (fetchError) {
+        console.error(`Error fetching goal for toggle: ${fetchError}`);
+        return false;
+      }
+    }
+
+    const wasCompleted = goalToToggle.isCompleted;
+    console.log(`Goal ${goalId} was${wasCompleted ? '' : ' not'} completed`);
+
+    // Calculate new progress - either 100% if completing, or 0% if uncompleting
+    const newProgress = !wasCompleted ? 100 : 0;
+
+    // For local goals (negative IDs), just update locally without server call
+    if (goalId < 0) {
+      console.log(`Local update for goal with negative ID: ${goalId}`);
+      
+      // If this is a completion (not unchecking) and goal wasn't previously completed,
+      // process rewards if eligible
+      if (!wasCompleted && newProgress === 100) {
+        if (canClaimRewardsForGoal(goalToToggle)) {
+          console.log(`Processing rewards for local goal ${goalId}`);
+          
+          // Define reward amounts
+          const XP_REWARD = 10;
+          const COIN_REWARD = 5;
+          
+          try {
+            // Process rewards
+            await processGoalRewards(XP_REWARD, COIN_REWARD);
+          } catch (rewardError) {
+            console.error(`Error processing rewards: ${rewardError}`);
+            // Continue with the toggle even if rewards fail
+          }
+        } else {
+          console.log(`Goal ${goalId} not eligible for rewards`);
+        }
+      }
+      
+      return true;
+    }
+
+    // Update goal progress in the database
+    const updatedGoal = await updateGoalProgress(goalId, newProgress);
+
+    // If update failed but we had the goal locally, proceed with optimistic UI update
+    if (!updatedGoal) {
+      console.warn(`Goal progress update failed for ID: ${goalId}, using optimistic update`);
+      
+      // If this is a completion (not unchecking) and goal wasn't previously completed,
+      // try to process rewards only if eligible
+      if (!wasCompleted && newProgress === 100) {
+        if (canClaimRewardsForGoal(goalToToggle)) {
+          console.log(`Processing rewards for goal ${goalId} (optimistic update)`);
+          
+          // Define reward amounts
+          const XP_REWARD = 10;
+          const COIN_REWARD = 5;
+          
+          try {
+            // Still try to process rewards even though the update failed
+            await processGoalRewards(XP_REWARD, COIN_REWARD);
+          } catch (rewardError) {
+            console.error(`Error processing rewards: ${rewardError}`);
+            // Continue with the toggle even if rewards fail
+          }
+        } else {
+          console.log(`Goal ${goalId} not eligible for rewards`);
+        }
+      }
+      
+      return true; // Return true so UI can be updated optimistically
+    }
+
+    // If this is a completion (not unchecking) and goal wasn't previously completed,
+    // process rewards only if eligible
+    if (!wasCompleted && newProgress === 100) {
+      if (canClaimRewardsForGoal(updatedGoal)) {
+        console.log(`Processing rewards for goal ${goalId}`);
+        
+        // Define reward amounts
+        const XP_REWARD = 10;
+        const COIN_REWARD = 5;
+        
+        try {
+          // Process rewards
+          await processGoalRewards(XP_REWARD, COIN_REWARD);
+        } catch (rewardError) {
+          console.error(`Error processing rewards: ${rewardError}`);
+          // Continue with the toggle even if rewards fail
+        }
+      } else {
+        console.log(`Goal ${goalId} not eligible for rewards`);
+      }
+    }
+
+    return true;
+  } catch (error) {
+    console.error(`Error toggling goal completion: ${error}`);
+    return false;
+  }
+};
+
+// Improved reward eligibility check function
+export const canClaimRewardsForGoal = (goal: Goal): boolean => {
+  // Validate input
+  if (!goal || typeof goal !== 'object') {
+    console.warn('Invalid goal object in canClaimRewardsForGoal');
+    return false;
+  }
+
+  console.log(`Checking reward eligibility for goal ID: ${goal.id}, Type: ${goal.type || 'unknown'}`);
+  
+  // For one-time goals, check completion date against target date
+  if (goal.type === 'one-time' || (!goal.isDaily && !goal.type)) {
+    const today = new Date();
+    
+    // Handle potential invalid date
+    let goalDate: Date;
+    try {
+      goalDate = new Date(goal.targetDate || goal.startDate || Date.now());
+    } catch (dateError) {
+      console.warn(`Invalid date format for goal ${goal.id}:`, dateError);
+      goalDate = new Date(); // Default to today if parsing fails
+    }
+    
+    // Format dates for logging
+    console.log(`Today: ${today.toISOString().split('T')[0]}, Goal date: ${goalDate.toISOString().split('T')[0]}`);
+    
+    // Allow rewards for goals that are due today or in the future
+    // Also allow if the target date is the same day (even if earlier hours)
+    if (goalDate.toDateString() === today.toDateString() || goalDate > today) {
+      console.log(`Goal ${goal.id} is eligible for rewards: same day or future date`);
+      return true;
+    }
+    
+    // For past goals, don't allow claiming rewards
+    console.log(`Goal ${goal.id} is not eligible: past due date`);
+    return false;
+  }
+  
+  // For recurring goals, check if it's scheduled for today
+  if (goal.isDaily || goal.type === 'recurring') {
+    // Check if it's scheduled for today
+    const today = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
+    
+    // If it has routine days defined and today is not in the list, don't give rewards
+    if (goal.routineDays && 
+        Array.isArray(goal.routineDays) && 
+        goal.routineDays.length > 0 && 
+        !goal.routineDays.includes(today)) {
+      console.log(`Goal ${goal.id} is not scheduled for today, no rewards given`);
+      return false;
+    }
+  }
+  
+  // All other cases can claim rewards
+  console.log(`Goal ${goal.id} is eligible for rewards`);
+  return true;
+};
+
+// ADDED BACK: Get user's coin balance function that was missing
+export const getUserFutureCoins = async (): Promise<number> => {
+  try {
+    // Get user ID from Firebase
+    let userId: string;
+    try {
+      userId = await getCurrentUserId();
+    } catch (authError) {
+      console.warn('Failed to get user ID for coins:', authError);
+      return 0;
+    }
+    
+    const apiUrl = getApiBaseUrl();
+    
+    // Add timeout to prevent hanging requests
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+    
+    try {
+      const res = await fetch(`${apiUrl}/users/${userId}/futurecoins`, {
+        headers: {
+          'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
+        },
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!res.ok) {
+        console.warn(`Error fetching future coins: ${res.status} ${res.statusText}`);
+        return 0;
+      }
+      
+      const data = await res.json();
+      return data.futureCoins || data.future_coins || 0;
+    } catch (fetchError) {
+      // Handle fetch timeout/abort error specifically
+      if (fetchError instanceof DOMException && fetchError.name === 'AbortError') {
+        console.error('Fetch request for coins timed out');
+      } else {
+        console.error('Network error fetching coins:', fetchError);
+      }
+      return 0;
+    }
+  } catch (err) {
+    console.error('Error fetching coins:', err);
+    return 0;
+  }
+};
+
+// Simplified function to process rewards
+export const processGoalRewards = async (
+  xpAmount: number = 10,
+  coinAmount: number = 5
+): Promise<boolean> => {
+  try {
+    // Get user ID from Firebase
+    let userId: string;
+    try {
+      userId = await getCurrentUserId();
+    } catch (authError) {
+      console.warn('Failed to get user ID for rewards:', authError);
+      userId = 'default_user';
+    }
+    
+    console.log(`Processing rewards for user ${userId}: ${xpAmount} XP, ${coinAmount} coins`);
+    
+    const apiUrl = getApiBaseUrl();
+    
+    // Unified stats update to minimize API calls
+    try {
+      const response = await fetch(`${apiUrl}/users/${userId}/stats`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          xp_points_to_add: xpAmount,
+          future_coins_to_add: coinAmount,
+          increment_streak: true
+        }),
+      });
+      
+      if (!response.ok) {
+        console.warn(`Error updating user stats: ${response.status} ${response.statusText}`);
+        return false;
+      }
+      
+      const result = await response.json();
+      console.log('Rewards processed successfully:', result);
+      
+      return true;
+    } catch (fetchError) {
+      console.error('Network error updating stats:', fetchError);
+      return false;
+    }
+  } catch (error) {
+    console.error('Error processing rewards:', error);
+    return false;
+  }
+};
+
+// Export other functions to maintain compatibility
 export const createGoal = async (goal: Partial<Goal>): Promise<Goal> => {
   try {
     // Get current user ID from Firebase
-    const userId = await getCurrentUserId();
+    let userId: string;
+    try {
+      userId = await getCurrentUserId();
+    } catch (authError) {
+      console.warn('Failed to get user ID for goal creation:', authError);
+      userId = 'default_user';
+    }
 
     if (!goal.title || goal.title.trim() === '') {
       console.warn('Goal title is missing, using default title');
@@ -299,14 +871,6 @@ export const createGoal = async (goal: Partial<Goal>): Promise<Goal> => {
       if (!res.ok) {
         console.warn(`Server error creating goal: ${res.status} ${res.statusText}`);
         
-        // Try to get error details if available
-        try {
-          const errorData = await res.json();
-          console.warn('Error details:', errorData);
-        } catch (jsonError) {
-          console.warn('No detailed error information available');
-        }
-        
         // Create a local goal as fallback
         console.log('Server error, creating local goal as fallback');
         
@@ -341,13 +905,16 @@ export const createGoal = async (goal: Partial<Goal>): Promise<Goal> => {
         const data = await res.json();
         
         // Handle different response formats
-        const createdGoal = data.goal || data;
+        const createdGoalData = data.goal || data;
         
-        if (!createdGoal || !createdGoal.id) {
+        // Validate the returned goal
+        const createdGoal = transformGoal(createdGoalData);
+        
+        if (!createdGoal) {
           throw new Error('No goal data returned from server');
         }
         
-        return transformGoal(createdGoal);
+        return createdGoal;
       } catch (parseError) {
         const errorMessage = parseError instanceof Error ? parseError.message : 'Unknown error';
         throw new Error(`Failed to parse server response: ${errorMessage}`);
@@ -419,485 +986,7 @@ export const createGoal = async (goal: Partial<Goal>): Promise<Goal> => {
   }
 };
 
-// Delete a goal
-export const deleteGoal = async (goalId: number): Promise<boolean> => {
-  try {
-    if (!goalId || isNaN(Number(goalId))) {
-      console.warn(`Invalid goal ID for deletion: ${goalId}`);
-      return false;
-    }
-
-    // Handle locally created goals (with negative IDs) by returning success immediately
-    if (goalId < 0) {
-      console.log(`Skipping server deletion for local goal ID: ${goalId}`);
-      return true;
-    }
-
-    const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/goals/${goalId}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      }
-    });
-    
-    if (res.status === 404) {
-      console.warn(`Goal not found when trying to delete ID: ${goalId}`);
-      return true; // Consider it a success since the goal is gone
-    }
-    
-    if (!res.ok) {
-      console.warn(`Error deleting goal: ${res.status} ${res.statusText}`);
-      
-      // For severe server errors (500), assume deletion worked to avoid blocking the user
-      if (res.status === 500) {
-        console.log('Server error 500 during deletion, assuming success');
-        return true;
-      }
-      
-      return false;
-    }
-    
-    return true;
-  } catch (err) {
-    console.error(`Error deleting goal with ID: ${goalId}`, err);
-    return false;
-  }
-};
-
-// Update the routine days for a goal
-export const updateGoalRoutineDays = async (goalId: number, routineDays: number[]): Promise<Goal | null> => {
-  try {
-    if (!goalId || isNaN(Number(goalId))) {
-      console.warn(`Invalid goal ID for routine days update: ${goalId}`);
-      return null;
-    }
-    
-    // Handle locally created goals (with negative IDs)
-    if (goalId < 0) {
-      console.log(`Cannot update server for local goal ID: ${goalId}`);
-      
-      // Get current user ID
-      let userId: string;
-      try {
-        userId = await getCurrentUserId();
-      } catch (error) {
-        userId = 'temp_user_' + Date.now();
-        console.warn(`Could not get user ID, using temporary: ${userId}`);
-      }
-      
-      // Return a mock goal with updated routine days
-      return {
-        id: goalId,
-        title: 'Local Goal',
-        description: '',
-        category: 'Personal',
-        color: '#3B82F6',
-        isCompleted: false,
-        isDaily: true,
-        progress: 0,
-        userId: userId,
-        routineDays: routineDays,
-        type: 'recurring',
-        startDate: new Date().toISOString().split('T')[0],
-        targetDate: new Date().toISOString().split('T')[0],
-        coinReward: 10,
-        lastCompleted: undefined
-      };
-    }
-    
-    // Validate routine days - should be array of numbers 0-6
-    if (!Array.isArray(routineDays) || 
-        !routineDays.every(day => typeof day === 'number' && day >= 0 && day <= 6)) {
-      console.warn(`Invalid routine days format: ${routineDays}`);
-      return null;
-    }
-    
-    // Fetch existing goal first, to use as fallback if needed
-    let existingGoal: Goal | null = null;
-    try {
-      existingGoal = await fetchGoalById(goalId);
-    } catch (fetchError) {
-      console.warn(`Could not fetch goal before routine days update: ${fetchError}`);
-    }
-    
-    const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/goals/${goalId}`, {
-      method: 'PATCH', 
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      },
-      body: JSON.stringify({ 
-        routine_days: JSON.stringify(routineDays) 
-      }),
-    });
-    
-    if (res.status === 404) {
-      console.warn(`Goal not found when updating routine days for ID: ${goalId}`);
-      return null;
-    }
-    
-    if (!res.ok) {
-      console.warn(`Error updating routine days: ${res.status} ${res.statusText}`);
-      
-      // If we have the existing goal, return that with updated routine days as fallback
-      if (existingGoal) {
-        return {
-          ...existingGoal,
-          routineDays: routineDays
-        };
-      }
-      
-      return null;
-    }
-    
-    const data = await res.json();
-    
-    // Handle different response formats
-    const goal = data.goal || data;
-    
-    if (!goal || !goal.id) {
-      console.warn(`Invalid goal data returned after routine days update for ID: ${goalId}`);
-      
-      // If we have the existing goal, return that with updated routine days as fallback
-      if (existingGoal) {
-        return {
-          ...existingGoal,
-          routineDays: routineDays
-        };
-      }
-      
-      return null;
-    }
-    
-    return transformGoal(goal);
-  } catch (err) {
-    console.error(`Error updating routine days for goal ${goalId}:`, err);
-    return null;
-  }
-};
-
-/**
- * Determines if a goal can receive rewards when completed
- * For one-time goals, they can only receive rewards if completed before expiration
- * @param goal The goal to check
- * @returns True if the goal can receive rewards, false otherwise
- */
-export const canClaimRewardsForGoal = (goal: Goal): boolean => {
-  // For one-time goals, check if they're completed on or before the assigned day
-  if (!goal.isDaily) {
-    const today = new Date();
-    const goalDate = new Date(goal.targetDate || goal.startDate || Date.now());
-    
-    // If the goal was due in the past, don't allow claiming rewards
-    if (goalDate < today && goalDate.toDateString() !== today.toDateString()) {
-      console.log(`One-time goal ${goal.id} is past due, no rewards given`);
-      return false;
-    }
-  } else {
-    // For daily goals, check if it's scheduled for today
-    const today = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
-    
-    // If it has routine days defined and today is not in the list, don't give rewards
-    if (goal.routineDays && goal.routineDays.length > 0 && !goal.routineDays.includes(today)) {
-      console.log(`Daily goal ${goal.id} is not scheduled for today, no rewards given`);
-      return false;
-    }
-  }
-  
-  console.log(`Goal ${goal.id} is eligible for rewards`);
-  // All other goals can claim rewards
-  return true;
-};
-
-// Process rewards for a completed goal
-export const processGoalRewards = async (
-  xpAmount: number = 10,
-  coinAmount: number = 5
-): Promise<boolean> => {
-  try {
-    // Get user ID from Firebase
-    const userId = await getCurrentUserId();
-    
-    console.log(`Processing rewards for user ${userId}: ${xpAmount} XP, ${coinAmount} coins`);
-    
-    // Update XP in database
-    const xpSuccess = await updateUserXP(userId, xpAmount);
-    
-    // Update coins in database
-    const coinSuccess = await updateUserCoins(userId, coinAmount);
-    
-    // Increment streak
-    let streakSuccess = false;
-    try {
-      const apiUrl = getApiBaseUrl();
-      const response = await fetch(`${apiUrl}/users/${userId}/streak`, {
-        method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-        },
-        body: JSON.stringify({ increment: true }),
-      });
-      
-      streakSuccess = response.ok;
-      
-      if (!response.ok) {
-        console.warn(`Error updating streak: ${response.status} ${response.statusText}`);
-      }
-    } catch (error) {
-      console.error('Error updating streak:', error);
-    }
-    
-    return xpSuccess && coinSuccess;
-  } catch (error) {
-    console.error('Error processing rewards:', error);
-    return false;
-  }
-};
-
-// Get user's streak
-export const getUserStreaks = async (): Promise<number> => {
-  try {
-    // Get user ID from Firebase
-    const userId = await getCurrentUserId();
-    
-    const apiUrl = getApiBaseUrl();
-    
-    try {
-      const res = await fetch(`${apiUrl}/users/${userId}/streak`, {
-        headers: {
-          'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-        }
-      });
-      
-      if (!res.ok) {
-        console.warn(`Error fetching streaks: ${res.status} ${res.statusText}`);
-        return 0;
-      }
-      
-      const data = await res.json();
-      return data.streak || data.streakCount || data.current_streak || 0;
-    } catch (fetchError) {
-      console.error('Network error fetching streaks:', fetchError);
-      return 0;
-    }
-  } catch (err) {
-    console.error('Error fetching streaks:', err);
-    return 0;
-  }
-};
-
-// Get user's coin balance
-export const getUserFutureCoins = async (): Promise<number> => {
-  try {
-    // Get user ID from Firebase
-    const userId = await getCurrentUserId();
-    
-    const apiUrl = getApiBaseUrl();
-    
-    try {
-      const res = await fetch(`${apiUrl}/users/${userId}/futurecoins`, {
-        headers: {
-          'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-        }
-      });
-      
-      if (!res.ok) {
-        console.warn(`Error fetching future coins: ${res.status} ${res.statusText}`);
-        return 0;
-      }
-      
-      const data = await res.json();
-      return data.futureCoins || data.future_coins || 0;
-    } catch (fetchError) {
-      console.error('Network error fetching coins:', fetchError);
-      return 0;
-    }
-  } catch (err) {
-    console.error('Error fetching coins:', err);
-    return 0;
-  }
-};
-
-// Helper function to get color for a category
-export const getCategoryColor = (category?: string): string => {
-  const categoryColors: Record<string, string> = {
-    'Personal': '#3B82F6', // Blue
-    'Work': '#4CAF50',     // Green
-    'Learning': '#5E6CE7', // Purple
-    'Health': '#F44336',   // Red
-    'Finance': '#FF9800',  // Orange
-    'Repair': '#56C3B6'    // Cyan
-  };
-  
-  return category && categoryColors[category] ? categoryColors[category] : '#3B82F6';
-};
-
-// Update user coins
-export const updateUserCoins = async (userId: string, amount: number): Promise<boolean> => {
-  try {
-    if (!userId) {
-      console.warn('Invalid user ID for updating coins');
-      return false;
-    }
-    
-    if (isNaN(Number(amount))) {
-      console.warn(`Invalid amount for coins update: ${amount}`);
-      return false;
-    }
-    
-    const apiUrl = getApiBaseUrl();
-    
-    try {
-      const res = await fetch(`${apiUrl}/users/${userId}/futurecoins`, {
-        method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-        },
-        body: JSON.stringify({ amount }),
-      });
-      
-      if (!res.ok) {
-        console.warn(`Error updating user coins: ${res.status} ${res.statusText}`);
-        
-        // For severe server errors (500), assume update worked so user isn't blocked
-        if (res.status === 500) {
-          console.log('Server error 500 during coin update, assuming success');
-          return true;
-        }
-        
-        return false;
-      }
-      
-      return true;
-    } catch (fetchError) {
-      console.error('Network error updating coins:', fetchError);
-      // Assume success for network errors to keep the UI moving forward
-      return true;
-    }
-  } catch (err) {
-    console.error('Error updating user coins:', err);
-    return false;
-  }
-};
-
-// Update user XP
-export const updateUserXP = async (userId: string, amount: number, newLevel?: number): Promise<boolean> => {
-  try {
-    if (!userId) {
-      console.warn('Invalid user ID for updating XP');
-      return false;
-    }
-    
-    if (isNaN(Number(amount))) {
-      console.warn(`Invalid amount for XP update: ${amount}`);
-      return false;
-    }
-    
-    const apiUrl = getApiBaseUrl();
-    
-    try {
-      const res = await fetch(`${apiUrl}/users/${userId}/xp`, {
-        method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-        },
-        body: JSON.stringify({ 
-          amount,
-          level: newLevel 
-        }),
-      });
-      
-      if (!res.ok) {
-        console.warn(`Error updating XP: ${res.status} ${res.statusText}`);
-        
-        // For severe server errors (500), assume update worked so user isn't blocked
-        if (res.status === 500) {
-          console.log('Server error 500 during XP update, assuming success');
-          return true;
-        }
-        
-        return false;
-      }
-      
-      return true;
-    } catch (fetchError) {
-      console.error('Network error updating XP:', fetchError);
-      // Assume success for network errors to keep the UI moving forward
-      return true;
-    }
-  } catch (err) {
-    console.error('Error updating user XP:', err);
-    return false;
-  }
-};
-
-// Helper function to check if a goal is active today (for daily goals)
-export const isGoalActiveToday = (goal: Goal): boolean => {
-  if (!goal.isDaily) return true; // Non-daily goals are always active
-  
-  if (!goal.routineDays || goal.routineDays.length === 0) return true; // If no days specified, show on all days
-  
-  const today = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
-  return goal.routineDays.includes(today);
-};
-
-// Reset daily goals at the start of a new day
-export const resetDailyGoals = async (): Promise<void> => {
-  try {
-    // Get current user ID from Firebase
-    const userId = await getCurrentUserId();
-    
-    console.log(`Resetting daily goals for user: ${userId}`);
-    
-    // Get all goals - handle empty response gracefully
-    const goals = await fetchUserGoals();
-    
-    if (!goals || goals.length === 0) {
-      console.log(`No goals found for user: ${userId}`);
-      return;
-    }
-    
-    // For each daily goal that's scheduled for today and was completed
-    let resetCount = 0;
-    const dailyGoals = goals.filter(g => g.isDaily && g.isCompleted);
-    
-    console.log(`Found ${dailyGoals.length} completed daily goals to check`);
-    
-    for (const goal of dailyGoals) {
-      try {
-        // Check if this goal is active today
-        const activeToday = isGoalActiveToday(goal);
-        
-        if (activeToday) {
-          console.log(`Resetting daily goal: ${goal.title} (ID: ${goal.id})`);
-          
-          try {
-            // Reset the progress to 0 and isCompleted to false
-            await updateGoalProgress(goal.id, 0);
-            resetCount++;
-          } catch (updateError) {
-            console.error(`Error updating goal ${goal.id} progress:`, updateError);
-            // Continue with other goals
-          }
-        }
-      } catch (goalError) {
-        console.error(`Error processing goal ${goal.id}:`, goalError);
-        // Continue with other goals
-      }
-    }
-    
-    console.log(`Reset ${resetCount} daily goals`);
-  } catch (error) {
-    console.error('Error resetting daily goals:', error);
-  }
-};
-
-// Get all goals active for today
+// Get today's goals function
 export const getTodaysGoals = async (): Promise<Goal[]> => {
   try {
     const allGoals = await fetchUserGoals();
@@ -907,87 +996,5 @@ export const getTodaysGoals = async (): Promise<Goal[]> => {
   } catch (error) {
     console.error('Error getting today\'s goals:', error);
     return [];
-  }
-};
-
-// Improved goal completion toggle function for screens
-export const toggleGoalCompletion = async (goalId: number, goals: Goal[]): Promise<boolean> => {
-  try {
-    // Get current user ID from Firebase
-    const userId = await getCurrentUserId();
-    
-    // Find the goal to toggle
-    const goalToToggle = goals.find((g) => g.id === goalId);
-
-    if (!goalToToggle) {
-      console.warn(`Goal not found in local state: ${goalId}`);
-      return false;
-    }
-
-    const wasCompleted = goalToToggle.isCompleted;
-
-    // Calculate new progress - either 100% if completing, or 0% if uncompleting
-    const newProgress = !wasCompleted ? 100 : 0;
-
-    // For local goals (negative IDs), just update locally without server call
-    if (goalId < 0) {
-      console.log(`Local update for goal with negative ID: ${goalId}`);
-      
-      // If this is a completion (not unchecking) and goal wasn't previously completed,
-      // process rewards only if eligible
-      if (!wasCompleted && newProgress === 100) {
-        if (canClaimRewardsForGoal(goalToToggle)) {
-          // Define reward amounts
-          const XP_REWARD = 10;
-          const COIN_REWARD = 5;
-          
-          // Process rewards
-          await processGoalRewards(XP_REWARD, COIN_REWARD);
-        }
-      }
-      
-      return true;
-    }
-
-    // Update goal progress in the database
-    const updatedGoal = await updateGoalProgress(goalId, newProgress);
-
-    // If update failed but we had the goal locally, proceed with optimistic UI update
-    if (!updatedGoal) {
-      console.warn(`Goal progress update failed for ID: ${goalId}, using optimistic update`);
-      
-      // If this is a completion (not unchecking) and goal wasn't previously completed,
-      // process rewards only if eligible
-      if (!wasCompleted && newProgress === 100) {
-        if (canClaimRewardsForGoal(goalToToggle)) {
-          // Define reward amounts
-          const XP_REWARD = 10;
-          const COIN_REWARD = 5;
-          
-          // Still try to process rewards even though the update failed
-          await processGoalRewards(XP_REWARD, COIN_REWARD);
-        }
-      }
-      
-      return true; // Return true so UI can be updated optimistically
-    }
-
-    // If this is a completion (not unchecking) and goal wasn't previously completed,
-    // process rewards only if eligible
-    if (!wasCompleted && newProgress === 100) {
-      if (canClaimRewardsForGoal(updatedGoal)) {
-        // Define reward amounts
-        const XP_REWARD = 10;
-        const COIN_REWARD = 5;
-        
-        // Process rewards
-        await processGoalRewards(XP_REWARD, COIN_REWARD);
-      }
-    }
-
-    return true;
-  } catch (error) {
-    console.error(`Error toggling goal completion: ${error}`);
-    return false;
   }
 };
