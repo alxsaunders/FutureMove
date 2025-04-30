@@ -178,7 +178,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
       setIsRefreshing(true);
 
       // Get all user goals
-      const goalsData = await fetchUserGoals(userId);
+      const goalsData = await fetchUserGoals();
       setAllGoals(goalsData);
 
       // Filter for today's goals only (not completed and active today)

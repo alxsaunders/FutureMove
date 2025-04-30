@@ -9,6 +9,11 @@ import { doc, getDoc } from "firebase/firestore";
 import { COLORS } from "../common/constants/colors";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+// Import both styles to handle different module systems
+import RoutineResetService, {
+  checkAndResetDailyGoals as checkRoutines,
+} from "../services/RoutineResetService";
+
 // Define API URL directly
 const getApiBaseUrl = () => {
   if (Platform.OS === "android") {
@@ -29,6 +34,33 @@ const formatName = (name: string | null | undefined): string => {
 
   // Capitalize the first letter
   return firstName.charAt(0).toUpperCase() + firstName.slice(1);
+};
+
+// Safely reset routine goals
+const safelyResetRoutineGoals = async (userId: string): Promise<void> => {
+  if (!userId) {
+    console.warn("Cannot reset goals: Invalid user ID");
+    return;
+  }
+
+  try {
+    // Try named import first
+    if (typeof checkRoutines === "function") {
+      await checkRoutines(userId);
+    }
+    // Fall back to default import if named import fails
+    else if (
+      RoutineResetService &&
+      typeof RoutineResetService.checkAndResetDailyGoals === "function"
+    ) {
+      await RoutineResetService.checkAndResetDailyGoals(userId);
+    } else {
+      console.warn("RoutineResetService not properly loaded");
+    }
+  } catch (error) {
+    console.error("Error resetting routine goals:", error);
+    // Don't block the app flow if this fails
+  }
 };
 
 // Create a wrapper component that integrates user data
@@ -112,24 +144,35 @@ const HomeScreenWrapper = () => {
 
             // Set the user data
             setUserData(user);
+
+            // Reset daily goals when the HomeScreen loads
+            // Do this after setting user data to avoid blocking the UI
+            safelyResetRoutineGoals(userId);
           } else {
             // No Firebase user, try to get data from AsyncStorage as fallback
             try {
               const userJson = await AsyncStorage.getItem("user");
               if (userJson) {
                 const localUser = JSON.parse(userJson);
+                const userId = localUser.user_id || "default_user";
+
                 setUserData({
-                  id: localUser.user_id,
+                  id: userId,
                   name: formatName(localUser.name || localUser.username),
                   level: localUser.level || 1,
                   xp_points: localUser.xp_points || 0,
                   future_coins: localUser.future_coins || 0,
                   streak: 0, // Default streak since we don't have it in local storage
                 });
+
+                // Reset daily goals after setting user data
+                safelyResetRoutineGoals(userId);
               } else {
                 // No local user either, use defaults
+                const defaultUserId = "default_user";
+
                 setUserData({
-                  id: "default_user",
+                  id: defaultUserId,
                   name: "User",
                   level: 1,
                   xp_points: 0,
@@ -157,6 +200,16 @@ const HomeScreenWrapper = () => {
       } catch (error) {
         console.error("Error in auth state change handler:", error);
         setLoading(false);
+
+        // Set default user data if everything fails
+        setUserData({
+          id: "default_user",
+          name: "User",
+          level: 1,
+          xp_points: 0,
+          future_coins: 0,
+          streak: 0,
+        });
       }
     };
 

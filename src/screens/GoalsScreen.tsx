@@ -27,6 +27,9 @@ import {
   getUserStreaks,
   getUserFutureCoins,
   getCategoryColor,
+  updateUserCoins,
+  updateUserXP,
+  deleteGoal,
 } from "../services/GoalService";
 
 // Define types for filters and sorting
@@ -44,29 +47,35 @@ const DAYS_OF_WEEK = [
   { id: 6, name: "Sat", fullName: "Saturday" },
 ];
 
-const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
+// Define reward constants
+const GOAL_COMPLETION_XP = 10;
+const GOAL_COMPLETION_COINS = 5;
+
+const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
   const { currentUser } = useAuth();
   const userId = currentUser?.id || "default_user";
 
   const [goals, setGoals] = useState<Goal[]>([]);
   const [filteredGoals, setFilteredGoals] = useState<Goal[]>([]);
-  // Set default filterType to "active" (Today tab)
   const [filterType, setFilterType] = useState<GoalFilterType>("active");
   const [sortType, setSortType] = useState<GoalSortType>("default");
   const [futureCoins, setFutureCoins] = useState(0);
   const [streakCount, setStreakCount] = useState(0);
+  const [userLevel, setUserLevel] = useState(1);
+  const [userExp, setUserExp] = useState(0);
   const [isCreateModalVisible, setCreateModalVisible] = useState(false);
   const [newGoalTitle, setNewGoalTitle] = useState("");
   const [newGoalDescription, setNewGoalDescription] = useState("");
   const [newGoalCategory, setNewGoalCategory] = useState("Personal");
   const [newGoalIsDaily, setNewGoalIsDaily] = useState(false);
   const [newGoalSelectedDays, setNewGoalSelectedDays] = useState<number[]>([]);
-  // Add routineDays to store which days a routine goal is scheduled for
   const [routineDays, setRoutineDays] = useState<Record<number, number[]>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [isFilterModalVisible, setFilterModalVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isDeleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [goalToDelete, setGoalToDelete] = useState<number | null>(null);
 
   // Categories with colors
   const categories = [
@@ -104,21 +113,98 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
     return goalDays && goalDays.includes(today);
   };
 
+  // Function to handle level up logic
+  const handleLevelUp = (newXP: number, currentLevel: number) => {
+    let newLevel = currentLevel;
+    let finalXP = newXP;
+
+    // Check if user leveled up (every 100 XP)
+    if (newXP >= 100) {
+      const levelsGained = Math.floor(newXP / 100);
+      newLevel += levelsGained;
+      finalXP = newXP % 100;
+
+      // Show level up alert
+      Alert.alert(
+        "Level Up!",
+        `Congratulations! You've reached level ${newLevel}!`,
+        [{ text: "Awesome!", style: "default" }]
+      );
+    }
+
+    return { newLevel, finalXP };
+  };
+
+  // Check if goal rewards can be claimed
+  const canClaimRewardsForGoal = (goal: Goal): boolean => {
+    // For one-time goals, check if they're completed on or before the assigned day
+    if (!goal.isDaily) {
+      const today = new Date();
+      const goalDate = new Date(
+        goal.targetDate || goal.startDate || Date.now()
+      );
+
+      // If the goal was due in the past, don't allow claiming rewards
+      if (
+        goalDate < today &&
+        goalDate.toDateString() !== today.toDateString()
+      ) {
+        return false;
+      }
+    }
+
+    // All daily goals can claim rewards when completed
+    return true;
+  };
+
+  // Process goal rewards
+  const processGoalRewards = async (goal: Goal) => {
+    try {
+      // Add XP and coins
+      const newXP = userExp + GOAL_COMPLETION_XP;
+      const levelUpResult = handleLevelUp(newXP, userLevel);
+
+      // Update XP in database
+      await updateUserXP(userId, GOAL_COMPLETION_XP, levelUpResult.newLevel);
+
+      // Update coins in database
+      await updateUserCoins(userId, GOAL_COMPLETION_COINS);
+
+      // Update local state
+      setUserLevel(levelUpResult.newLevel);
+      setUserExp(levelUpResult.finalXP);
+      setFutureCoins(futureCoins + GOAL_COMPLETION_COINS);
+
+      // Show completion message
+      Alert.alert(
+        "Goal Completed!",
+        `Great job! You've earned ${GOAL_COMPLETION_XP} XP and ${GOAL_COMPLETION_COINS} coins.`,
+        [{ text: "Nice!", style: "default" }]
+      );
+    } catch (error) {
+      console.error("Error processing rewards:", error);
+    }
+  };
+
   // Load user data (goals, streaks, coins)
   const loadUserData = async () => {
     try {
       setIsLoading(true);
 
       // Fetch goals
-      const goalsData = await fetchUserGoals(userId);
+      const goalsData = await fetchUserGoals();
       setGoals(goalsData);
 
       // For now, mock routine days since we don't have them in the backend yet
       const mockRoutineDays: Record<number, number[]> = {};
       goalsData.forEach((goal) => {
         if (goal.isDaily) {
-          // Assign every day routine for daily goals
-          mockRoutineDays[goal.id] = [0, 1, 2, 3, 4, 5, 6]; // All days
+          if (goal.routineDays && goal.routineDays.length > 0) {
+            mockRoutineDays[goal.id] = goal.routineDays;
+          } else {
+            // Assign every day routine for daily goals
+            mockRoutineDays[goal.id] = [0, 1, 2, 3, 4, 5, 6]; // All days
+          }
         }
       });
       setRoutineDays(mockRoutineDays);
@@ -127,12 +213,25 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
       applyFilters(goalsData, "active", sortType, searchQuery);
 
       // Fetch streak count
-      const streak = await getUserStreaks(userId);
+      const streak = await getUserStreaks();
       setStreakCount(streak);
 
       // Fetch coins balance
-      const coins = await getUserFutureCoins(userId);
+      const coins = await getUserFutureCoins();
       setFutureCoins(coins);
+
+      // Fetch user level and XP
+      try {
+        const apiUrl = "http://10.0.2.2:3001/api";
+        const response = await fetch(`${apiUrl}/users/${userId}`);
+        if (response.ok) {
+          const userData = await response.json();
+          setUserLevel(userData.level || 1);
+          setUserExp(userData.xp_points || 0);
+        }
+      } catch (error) {
+        console.error("Error fetching user level and XP:", error);
+      }
 
       setIsLoading(false);
       setIsRefreshing(false);
@@ -143,6 +242,15 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
       setIsRefreshing(false);
     }
   };
+
+  // Check if route params request to open create goal form
+  useEffect(() => {
+    if (route.params?.openCreateGoal) {
+      setCreateModalVisible(true);
+      // Reset the param to avoid reopening
+      navigation.setParams({ openCreateGoal: undefined });
+    }
+  }, [route.params?.openCreateGoal]);
 
   // Use the useFocusEffect hook to refresh data when screen comes into focus
   useFocusEffect(
@@ -266,16 +374,33 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
 
       if (!goalToToggle) return;
 
-      // Calculate new progress - either 100% if completing, or reduce if uncompleting
-      const newProgress = !goalToToggle.isCompleted
-        ? 100
-        : Math.max(goalToToggle.progress - 10, 0);
+      const wasCompleted = goalToToggle.isCompleted;
 
-      // Update goal progress in the database - this also handles streak and coin rewards
+      // For daily/routine goals, we just mark as completed for today
+      // For one-time goals, we mark as completed permanently
+      let newProgress = 0;
+
+      if (!wasCompleted) {
+        // Completing the goal
+        newProgress = 100;
+      } else {
+        // Uncompleting the goal - reset progress
+        newProgress = 0;
+      }
+
+      // Update goal progress in the database
       const updatedGoal = await updateGoalProgress(goalId, newProgress);
 
       if (!updatedGoal) {
         throw new Error("Failed to update goal");
+      }
+
+      // If this is a completion (not unchecking) and goal wasn't previously completed,
+      // process rewards only if eligible
+      if (!wasCompleted && newProgress === 100) {
+        if (canClaimRewardsForGoal(goalToToggle)) {
+          await processGoalRewards(goalToToggle);
+        }
       }
 
       // Reload all data to get updated streaks, coins, and goals
@@ -327,7 +452,6 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
               : [0, 1, 2, 3, 4, 5, 6]
             : [],
         },
-        userId
       );
 
       // Store the selected days for this goal
@@ -351,6 +475,25 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
     } catch (error) {
       console.error("Error creating goal:", error);
       Alert.alert("Error", "Failed to create goal. Please try again.");
+    }
+  };
+
+  // Function to handle goal deletion
+  const handleDeleteGoal = async () => {
+    if (goalToDelete === null) return;
+
+    try {
+      await deleteGoal(goalToDelete);
+
+      // Reload goals after deletion
+      loadUserData();
+
+      // Reset state
+      setGoalToDelete(null);
+      setDeleteModalVisible(false);
+    } catch (error) {
+      console.error("Error deleting goal:", error);
+      Alert.alert("Error", "Failed to delete goal. Please try again.");
     }
   };
 
@@ -515,6 +658,11 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
           onPress={() => {
             // Navigate to goal details
             navigation.navigate("GoalDetail", { goalId: item.id });
+          }}
+          onLongPress={() => {
+            // Set the goal to delete and show confirmation modal
+            setGoalToDelete(item.id);
+            setDeleteModalVisible(true);
           }}
         >
           <View style={styles.goalContent}>
@@ -890,6 +1038,50 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
     </Modal>
   );
 
+  // Delete confirmation modal
+  const renderDeleteModal = () => (
+    <Modal
+      visible={isDeleteModalVisible}
+      animationType="fade"
+      transparent={true}
+      onRequestClose={() => setDeleteModalVisible(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.deleteModalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Delete Goal</Text>
+            <TouchableOpacity onPress={() => setDeleteModalVisible(false)}>
+              <Ionicons name="close" size={24} color={COLORS.text} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.modalContent}>
+            <Text style={styles.deleteConfirmText}>
+              Are you sure you want to delete this goal? This action cannot be
+              undone.
+            </Text>
+
+            <View style={styles.deleteButtonsContainer}>
+              <TouchableOpacity
+                style={[styles.deleteButton, styles.cancelButton]}
+                onPress={() => setDeleteModalVisible(false)}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.deleteButton, styles.confirmButton]}
+                onPress={handleDeleteGoal}
+              >
+                <Text style={styles.confirmButtonText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
   // Render loading, empty, or error state
   const renderEmptyState = () => {
     if (isLoading) {
@@ -952,6 +1144,7 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation }) => {
 
       {renderCreateModal()}
       {renderFilterModal()}
+      {renderDeleteModal()}
     </SafeAreaView>
   );
 };
@@ -1230,6 +1423,13 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     maxHeight: "70%",
   },
+  deleteModalContainer: {
+    backgroundColor: COLORS.background,
+    borderRadius: 20,
+    width: "85%",
+    alignSelf: "center",
+    marginTop: "50%", // Center in screen
+  },
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1391,6 +1591,38 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 16,
     fontWeight: "500",
+  },
+  deleteConfirmText: {
+    fontSize: 16,
+    color: COLORS.text,
+    marginVertical: 20,
+    textAlign: "center",
+  },
+  deleteButtonsContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 10,
+  },
+  deleteButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    marginHorizontal: 8,
+    alignItems: "center",
+  },
+  cancelButton: {
+    backgroundColor: COLORS.lightBackground,
+  },
+  confirmButton: {
+    backgroundColor: "#F44336", // Red color for delete
+  },
+  cancelButtonText: {
+    color: COLORS.text,
+    fontWeight: "600",
+  },
+  confirmButtonText: {
+    color: COLORS.white,
+    fontWeight: "600",
   },
 });
 

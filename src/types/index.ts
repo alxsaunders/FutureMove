@@ -41,11 +41,12 @@ export interface Goal {
   isDaily: boolean;
   progress: number;
   startDate?: string;
-  userId?: string;
+  targetDate?: string;
+  userId: string;
   coinReward?: number;
-  routineDays?: number[]; 
-  type: 'recurring' | 'one-time';
-  targetDate?: string;// Added for day-specific routine functionality
+  routineDays?: number[];
+  type?: 'one-time' | 'recurring';
+  lastCompleted?: string; // ISO date string of when the goal was last completed
 }
 
 export interface SubGoal {

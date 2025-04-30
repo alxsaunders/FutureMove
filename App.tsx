@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState, useEffect } from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { createStackNavigator } from "@react-navigation/stack";
 import { StatusBar, View, Text } from "react-native";
@@ -6,7 +6,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as Font from "expo-font";
 
 // Context
-import { AuthProvider } from "./src/contexts/AuthContext";
+import { AuthProvider, useAuth } from "./src/contexts/AuthContext";
 
 // Import screens
 import SplashScreen from "./src/screens/SplashScreen";
@@ -20,6 +20,10 @@ const Stack = createStackNavigator<RootStackParamList>();
 
 // Create a wrapper component to handle the case where screens might not be loaded yet
 const AppContent = () => {
+  // Note: We're not initializing routine reset service here
+  // It will be initialized in HomeScreenWrapper instead
+  // This avoids potential issues with imports and timing
+
   return (
     <NavigationContainer>
       <Stack.Navigator

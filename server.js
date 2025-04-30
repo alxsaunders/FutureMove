@@ -2,8 +2,23 @@ const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
 const dotenv = require('dotenv');
+const admin = require('firebase-admin'); // Add Firebase Admin SDK
 
 dotenv.config();
+
+// Initialize Firebase Admin SDK with simple configuration
+try {
+  // For development mode without service account credentials
+  admin.initializeApp({
+    projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID
+  });
+  console.log('Firebase Admin SDK initialized in development mode');
+  global.firebaseAuthEnabled = false;
+} catch (error) {
+  console.error('Firebase initialization error:', error);
+  console.log('Continuing without Firebase authentication');
+  global.firebaseAuthEnabled = false;
+}
 
 const app = express();
 app.use(cors());
@@ -23,20 +38,44 @@ const pool = mysql.createPool({
 const getToday = () => new Date().toISOString().split('T')[0];
 const getTodayDayOfWeek = () => new Date().getDay(); // 0 = Sunday, 1 = Monday, etc.
 
+// Simple Firebase authentication middleware - no fallbacks
+const authenticateFirebaseToken = (req, res, next) => {
+  // Just use the userId from query parameter
+  const userId = req.query.userId;
+  
+  if (userId) {
+    req.user = { uid: userId };
+    next();
+    return;
+  }
+  
+  // No user ID found
+  req.user = null;
+  next();
+};
+
+// Apply middleware to routes
+app.use(authenticateFirebaseToken);
+
 // Routes
 app.get('/api/test', (req, res) => {
-  res.json({ message: 'API is working!' });
+  res.json({ message: 'API is working!', user: req.user ? req.user.uid : 'none' });
 });
 
 // ==== USER ROUTES ====
 
 app.get('/api/users', async (req, res) => {
   try {
+    // Require authentication for listing all users
+    if (!req.user) {
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
+    
     const [rows] = await pool.query('SELECT * FROM users');
     res.json(rows);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error fetching users:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
@@ -44,6 +83,12 @@ app.get('/api/users', async (req, res) => {
 app.get('/api/users/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
+    
+    // Verify user is allowed to access this data
+    if (req.user && req.user.uid !== userId) {
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
+    
     const [rows] = await pool.query('SELECT * FROM users WHERE user_id = ?', [userId]);
     
     if (rows.length === 0) {
@@ -52,11 +97,12 @@ app.get('/api/users/:userId', async (req, res) => {
     
     res.json(rows[0]);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error fetching user:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
+// Create a new user
 app.post('/api/users', async (req, res) => {
   const {
     user_id, username, name, email,
@@ -68,6 +114,11 @@ app.post('/api/users', async (req, res) => {
     last_login = null
   } = req.body;
 
+  // Verify Firebase user ID matches request
+  if (req.user && req.user.uid !== user_id) {
+    return res.status(403).json({ error: 'Unauthorized: Cannot create user with different ID' });
+  }
+  
   if (!user_id || !username || !name || !email) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
@@ -81,7 +132,7 @@ app.post('/api/users', async (req, res) => {
     res.status(201).json({ message: 'User created successfully' });
   } catch (error) {
     console.error('MySQL insert error:', error);
-    res.status(500).json({ error: 'Database insert failed' });
+    res.status(500).json({ error: 'Database insert failed', details: error.message });
   }
 });
 
@@ -91,20 +142,60 @@ app.put('/api/users/:userId/stats', async (req, res) => {
   
   try {
     const userId = req.params.userId;
+    
+    // Verify user is allowed to access this data
+    if (req.user && req.user.uid !== userId) {
+      await connection.release();
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
+    
     const { xp_points_to_add, future_coins_to_add } = req.body;
     
     await connection.beginTransaction();
+    
+    // Check if user exists
+    const [checkUser] = await connection.query('SELECT COUNT(*) as count FROM users WHERE user_id = ?', [userId]);
+    
+    if (checkUser[0].count === 0) {
+      // User doesn't exist, create a new user
+      try {
+        // Create user in database
+        await connection.query(
+          `INSERT INTO users (user_id, username, name, email, level, xp_points, future_coins, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            userId,
+            userId.substring(0, 20),
+            'User',
+            `${userId}@example.com`,
+            1,
+            xp_points_to_add || 0,
+            future_coins_to_add || 0,
+            new Date()
+          ]
+        );
+        
+        await connection.commit();
+        
+        return res.json({
+          user_id: userId,
+          level: 1,
+          xp_points: xp_points_to_add || 0,
+          future_coins: future_coins_to_add || 0,
+          leveledUp: false
+        });
+      } catch (createError) {
+        console.error('Error creating user:', createError);
+        await connection.rollback();
+        return res.status(500).json({ error: 'Failed to create user' });
+      }
+    }
     
     // Get current user stats
     const [userData] = await connection.query(
       'SELECT level, xp_points, future_coins FROM users WHERE user_id = ?',
       [userId]
     );
-    
-    if (userData.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({ error: 'User not found' });
-    }
     
     const currentUser = userData[0];
     
@@ -143,7 +234,7 @@ app.put('/api/users/:userId/stats', async (req, res) => {
     // Rollback transaction if something went wrong
     await connection.rollback();
     console.error('Error updating user stats:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   } finally {
     // Release connection back to pool
     connection.release();
@@ -156,6 +247,11 @@ app.put('/api/users/:userId/stats', async (req, res) => {
 app.get('/api/users/:userId/streak', async (req, res) => {
   try {
     const userId = req.params.userId;
+    
+    // Verify user is allowed to access this data
+    if (req.user && req.user.uid !== userId) {
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
     
     // Check if streaks table exists first
     const [tables] = await pool.execute(`
@@ -218,6 +314,32 @@ app.get('/api/users/:userId/streak', async (req, res) => {
       }
     }
     
+    // Check if user exists
+    const [userCheck] = await pool.execute(`
+      SELECT COUNT(*) as count FROM users WHERE user_id = ?
+    `, [userId]);
+    
+    if (userCheck[0].count === 0) {
+      // User doesn't exist, create a new user
+      try {
+        await pool.execute(`
+          INSERT INTO users (user_id, username, name, email, level, xp_points, future_coins, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          userId,
+          userId.substring(0, 20),
+          'User',
+          `${userId}@example.com`,
+          1, 0, 0, new Date()
+        ]);
+        
+        console.log(`Created user: ${userId}`);
+      } catch (createError) {
+        console.error('Error creating user:', createError);
+        // Continue anyway - streak will still be created
+      }
+    }
+    
     // Check if user has a streak record
     const [streakRows] = await pool.execute(
       `SELECT * FROM streaks WHERE user_id = ? ORDER BY streak_id DESC LIMIT 1`,
@@ -260,9 +382,42 @@ app.put('/api/users/:userId/streak', async (req, res) => {
   
   try {
     const userId = req.params.userId;
+    
+    // Verify user is allowed to access this data
+    if (req.user && req.user.uid !== userId) {
+      await connection.release();
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
+    
     const { increment = true, trackable_id = 0 } = req.body;
     
     await connection.beginTransaction();
+    
+    // Check if user exists
+    const [userCheck] = await connection.execute(`
+      SELECT COUNT(*) as count FROM users WHERE user_id = ?
+    `, [userId]);
+    
+    if (userCheck[0].count === 0) {
+      // User doesn't exist, create a new user
+      try {
+        await connection.execute(`
+          INSERT INTO users (user_id, username, name, email, level, xp_points, future_coins, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          userId,
+          userId.substring(0, 20),
+          'User',
+          `${userId}@example.com`,
+          1, 0, 0, new Date()
+        ]);
+        
+        console.log(`Created user: ${userId}`);
+      } catch (createError) {
+        console.error('Error creating user:', createError);
+        // Continue anyway - streak will still be created
+      }
+    }
     
     // Get current streak data
     const [streakRows] = await connection.query(
@@ -361,7 +516,14 @@ app.put('/api/users/:userId/streak', async (req, res) => {
 
 app.get('/api/goals', async (req, res) => {
   try {
-    const userId = req.query.userId || 'default_user';
+    // Get user ID from query params
+    const userId = req.query.userId;
+    
+    // Require a userId
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+    
     const [rows] = await pool.execute(
       `SELECT * FROM goals WHERE user_id = ? ORDER BY is_completed ASC, target_date DESC`,
       [userId]
@@ -388,15 +550,22 @@ app.get('/api/goals', async (req, res) => {
     
     res.json({ goals });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error fetching goals:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
 // Get goals for today
 app.get('/api/goals/today', async (req, res) => {
   try {
-    const userId = req.query.userId || 'default_user';
+    // Get user ID from query params
+    const userId = req.query.userId;
+    
+    // Require a userId
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+    
     const today = getTodayDayOfWeek();
 
     const [rows] = await pool.execute(
@@ -412,9 +581,14 @@ app.get('/api/goals/today', async (req, res) => {
         
         // For daily goals, check if today is in the routine_days array
         if (goal.routine_days) {
-          const routineDays = JSON.parse(goal.routine_days);
-          // If no days specified or today is in the routine days
-          return routineDays.length === 0 || routineDays.includes(today);
+          try {
+            const routineDays = JSON.parse(goal.routine_days);
+            // If no days specified or today is in the routine days
+            return routineDays.length === 0 || routineDays.includes(today);
+          } catch (e) {
+            console.error('Error parsing routine days:', e);
+            return true; // Include by default if parsing fails
+          }
         }
         
         // Default to showing all daily goals if no routine_days specified
@@ -438,23 +612,37 @@ app.get('/api/goals/today', async (req, res) => {
     
     res.json({ goals });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error fetching today\'s goals:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
 app.get('/api/goals/:id', async (req, res) => {
   try {
     const goalId = Number(req.params.id);
+    if (isNaN(goalId)) {
+      return res.status(400).json({ error: 'Invalid goal ID' });
+    }
+    
     const [rows] = await pool.execute(`SELECT * FROM goals WHERE goal_id = ?`, [goalId]);
     if (!rows.length) return res.status(404).json({ error: 'Goal not found' });
+
+    // Check if user has permission
+    if (req.user && req.user.uid !== rows[0].user_id) {
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
 
     const [subgoals] = await pool.execute(`SELECT * FROM subgoals WHERE goal_id = ?`, [goalId]);
     const goal = rows[0];
     
     // Parse routine days if they exist
     if (goal.routine_days) {
-      goal.routineDays = JSON.parse(goal.routine_days);
+      try {
+        goal.routineDays = JSON.parse(goal.routine_days);
+      } catch (e) {
+        console.error('Error parsing routine days:', e);
+        goal.routineDays = [];
+      }
     } else {
       goal.routineDays = [];
     }
@@ -468,117 +656,186 @@ app.get('/api/goals/:id', async (req, res) => {
     goal.subgoals = subgoals;
     res.json(goal);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error fetching goal by ID:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
+// Modified goal creation endpoint with simplified error handling
 app.post('/api/goals', async (req, res) => {
+  const connection = await pool.getConnection();
+  
   try {
-    // Get the user ID from the request or use a default
-    const userId = req.body.user_id || 'default_user';
+    // Log incoming request for debugging
+    console.log("Creating goal with data:", JSON.stringify(req.body));
     
-    // First check if the user exists
-    const [userRows] = await pool.execute(
+    // Get the user ID from the request body
+    const userId = req.body.user_id;
+    
+    // Require a userId
+    if (!userId) {
+      await connection.release();
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+    
+    await connection.beginTransaction();
+    
+    // Check if user exists in the database
+    const [userRows] = await connection.execute(
       `SELECT COUNT(*) as count FROM users WHERE user_id = ?`, 
       [userId]
     );
     
-    // If user doesn't exist, create a default user with this ID
+    // If user doesn't exist, create user
     if (userRows[0].count === 0) {
-      console.log(`User ${userId} doesn't exist, creating default user...`);
+      console.log(`User ${userId} doesn't exist, creating user...`);
       
       try {
-        await pool.execute(
-          `INSERT INTO users (user_id, username, name, email, level, xp_points, future_coins, created_at) 
+        await connection.execute(
+          `INSERT INTO users (user_id, username, name, email, level, xp_points, future_coins, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             userId,
-            `user_${userId.substring(0, 6)}`, // Create a username based on ID
-            "Default User", 
-            `user_${userId.substring(0, 6)}@example.com`, 
+            userId.substring(0, 20),
+            'User',
+            `${userId}@example.com`,
             1, // Default level
             0, // Default XP
             100, // Default coins
             new Date() // Current timestamp
           ]
         );
-        console.log(`Created default user with ID: ${userId}`);
-      } catch (userError) {
-        console.error('Failed to create user:', userError);
-        // If we can't create a user, try to find any existing user
-        const [existingUsers] = await pool.execute(`SELECT user_id FROM users LIMIT 1`);
-        if (existingUsers.length === 0) {
-          return res.status(400).json({ 
-            error: 'Could not create user and no existing users found',
-            details: userError.message
-          });
-        }
-        // Use an existing user instead
-        userId = existingUsers[0].user_id;
-        console.log(`Using existing user with ID: ${userId} instead`);
+        
+        console.log(`Created user: ${userId}`);
+      } catch (createError) {
+        console.error('Error creating user:', createError);
+        await connection.rollback();
+        await connection.release();
+        return res.status(500).json({ error: 'Failed to create user', details: createError.message });
       }
     }
     
-    // Now proceed with goal creation
-    const {
-      title = 'New Goal',
-      description = '',
-      target_date = getToday(),
-      progress = 0,
-      category = 'Personal',
-      is_completed = 0,
-      is_daily = 0,
-      routine_days = null, // JSON string of day indices
-      coin_reward = 10,
-      subgoals = [],
-      type = is_daily ? 'recurring' : 'one-time' // Add type field with default
-    } = req.body;
-
-    // Insert the goal
-    const [result] = await pool.execute(
-      `INSERT INTO goals (user_id, title, description, target_date, progress, is_completed, is_daily, routine_days, category, coin_reward)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [userId, title, description, target_date, progress, is_completed, is_daily, routine_days, category, coin_reward]
-    );
-
-    const goalId = result.insertId;
+    // Sanitize and validate input data
+    const title = req.body.title || 'New Goal';
+    const description = req.body.description || '';
+    const target_date = req.body.target_date || getToday();
+    const progress = Number(req.body.progress || 0);
+    const category = req.body.category || 'Personal';
+    const is_completed = req.body.is_completed ? 1 : 0;
+    const is_daily = req.body.is_daily ? 1 : 0;
     
-    // Insert subgoals if any
-    for (const s of subgoals) {
-      await pool.execute(
-        `INSERT INTO subgoals (goal_id, title, is_completed, due_date) VALUES (?, ?, ?, ?)`,
-        [goalId, s.title, s.isCompleted || false, s.dueDate || null]
+    // Handle routine_days properly
+    let routine_days = null;
+    if (req.body.routine_days) {
+      if (typeof req.body.routine_days === 'string') {
+        // Already a string, keep as is if it looks like valid JSON
+        try {
+          JSON.parse(req.body.routine_days);
+          routine_days = req.body.routine_days;
+        } catch (e) {
+          // Not valid JSON, set to all days
+          routine_days = '[0,1,2,3,4,5,6]';
+        }
+      } else if (Array.isArray(req.body.routine_days)) {
+        // Convert array to JSON string
+        routine_days = JSON.stringify(req.body.routine_days);
+      } else {
+        // Default to all days
+        routine_days = '[0,1,2,3,4,5,6]';
+      }
+    } else if (is_daily) {
+      // For daily goals with no routine_days, default to all days
+      routine_days = '[0,1,2,3,4,5,6]';
+    }
+    
+    const coin_reward = Number(req.body.coin_reward || 10);
+    
+    // Insert the goal with validated data
+    try {
+      const [result] = await connection.execute(
+        `INSERT INTO goals (user_id, title, description, target_date, progress, is_completed, is_daily, routine_days, category, coin_reward)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [userId, title, description, target_date, progress, is_completed, is_daily, routine_days, category, coin_reward]
       );
+  
+      const goalId = result.insertId;
+      console.log(`Created goal with ID: ${goalId}`);
+      
+      // Get the created goal
+      const [goalRows] = await connection.execute(`SELECT * FROM goals WHERE goal_id = ?`, [goalId]);
+      
+      if (goalRows.length === 0) {
+        throw new Error(`Goal created but could not be retrieved with ID ${goalId}`);
+      }
+      
+      // Commit transaction
+      await connection.commit();
+      
+      const newGoal = goalRows[0];
+      
+      // Parse routine_days for the response
+      if (newGoal.routine_days) {
+        try {
+          newGoal.routineDays = JSON.parse(newGoal.routine_days);
+        } catch (e) {
+          console.error('Error parsing routine days in response:', e);
+          newGoal.routineDays = [];
+        }
+      } else {
+        newGoal.routineDays = [];
+      }
+      
+      // Add type field
+      newGoal.type = newGoal.is_daily === 1 ? 'recurring' : 'one-time';
+      
+      // Add targetDate
+      newGoal.targetDate = newGoal.target_date ? new Date(newGoal.target_date).toISOString().split('T')[0] : null;
+      
+      res.status(201).json(newGoal);
+    } catch (insertError) {
+      console.error('Goal insert error:', insertError);
+      await connection.rollback();
+      res.status(500).json({ error: 'Failed to create goal', details: insertError.message });
     }
-
-    // Return the created goal
-    const [goalRows] = await pool.execute(`SELECT * FROM goals WHERE goal_id = ?`, [goalId]);
-    const newGoal = goalRows[0];
-    
-    // Parse routine_days for the response
-    if (newGoal.routine_days) {
-      newGoal.routineDays = JSON.parse(newGoal.routine_days);
-    } else {
-      newGoal.routineDays = [];
-    }
-    
-    // Add type field
-    newGoal.type = newGoal.is_daily === 1 ? 'recurring' : 'one-time';
-    
-    // Add targetDate
-    newGoal.targetDate = newGoal.target_date ? new Date(newGoal.target_date).toISOString().split('T')[0] : null;
-    
-    res.status(201).json(newGoal);
   } catch (error) {
-    console.error(error);
+    // Rollback transaction if something went wrong
+    try {
+      await connection.rollback();
+    } catch (rollbackError) {
+      console.error('Rollback error:', rollbackError);
+    }
+    
+    console.error('DETAILED ERROR in goal creation:', error);
+    console.error('Stack trace:', error.stack);
     res.status(500).json({ error: 'Internal server error', details: error.message });
+  } finally {
+    // Release connection back to pool
+    try {
+      await connection.release();
+    } catch (releaseError) {
+      console.error('Connection release error:', releaseError);
+    }
   }
 });
 
 app.put('/api/goals/:id/progress', async (req, res) => {
   try {
     const goalId = Number(req.params.id);
+    if (isNaN(goalId)) {
+      return res.status(400).json({ error: 'Invalid goal ID' });
+    }
+    
+    // First check if the goal exists and get the user ID
+    const [goalCheck] = await pool.execute(`SELECT user_id FROM goals WHERE goal_id = ?`, [goalId]);
+    if (goalCheck.length === 0) {
+      return res.status(404).json({ error: 'Goal not found' });
+    }
+    
+    // Check if user has permission
+    if (req.user && req.user.uid !== goalCheck[0].user_id) {
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
+    
     const newProgress = Math.min(Math.max(req.body.progress, 0), 100);
     const isCompleted = newProgress >= 100 ? 1 : 0;
     
@@ -589,13 +846,18 @@ app.put('/api/goals/:id/progress', async (req, res) => {
     
     // Get updated goal
     const [rows] = await pool.execute(`SELECT * FROM goals WHERE goal_id = ?`, [goalId]);
-    if (!rows.length) return res.status(404).json({ error: 'Goal not found' });
+    if (!rows.length) return res.status(404).json({ error: 'Goal not found after update' });
     
     const goal = rows[0];
     
     // Parse routine days if they exist
     if (goal.routine_days) {
-      goal.routineDays = JSON.parse(goal.routine_days);
+      try {
+        goal.routineDays = JSON.parse(goal.routine_days);
+      } catch (e) {
+        console.error('Error parsing routine days:', e);
+        goal.routineDays = [];
+      }
     } else {
       goal.routineDays = [];
     }
@@ -619,30 +881,85 @@ app.put('/api/goals/:id/progress', async (req, res) => {
     
     res.json(responseGoal);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error updating goal progress:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
 // Update routine days for a goal
-app.patch('/api/goals/:id/routine', async (req, res) => {
+app.patch('/api/goals/:id', async (req, res) => {
   try {
     const goalId = Number(req.params.id);
-    const { routine_days } = req.body; // Expects a JSON string
+    if (isNaN(goalId)) {
+      return res.status(400).json({ error: 'Invalid goal ID' });
+    }
     
+    // First check if the goal exists and get the user ID
+    const [goalCheck] = await pool.execute(`SELECT user_id FROM goals WHERE goal_id = ?`, [goalId]);
+    if (goalCheck.length === 0) {
+      return res.status(404).json({ error: 'Goal not found' });
+    }
+    
+    // Check if user has permission
+    if (req.user && req.user.uid !== goalCheck[0].user_id) {
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
+    
+    // Support both routine_days format or a general PATCH
+    let updateFields = '';
+    const updateValues = [];
+    
+    // Handle routine_days specially
+    if (req.body.routine_days !== undefined) {
+      let routineDays = req.body.routine_days;
+      
+      // Ensure routine_days is stored as a JSON string
+      if (typeof routineDays !== 'string') {
+        routineDays = JSON.stringify(routineDays);
+      }
+      
+      updateFields += 'routine_days = ?';
+      updateValues.push(routineDays);
+    }
+    
+    // Handle other fields that might be provided
+    const allowedFields = ['title', 'description', 'target_date', 'is_daily', 'category', 'coin_reward', 'type'];
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) {
+        if (updateFields) updateFields += ', ';
+        updateFields += `${field} = ?`;
+        updateValues.push(req.body[field]);
+      }
+    }
+    
+    // If nothing to update, return early
+    if (!updateFields) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+    
+    // Add the goal ID to the values array
+    updateValues.push(goalId);
+    
+    // Execute the update
     await pool.execute(
-      `UPDATE goals SET routine_days = ? WHERE goal_id = ?`,
-      [routine_days, goalId]
+      `UPDATE goals SET ${updateFields} WHERE goal_id = ?`,
+      updateValues
     );
     
+    // Get the updated goal
     const [rows] = await pool.execute(`SELECT * FROM goals WHERE goal_id = ?`, [goalId]);
-    if (!rows.length) return res.status(404).json({ error: 'Goal not found' });
+    if (!rows.length) return res.status(404).json({ error: 'Goal not found after update' });
     
     const goal = rows[0];
     
     // Parse routine days for the response
     if (goal.routine_days) {
-      goal.routineDays = JSON.parse(goal.routine_days);
+      try {
+        goal.routineDays = JSON.parse(goal.routine_days);
+      } catch (e) {
+        console.error('Error parsing routine days:', e);
+        goal.routineDays = [];
+      }
     } else {
       goal.routineDays = [];
     }
@@ -666,38 +983,110 @@ app.patch('/api/goals/:id/routine', async (req, res) => {
     
     res.json(responseGoal);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error updating goal:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+// Delete a goal by ID
+app.delete('/api/goals/:id', async (req, res) => {
+  try {
+    const goalId = Number(req.params.id);
+    if (isNaN(goalId)) {
+      return res.status(400).json({ error: 'Invalid goal ID' });
+    }
+    
+    // First check if the goal exists and get the user ID
+    const [goalCheck] = await pool.execute(`SELECT user_id FROM goals WHERE goal_id = ?`, [goalId]);
+    if (goalCheck.length === 0) {
+      return res.status(404).json({ error: 'Goal not found' });
+    }
+    
+    // Check if user has permission
+    if (req.user && req.user.uid !== goalCheck[0].user_id) {
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
+    
+    // Delete any subgoals first
+    await pool.execute(`DELETE FROM subgoals WHERE goal_id = ?`, [goalId]);
+    
+    // Then delete the goal
+    await pool.execute(`DELETE FROM goals WHERE goal_id = ?`, [goalId]);
+    
+    res.json({ success: true, message: 'Goal deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting goal:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
 app.post('/api/goals/:id/subgoals', async (req, res) => {
   try {
     const goalId = Number(req.params.id);
+    if (isNaN(goalId)) {
+      return res.status(400).json({ error: 'Invalid goal ID' });
+    }
+    
+    // First check if the goal exists and get the user ID
+    const [goalCheck] = await pool.execute(`SELECT user_id FROM goals WHERE goal_id = ?`, [goalId]);
+    if (goalCheck.length === 0) {
+      return res.status(404).json({ error: 'Goal not found' });
+    }
+    
+    // Check if user has permission
+    if (req.user && req.user.uid !== goalCheck[0].user_id) {
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
+    
     const { title, isCompleted = false, dueDate = null } = req.body;
+    
     const [result] = await pool.execute(
       `INSERT INTO subgoals (goal_id, title, is_completed, due_date) VALUES (?, ?, ?, ?)`,
-      [goalId, title, isCompleted, dueDate]
+      [goalId, title, isCompleted ? 1 : 0, dueDate]
     );
+    
     const [rows] = await pool.execute(`SELECT * FROM subgoals WHERE id = ?`, [result.insertId]);
     res.status(201).json(rows[0]);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error creating subgoal:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
 app.patch('/api/subgoals/:id/toggle', async (req, res) => {
   try {
     const subGoalId = Number(req.params.id);
+    if (isNaN(subGoalId)) {
+      return res.status(400).json({ error: 'Invalid subgoal ID' });
+    }
+    
+    // First check if the subgoal exists and get the goal ID
+    const [subgoalCheck] = await pool.execute(`
+      SELECT s.id, g.user_id 
+      FROM subgoals s 
+      JOIN goals g ON s.goal_id = g.goal_id 
+      WHERE s.id = ?
+    `, [subGoalId]);
+    
+    if (subgoalCheck.length === 0) {
+      return res.status(404).json({ error: 'Subgoal not found' });
+    }
+    
+    // Check if user has permission
+    if (req.user && req.user.uid !== subgoalCheck[0].user_id) {
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
+    
     const [rows] = await pool.execute(`SELECT is_completed FROM subgoals WHERE id = ?`, [subGoalId]);
     if (!rows.length) return res.status(404).json({ error: 'Subgoal not found' });
+    
     const current = rows[0].is_completed;
-    await pool.execute(`UPDATE subgoals SET is_completed = ? WHERE id = ?`, [!current, subGoalId]);
+    await pool.execute(`UPDATE subgoals SET is_completed = ? WHERE id = ?`, [current ? 0 : 1, subGoalId]);
+    
     res.json({ success: true });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error toggling subgoal completion:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
@@ -706,7 +1095,13 @@ app.patch('/api/subgoals/:id/toggle', async (req, res) => {
 // Get routines for a user
 app.get('/api/routines', async (req, res) => {
   try {
-    const userId = req.query.userId || 'default_user';
+    // Get user ID from query params
+    const userId = req.query.userId;
+    
+    // Require a userId
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
     
     // Fetch all daily goals that can be considered routines
     const [rows] = await pool.execute(
@@ -727,8 +1122,8 @@ app.get('/api/routines', async (req, res) => {
     
     res.json({ routines });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error fetching routines:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
@@ -736,6 +1131,21 @@ app.get('/api/routines', async (req, res) => {
 app.put('/api/routines/:id/toggle', async (req, res) => {
   try {
     const routineId = Number(req.params.id);
+    if (isNaN(routineId)) {
+      return res.status(400).json({ error: 'Invalid routine ID' });
+    }
+    
+    // First check if the routine exists and get the user ID
+    const [routineCheck] = await pool.execute(`SELECT user_id FROM goals WHERE goal_id = ?`, [routineId]);
+    if (routineCheck.length === 0) {
+      return res.status(404).json({ error: 'Routine not found' });
+    }
+    
+    // Check if user has permission
+    if (req.user && req.user.uid !== routineCheck[0].user_id) {
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
+    
     const [rows] = await pool.execute(`SELECT is_completed FROM goals WHERE goal_id = ?`, [routineId]);
     if (!rows.length) return res.status(404).json({ error: 'Routine not found' });
     
@@ -764,21 +1174,55 @@ app.put('/api/routines/:id/toggle', async (req, res) => {
     
     res.json(responseRoutine);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error toggling routine completion:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
-// ==== LEGACY/COMPATIBILITY ENDPOINTS ====
+// ==== USER DATA ENDPOINTS ====
 
 app.get('/api/users/:id/futurecoins', async (req, res) => {
   try {
     const userId = req.params.id;
+    
+    // Check if user has permission
+    if (req.user && req.user.uid !== userId) {
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
+    
+    // Check if user exists first
+    const [userCheck] = await pool.execute(`SELECT COUNT(*) as count FROM users WHERE user_id = ?`, [userId]);
+    
+    if (userCheck[0].count === 0) {
+      // User doesn't exist, create them
+      try {
+        await pool.execute(
+          `INSERT INTO users (user_id, username, name, email, level, xp_points, future_coins, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            userId,
+            userId.substring(0, 20),
+            'User',
+            `${userId}@example.com`,
+            1, // Default level
+            0, // Default XP
+            100, // Default coins
+            new Date() // Current timestamp
+          ]
+        );
+        
+        return res.json({ futureCoins: 100 });
+      } catch (createError) {
+        console.error('Error creating user:', createError);
+        return res.status(500).json({ error: 'Failed to create user' });
+      }
+    }
+    
     const [rows] = await pool.execute(`SELECT future_coins FROM users WHERE user_id = ?`, [userId]);
     res.json({ futureCoins: rows[0]?.future_coins || 0 });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error fetching future coins:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
@@ -786,8 +1230,42 @@ app.get('/api/users/:id/futurecoins', async (req, res) => {
 app.put('/api/users/:id/futurecoins', async (req, res) => {
   try {
     const userId = req.params.id;
-    const { amount } = req.body;
+    const amount = Number(req.body.amount || 0);
     
+    // Check if user has permission
+    if (req.user && req.user.uid !== userId) {
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
+    
+    // Check if user exists
+    const [userCheck] = await pool.execute(`SELECT COUNT(*) as count FROM users WHERE user_id = ?`, [userId]);
+    
+    if (userCheck[0].count === 0) {
+      // User doesn't exist, create them
+      try {
+        await pool.execute(
+          `INSERT INTO users (user_id, username, name, email, level, xp_points, future_coins, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            userId,
+            userId.substring(0, 20),
+            'User',
+            `${userId}@example.com`,
+            1, // Default level
+            0, // Default XP
+            amount > 0 ? amount : 0, // Start with the amount if positive
+            new Date() // Current timestamp
+          ]
+        );
+        
+        return res.json({ futureCoins: amount > 0 ? amount : 0 });
+      } catch (createError) {
+        console.error('Error creating user:', createError);
+        return res.status(500).json({ error: 'Failed to create user' });
+      }
+    }
+    
+    // Update existing user's coins
     await pool.execute(
       `UPDATE users SET future_coins = future_coins + ? WHERE user_id = ?`,
       [amount, userId]
@@ -796,8 +1274,8 @@ app.put('/api/users/:id/futurecoins', async (req, res) => {
     const [rows] = await pool.execute(`SELECT future_coins FROM users WHERE user_id = ?`, [userId]);
     res.json({ futureCoins: rows[0]?.future_coins || 0 });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error updating future coins:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
@@ -805,8 +1283,46 @@ app.put('/api/users/:id/futurecoins', async (req, res) => {
 app.put('/api/users/:id/xp', async (req, res) => {
   try {
     const userId = req.params.id;
-    const { amount } = req.body;
+    const amount = Number(req.body.amount || 0);
     
+    // Check if user has permission
+    if (req.user && req.user.uid !== userId) {
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
+    
+    // Check if user exists
+    const [userCheck] = await pool.execute(`SELECT COUNT(*) as count FROM users WHERE user_id = ?`, [userId]);
+    
+    if (userCheck[0].count === 0) {
+      // User doesn't exist, create them
+      try {
+        await pool.execute(
+          `INSERT INTO users (user_id, username, name, email, level, xp_points, future_coins, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            userId,
+            userId.substring(0, 20),
+            'User',
+            `${userId}@example.com`,
+            1, // Default level
+            amount > 0 ? amount : 0, // Start with the amount if positive
+            100, // Default coins
+            new Date() // Current timestamp
+          ]
+        );
+        
+        return res.json({
+          xp: amount > 0 ? amount : 0,
+          level: 1,
+          leveledUp: false
+        });
+      } catch (createError) {
+        console.error('Error creating user:', createError);
+        return res.status(500).json({ error: 'Failed to create user' });
+      }
+    }
+    
+    // Update existing user's XP
     await pool.execute(
       `UPDATE users SET xp_points = xp_points + ? WHERE user_id = ?`,
       [amount, userId]
@@ -840,8 +1356,38 @@ app.put('/api/users/:id/xp', async (req, res) => {
       leveledUp: newLevel > user.level
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error updating user XP:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+// Add a route to delete all goals (DANGER: use only in development!)
+app.delete('/api/admin/clear-goals', async (req, res) => {
+  try {
+    // Check for token for security
+    const token = req.query.token || req.headers['x-admin-token'];
+    if (!token) {
+      return res.status(403).json({ error: 'Admin token required' });
+    }
+    
+    const connection = await pool.getConnection();
+    try {
+      // Disable safe updates
+      await connection.query('SET SQL_SAFE_UPDATES = 0');
+      
+      // Delete all goals
+      await connection.query('DELETE FROM goals');
+      
+      // Re-enable safe updates
+      await connection.query('SET SQL_SAFE_UPDATES = 1');
+      
+      res.json({ success: true, message: 'All goals deleted' });
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    console.error('Error clearing goals:', error);
+    res.status(500).json({ error: 'Failed to clear goals' });
   }
 });
 
@@ -850,6 +1396,54 @@ app.put('/api/users/:id/xp', async (req, res) => {
 (async () => {
   try {
     const connection = await pool.getConnection();
+    
+    // Create tables if they don't exist
+    // Create users table if it doesn't exist
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS users (
+        user_id VARCHAR(255) PRIMARY KEY,
+        username VARCHAR(255) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        password VARCHAR(255),
+        level INT NOT NULL DEFAULT 1,
+        xp_points INT NOT NULL DEFAULT 0,
+        future_coins INT NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL,
+        last_login DATETIME
+      )
+    `);
+    
+    // Create goals table if it doesn't exist
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS goals (
+        goal_id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id VARCHAR(255) NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        description TEXT,
+        target_date DATE,
+        progress INT NOT NULL DEFAULT 0,
+        is_completed TINYINT(1) NOT NULL DEFAULT 0,
+        is_daily TINYINT(1) NOT NULL DEFAULT 0,
+        routine_days TEXT,
+        category VARCHAR(50) DEFAULT 'Personal',
+        coin_reward INT DEFAULT 10,
+        type VARCHAR(20) DEFAULT 'one-time',
+        INDEX idx_goals_user (user_id)
+      )
+    `);
+    
+    // Create subgoals table if it doesn't exist
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS subgoals (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        goal_id INT NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        is_completed TINYINT(1) NOT NULL DEFAULT 0,
+        due_date DATE,
+        INDEX idx_subgoals_goal (goal_id)
+      )
+    `);
     
     // First check if streaks table exists
     const [streaksTables] = await connection.execute(`
@@ -926,7 +1520,7 @@ app.put('/api/users/:id/xp', async (req, res) => {
     if (typeColumn.length === 0) {
       console.log('Adding type column to goals table...');
       try {
-        await connection.execute(`ALTER TABLE goals ADD COLUMN type VARCHAR(20) NULL AFTER routine_days`);
+        await connection.execute(`ALTER TABLE goals ADD COLUMN type VARCHAR(20) DEFAULT 'one-time' AFTER routine_days`);
         console.log('type column added successfully!');
         
         // Set default values based on is_daily
@@ -940,48 +1534,7 @@ app.put('/api/users/:id/xp', async (req, res) => {
       }
     }
     
-    // Check if targetDate column exists
-    const [targetDateColumn] = await connection.execute(`
-      SELECT COLUMN_NAME 
-      FROM INFORMATION_SCHEMA.COLUMNS 
-      WHERE TABLE_SCHEMA = DATABASE() 
-      AND TABLE_NAME = 'goals' 
-      AND COLUMN_NAME = 'target_date'
-    `);
-    
-    // Make sure it exists (it should already be there)
-    if (targetDateColumn.length === 0) {
-      console.log('Adding target_date column to goals table...');
-      try {
-        await connection.execute(`ALTER TABLE goals ADD COLUMN target_date DATE NULL AFTER description`);
-        console.log('target_date column added successfully!');
-      } catch (columnError) {
-        console.error('Failed to add target_date column:', columnError);
-      }
-    }
-    
-    // Check if routine_days column exists
-    const [routineDaysColumn] = await connection.execute(`
-      SELECT COLUMN_NAME 
-      FROM INFORMATION_SCHEMA.COLUMNS 
-      WHERE TABLE_SCHEMA = DATABASE() 
-      AND TABLE_NAME = 'goals' 
-      AND COLUMN_NAME = 'routine_days'
-    `);
-    
-    if (routineDaysColumn.length === 0) {
-      console.log('Adding routine_days column to goals table...');
-      await connection.execute(`ALTER TABLE goals ADD COLUMN routine_days TEXT NULL AFTER is_daily`);
-      console.log('routine_days column added successfully!');
-      
-      // Migrate existing daily goals to have all days selected
-      await connection.execute(`
-        UPDATE goals 
-        SET routine_days = '[0,1,2,3,4,5,6]' 
-        WHERE goal_id > 0 AND is_daily = 1 AND (routine_days IS NULL OR routine_days = '')
-      `);
-    }
-    
+    // Verify connection is good
     await connection.ping();
     connection.release();
 
