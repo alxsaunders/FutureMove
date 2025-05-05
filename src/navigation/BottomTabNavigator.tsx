@@ -1,4 +1,3 @@
-// src/navigation/BottomTabNavigator.tsx
 import React from "react";
 import { Image, StyleSheet, Text, View, TouchableOpacity } from "react-native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
@@ -6,10 +5,12 @@ import { BottomTabParamList } from "../types/navigaton";
 
 // Import screen components
 import HomeScreenWrapper from "../components/HomeScreenWrapper";
-import GoalsScreen from "../screens/GoalsScreen";
 import CommunityScreen from "../screens/CommunityScreen";
 import ProfileScreen from "../screens/ProfileScreen";
 import ItemShopScreen from "../screens/ItemShopScreen";
+
+// Import Goals Stack Navigator instead of direct GoalsScreen
+import GoalsStackNavigator from "./GoalsStackNavigator";
 
 // Create bottom tab navigator with proper typing
 const Tab = createBottomTabNavigator<BottomTabParamList>();
@@ -108,7 +109,8 @@ const BottomTabNavigator = () => {
       }}
     >
       <Tab.Screen name="Home" component={HomeScreenWrapper} />
-      <Tab.Screen name="Goals" component={GoalsScreen} />
+      {/* Use GoalsStackNavigator instead of GoalsScreen directly */}
+      <Tab.Screen name="Goals" component={GoalsStackNavigator} />
       <Tab.Screen name="Community" component={CommunityScreen} />
       <Tab.Screen name="ItemShop" component={ItemShopScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />

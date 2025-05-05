@@ -424,6 +424,158 @@ export const updateGoalProgress = async (goalId: number, progress: number): Prom
     return null;
   }
 };
+export const updateGoal = async (goal: Goal): Promise<boolean> => {
+  try {
+    console.log(`Updating goal with ID: ${goal.id}`);
+    
+    // Validate input
+    if (!goal || !goal.id) {
+      console.warn('Invalid goal for update', goal);
+      return false;
+    }
+    
+    // For local goals (with negative IDs), just return success
+    if (goal.id < 0) {
+      console.log(`Cannot update server for local goal ID: ${goal.id}`);
+      return true; // Return success for UI update
+    }
+    
+    // Prepare routine days - convert to json string if needed
+    let routineDaysString: string | null = null;
+    if (goal.isDaily && goal.routineDays) {
+      routineDaysString = JSON.stringify(goal.routineDays);
+    }
+    
+    // Prepare API payload
+    const payload = {
+      title: goal.title,
+      description: goal.description || '',
+      target_date: goal.targetDate || goal.startDate || new Date().toISOString().split('T')[0],
+      progress: goal.progress,
+      is_completed: goal.isCompleted ? 1 : 0,
+      is_daily: goal.isDaily ? 1 : 0,
+      category: goal.category || 'Personal',
+      coin_reward: goal.coinReward || 10,
+      routine_days: routineDaysString,
+      type: goal.type || (goal.isDaily ? 'recurring' : 'one-time'),
+      // Preserve existing last_completed date if present
+      last_completed: goal.lastCompleted,
+    };
+    
+    // Add timeout to prevent hanging requests
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    
+    // Make API request
+    const apiUrl = getApiBaseUrl();
+    const res = await fetch(`${apiUrl}/goals/${goal.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    
+    // Check response
+    if (!res.ok) {
+      console.warn(`Error updating goal: ${res.status} ${res.statusText}`);
+      
+      // For connectivity issues, still return success for optimistic UI update
+      if (res.status === 0 || res.status >= 500) {
+        console.log('Server error during update, using optimistic update');
+        return true;
+      }
+      
+      return false;
+    }
+    
+    // Parse response
+    try {
+      const data = await res.json();
+      console.log(`Goal updated successfully, ID: ${goal.id}`);
+      return true;
+    } catch (parseError) {
+      console.error('Error parsing update response:', parseError);
+      // Still return true if server returned OK but parsing failed
+      return true;
+    }
+  } catch (err) {
+    // Handle fetch timeout/abort error specifically
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      console.error(`Fetch request for goal update ${goal.id} timed out`);
+    } else {
+      console.error(`Error updating goal with ID: ${goal.id}`, err);
+    }
+    
+    // For network errors, still return success for optimistic UI update
+    return true;
+  }
+};
+
+// Delete goal function
+export const deleteGoal = async (goalId: number): Promise<boolean> => {
+  try {
+    console.log(`Deleting goal with ID: ${goalId}`);
+    
+    // Validate input
+    if (!goalId || isNaN(Number(goalId))) {
+      console.warn(`Invalid goal ID for deletion: ${goalId}`);
+      return false;
+    }
+    
+    // For local goals (with negative IDs), just return success
+    if (goalId < 0) {
+      console.log(`Cannot delete server goal for local ID: ${goalId}`);
+      return true; // Return success for UI update
+    }
+    
+    // Add timeout to prevent hanging requests
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+    
+    // Make API request
+    const apiUrl = getApiBaseUrl();
+    const res = await fetch(`${apiUrl}/goals/${goalId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
+      },
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    
+    // Check response
+    if (!res.ok) {
+      console.warn(`Error deleting goal: ${res.status} ${res.statusText}`);
+      
+      // For connectivity issues, still return success for optimistic UI update
+      if (res.status === 0 || res.status >= 500) {
+        console.log('Server error during deletion, using optimistic update');
+        return true;
+      }
+      
+      return false;
+    }
+    
+    console.log(`Goal deleted successfully, ID: ${goalId}`);
+    return true;
+  } catch (err) {
+    // Handle fetch timeout/abort error specifically
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      console.error(`Fetch request for goal deletion ${goalId} timed out`);
+    } else {
+      console.error(`Error deleting goal with ID: ${goalId}`, err);
+    }
+    
+    // For network errors, still return success for optimistic UI update
+    return true;
+  }
+};
 
 // Helper function to get color for a category
 export const getCategoryColor = (category?: string): string => {
@@ -996,5 +1148,96 @@ export const getTodaysGoals = async (): Promise<Goal[]> => {
   } catch (error) {
     console.error('Error getting today\'s goals:', error);
     return [];
+  }
+};
+/**
+ * Update user's FutureCoins balance
+ * @param userId User ID
+ * @param coinsToAdd Number of coins to add (can be negative for spending)
+ * @returns Promise resolving to success status
+ */
+export const updateUserCoins = async (userId: string, coinsToAdd: number): Promise<boolean> => {
+  try {
+    // Get API base URL
+    const apiUrl = getApiBaseUrl();
+    
+    // Use the existing stats endpoint for efficiency
+    try {
+      const response = await fetch(`${apiUrl}/users/${userId}/stats`, {
+        method: 'PUT',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
+        },
+        body: JSON.stringify({
+          future_coins_to_add: coinsToAdd,
+          xp_points_to_add: 0,  // No XP change
+          increment_streak: false // Don't affect streak
+        }),
+      });
+      
+      if (!response.ok) {
+        console.warn(`Error updating user coins: ${response.status} ${response.statusText}`);
+        return false;
+      }
+      
+      console.log(`Updated user ${userId} coins by ${coinsToAdd}`);
+      return true;
+    } catch (fetchError) {
+      console.error('Network error updating coins:', fetchError);
+      return false;
+    }
+  } catch (error) {
+    console.error('Error updating user coins:', error);
+    return false;
+  }
+};
+
+/**
+ * Update user's XP and level
+ * @param userId User ID
+ * @param xpToAdd XP points to add
+ * @param newLevel Optional new level if level up occurred
+ * @returns Promise resolving to success status
+ */
+export const updateUserXP = async (
+  userId: string, 
+  xpToAdd: number,
+  newLevel?: number
+): Promise<boolean> => {
+  try {
+    // Get API base URL
+    const apiUrl = getApiBaseUrl();
+    
+    // Use the existing stats endpoint for efficiency
+    try {
+      const response = await fetch(`${apiUrl}/users/${userId}/stats`, {
+        method: 'PUT',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
+        },
+        body: JSON.stringify({
+          xp_points_to_add: xpToAdd,
+          future_coins_to_add: 0, // No coins change
+          increment_streak: false, // Don't affect streak
+          level: newLevel // Include level if provided
+        }),
+      });
+      
+      if (!response.ok) {
+        console.warn(`Error updating user XP: ${response.status} ${response.statusText}`);
+        return false;
+      }
+      
+      console.log(`Updated user ${userId} XP by ${xpToAdd}${newLevel ? `, level to ${newLevel}` : ''}`);
+      return true;
+    } catch (fetchError) {
+      console.error('Network error updating XP:', fetchError);
+      return false;
+    }
+  } catch (error) {
+    console.error('Error updating user XP:', error);
+    return false;
   }
 };

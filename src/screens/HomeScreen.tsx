@@ -58,7 +58,7 @@ type SectionType = {
 };
 
 // Extended Routine type to include the properties we need
-interface ExtendedRoutine extends Routine {
+interface ExtendedRoutine extends Omit<Routine, "frequency"> {
   routine_days?: number[];
   category: string;
   isCompleted?: boolean;
@@ -660,9 +660,11 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   };
 
   // Navigation functions
-  const navigateToGoalsScreen = () => {
-    tabNavigation.navigate("Goals", {});
-  };
+ const navigateToGoalsScreen = () => {
+   navigation.navigate("Goals", {
+     screen: "Goals",
+   });
+ };
 
   const navigateToCreateGoal = () => {
     // Navigate to Goals tab with param to trigger create form
@@ -737,80 +739,86 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   };
 
   // UPDATED: Render individual goal item for goals section with improved background
-  const renderGoalItem = ({ item }: { item: Goal }) => {
-    // Get background image based on category
-    const backgroundImage = getCategoryBackground(item.category);
+const renderGoalItem = ({ item }: { item: Goal }) => {
+  // Get background image based on category
+  const backgroundImage = getCategoryBackground(item.category);
 
-    return (
-      <TouchableOpacity
-        style={[
-          styles.goalCard,
-          { borderLeftColor: item.color || COLORS.primary },
-        ]}
-        onPress={() => {
-          // Navigate to the Goals tab with specific goal ID
-          tabNavigation.navigate("Goals", { viewGoalId: item.id });
-        }}
-        activeOpacity={0.8}
+  return (
+    <TouchableOpacity
+      style={[
+        styles.goalCard,
+        { borderLeftColor: item.color || COLORS.primary },
+      ]}
+      onPress={() => {
+        // Navigate to the Goals tab first, then to the GoalDetail screen
+        navigation.navigate("Goals", {
+          screen: "GoalDetail",
+          params: { goalId: item.id },
+        });
+      }}
+      activeOpacity={0.8}
+    >
+      <ImageBackground
+        source={backgroundImage}
+        style={styles.goalCardBackground}
+        imageStyle={styles.goalCardBackgroundImage}
       >
-        <ImageBackground
-          source={backgroundImage}
-          style={styles.goalCardBackground}
-          imageStyle={styles.goalCardBackgroundImage}
-        >
-          {/* Add a semi-transparent overlay to darken the image */}
-          <View style={styles.cardOverlay}>
-            <View style={styles.goalCardContent}>
-              <View style={styles.goalCardHeader}>
-                <Text
-                  style={[
-                    styles.goalCardTitle,
-                    item.isCompleted ? styles.completedText : {},
-                  ]}
-                  numberOfLines={2}
-                >
-                  {item.title}
-                </Text>
-                {item.category && (
-                  <View
-                    style={[
-                      styles.categoryBadge,
-                      { backgroundColor: item.color || COLORS.primary },
-                    ]}
-                  >
-                    <Text style={styles.categoryText}>{item.category}</Text>
-                  </View>
-                )}
-              </View>
-
-              <TouchableOpacity
+        {/* Add a semi-transparent overlay to darken the image */}
+        <View style={styles.cardOverlay}>
+          <View style={styles.goalCardContent}>
+            <View style={styles.goalCardHeader}>
+              <Text
                 style={[
-                  styles.checkButton,
-                  item.isCompleted ? styles.completedCheckButton : {},
+                  styles.goalCardTitle,
+                  item.isCompleted ? styles.completedText : {},
                 ]}
-                onPress={() => toggleGoalCompletion(item.id)}
+                numberOfLines={2}
               >
-                {item.isCompleted ? (
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={24}
-                    color={COLORS.success}
-                  />
-                ) : (
-                  <Ionicons
-                    name="ellipse-outline"
-                    size={24}
-                    color={COLORS.white}
-                  />
-                )}
-              </TouchableOpacity>
+                {item.title}
+              </Text>
+              {item.category && (
+                <View
+                  style={[
+                    styles.categoryBadge,
+                    { backgroundColor: item.color || COLORS.primary },
+                  ]}
+                >
+                  <Text style={styles.categoryText}>{item.category}</Text>
+                </View>
+              )}
             </View>
-          </View>
-        </ImageBackground>
-      </TouchableOpacity>
-    );
-  };
 
+            <TouchableOpacity
+              style={[
+                styles.checkButton,
+                item.isCompleted ? styles.completedCheckButton : {},
+              ]}
+              onPress={(event) => {
+                // Stop event propagation to prevent navigation when toggling completion
+                event.stopPropagation();
+                toggleGoalCompletion(item.id);
+              }}
+            >
+              {item.isCompleted ? (
+                <Ionicons
+                  name="checkmark-circle"
+                  size={24}
+                  color={COLORS.success}
+                />
+              ) : (
+                <Ionicons
+                  name="ellipse-outline"
+                  size={24}
+                  color={COLORS.white}
+                />
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </ImageBackground>
+    </TouchableOpacity>
+  );
+};
   // Render horizontal goal list
   const renderHorizontalGoalList = () => (
     <FlatList
@@ -827,121 +835,127 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   );
 
   // Goals section with horizontal list of goals, create button
-  const renderGoalsSection = () => (
-    <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Today's Goals</Text>
-        <TouchableOpacity
-          style={styles.viewAllButton}
-          onPress={navigateToGoalsScreen}
-        >
-          <Text style={styles.viewAllText}>View All</Text>
-        </TouchableOpacity>
-      </View>
+ const renderGoalsSection = () => (
+   <View style={styles.section}>
+     <View style={styles.sectionHeader}>
+       <Text style={styles.sectionTitle}>Today's Goals</Text>
+       <TouchableOpacity
+         style={styles.viewAllButton}
+         onPress={navigateToGoalsScreen}
+       >
+         <Text style={styles.viewAllText}>View All</Text>
+       </TouchableOpacity>
+     </View>
 
-      {todayGoals.length > 0 ? (
-        renderHorizontalGoalList()
-      ) : (
-        <View style={styles.emptyStateContainer}>
-          <Text style={styles.noGoalsText}>
-            You have 0 active goals for today.
-          </Text>
-        </View>
-      )}
+     {todayGoals.length > 0 ? (
+       renderHorizontalGoalList()
+     ) : (
+       <View style={styles.emptyStateContainer}>
+         <Text style={styles.noGoalsText}>
+           You have 0 active goals for today.
+         </Text>
+       </View>
+     )}
 
-      <TouchableOpacity
-        style={styles.actionButton}
-        onPress={navigateToCreateGoal}
-      >
-        <Text style={styles.actionButtonText}>Create New Goal</Text>
-      </TouchableOpacity>
-    </View>
-  );
+     <TouchableOpacity
+       style={styles.actionButton}
+       onPress={() => {
+         // Navigate to Goals tab with param to trigger create form using nested navigation
+         navigation.navigate("Goals", {
+           screen: "Goals",
+           params: { openCreateGoal: true },
+         });
+       }}
+     >
+       <Text style={styles.actionButtonText}>Create New Goal</Text>
+     </TouchableOpacity>
+   </View>
+ );
 
   // UPDATED: Render individual routine item with improved day count display
-  const renderRoutineItem = ({ item }: { item: ExtendedRoutine }) => {
-    // Get color based on routine category
-    const categoryColor = getCategoryColor(item.category) || COLORS.accent1;
+ const renderRoutineItem = ({ item }: { item: ExtendedRoutine }) => {
+   // Get color based on routine category
+   const categoryColor = getCategoryColor(item.category) || COLORS.accent1;
 
-    // Use dedicated routine background
-    const backgroundImage = require("../assets/images/routinepic.png");
+   // Use dedicated routine background
+   const backgroundImage = require("../assets/images/routinepic.png");
 
-    // Get routine days
-    const routineDays = item.routine_days || [];
+   // Get routine days
+   const routineDays = item.routine_days || [];
 
-    // Determine the day count for display
-    const totalDays = routineDays.length > 0 ? routineDays.length : 1;
-    const completedDays = item.isCompleted ? 1 : 0;
+   // Determine the day count for display
+   const totalDays = routineDays.length > 0 ? routineDays.length : 1;
+   const completedDays = item.isCompleted ? 1 : 0;
 
-    // Calculate progress percentage based on completion
-    const progressPercentage = item.isCompleted ? 100 : 0;
+   // Calculate progress percentage based on completion
+   const progressPercentage = item.isCompleted ? 100 : 0;
 
-    return (
-      <TouchableOpacity
-        style={[styles.routineCard, { borderLeftColor: categoryColor }]}
-        onPress={() => {
-          // Navigate to the Goals tab with routine filter and selected routine
-          tabNavigation.navigate("Goals", {
-            filterType: "routine",
-            viewGoalId: item.id,
-          });
-        }}
-        activeOpacity={0.8}
-      >
-        <ImageBackground
-          source={backgroundImage}
-          style={styles.goalCardBackground}
-          imageStyle={styles.goalCardBackgroundImage}
-        >
-          {/* Add a semi-transparent overlay to darken the image */}
-          <View style={styles.cardOverlay}>
-            <View style={styles.routineCardContent}>
-              <View style={styles.routineCardHeader}>
-                <Text
-                  style={[
-                    styles.routineCardTitle,
-                    item.isCompleted ? styles.completedText : {},
-                  ]}
-                  numberOfLines={1}
-                >
-                  {item.title}
-                </Text>
-                {/* Show category badge */}
-                <View
-                  style={[
-                    styles.categoryBadge,
-                    { backgroundColor: categoryColor },
-                  ]}
-                >
-                  <Text style={styles.categoryText}>{item.category}</Text>
-                </View>
-              </View>
+   return (
+     <TouchableOpacity
+       style={[styles.routineCard, { borderLeftColor: categoryColor }]}
+       onPress={() => {
+         // Navigate to the Goals tab first, then to the GoalDetail screen
+         navigation.navigate("Goals", {
+           screen: "GoalDetail",
+           params: { goalId: item.id },
+         });
+       }}
+       activeOpacity={0.8}
+     >
+       <ImageBackground
+         source={backgroundImage}
+         style={styles.goalCardBackground}
+         imageStyle={styles.goalCardBackgroundImage}
+       >
+         {/* Add a semi-transparent overlay to darken the image */}
+         <View style={styles.cardOverlay}>
+           <View style={styles.routineCardContent}>
+             <View style={styles.routineCardHeader}>
+               <Text
+                 style={[
+                   styles.routineCardTitle,
+                   item.isCompleted ? styles.completedText : {},
+                 ]}
+                 numberOfLines={1}
+               >
+                 {item.title}
+               </Text>
+               {/* Show category badge */}
+               <View
+                 style={[
+                   styles.categoryBadge,
+                   { backgroundColor: categoryColor },
+                 ]}
+               >
+                 <Text style={styles.categoryText}>{item.category}</Text>
+               </View>
+             </View>
 
-              <View style={styles.routineProgressBarContainer}>
-                <View style={styles.routineProgressBar}>
-                  <View
-                    style={[
-                      styles.routineProgressFill,
-                      {
-                        width: `${progressPercentage}%`,
-                        backgroundColor: item.isCompleted
-                          ? COLORS.success
-                          : categoryColor,
-                      },
-                    ]}
-                  />
-                </View>
-                {/* Display simplified day count */}
-                <Text style={styles.routineProgressText}>
-                  {completedDays}/{totalDays}
-                </Text>
-              </View>
-            </View>
-          </View>
-        </ImageBackground>
-      </TouchableOpacity>
-    );
-  };
+             <View style={styles.routineProgressBarContainer}>
+               <View style={styles.routineProgressBar}>
+                 <View
+                   style={[
+                     styles.routineProgressFill,
+                     {
+                       width: `${progressPercentage}%`,
+                       backgroundColor: item.isCompleted
+                         ? COLORS.success
+                         : categoryColor,
+                     },
+                   ]}
+                 />
+               </View>
+               {/* Display simplified day count */}
+               <Text style={styles.routineProgressText}>
+                 {completedDays}/{totalDays}
+               </Text>
+             </View>
+           </View>
+         </View>
+       </ImageBackground>
+     </TouchableOpacity>
+   );
+ };
 
   // Render horizontal routines list
   const renderHorizontalRoutinesList = () => (
@@ -959,42 +973,53 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   );
 
   // Routines section
-  const renderRoutinesSection = () => (
-    <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Routines</Text>
-        <TouchableOpacity
-          style={styles.viewAllButton}
-          onPress={() =>
-            tabNavigation.navigate("Goals", { filterType: "routine" })
-          }
-        >
-          <Text style={styles.viewAllText}>View All</Text>
-        </TouchableOpacity>
-      </View>
-
-      {routines.length > 0 ? (
-        renderHorizontalRoutinesList()
-      ) : (
-        <View style={styles.emptyStateContainer}>
-          <Text style={styles.noGoalsText}>You have 0 active routines.</Text>
-        </View>
-      )}
-
+const renderRoutinesSection = () => (
+  <View style={styles.section}>
+    <View style={styles.sectionHeader}>
+      <Text style={styles.sectionTitle}>Routines</Text>
       <TouchableOpacity
-        style={styles.actionButton}
+        style={styles.viewAllButton}
         onPress={() => {
-          // Navigate to create goal but set it as daily/routine
-          tabNavigation.navigate("Goals", {
-            openCreateGoal: true,
-            createAsRoutine: true,
+          // Navigate to Goals tab and switch to the routines tab
+          navigation.navigate("Goals", {
+            screen: "Goals",
+            params: {
+              filterType: "routine",
+              activeTab: "routine", // Add this parameter to explicitly switch to routines tab
+            },
           });
         }}
       >
-        <Text style={styles.actionButtonText}>Create New Routine</Text>
+        <Text style={styles.viewAllText}>View All</Text>
       </TouchableOpacity>
     </View>
-  );
+
+    {routines.length > 0 ? (
+      renderHorizontalRoutinesList()
+    ) : (
+      <View style={styles.emptyStateContainer}>
+        <Text style={styles.noGoalsText}>You have 0 active routines.</Text>
+      </View>
+    )}
+
+    <TouchableOpacity
+      style={styles.actionButton}
+      onPress={() => {
+        // Navigate to create goal as daily/routine using nested navigation
+        navigation.navigate("Goals", {
+          screen: "Goals",
+          params: {
+            openCreateGoal: true,
+            createAsRoutine: true,
+            activeTab: "routines", // Also add this to ensure we're on the routines tab
+          },
+        });
+      }}
+    >
+      <Text style={styles.actionButtonText}>Create New Routine</Text>
+    </TouchableOpacity>
+  </View>
+);
 
   // News section
   const renderNewsSection = () => (

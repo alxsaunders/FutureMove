@@ -242,6 +242,7 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
       setIsRefreshing(false);
     }
   };
+  
 
   // Check if route params request to open create goal form
   useEffect(() => {
@@ -250,7 +251,9 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
       // Reset the param to avoid reopening
       navigation.setParams({ openCreateGoal: undefined });
     }
+    
   }, [route.params?.openCreateGoal]);
+  
 
   // Use the useFocusEffect hook to refresh data when screen comes into focus
   useFocusEffect(

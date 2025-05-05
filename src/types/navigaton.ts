@@ -6,7 +6,7 @@ import { NavigatorScreenParams } from "@react-navigation/native";
 export type RootStackParamList = {
   Splash: undefined;
   Home: { 
-    username: string;
+    username?: string;
     userLevel?: number;
     userExp?: number;
     userCoins?: number;
@@ -15,7 +15,16 @@ export type RootStackParamList = {
   SignUp: undefined;
   Main: undefined;
   GoalDetail: { goalId: number }; 
-  Login: undefined; 
+  Login: undefined;
+  Goals: {
+    viewGoalId?: number;
+    openCreateGoal?: boolean;
+    createAsRoutine?: boolean;
+    filterType?: string;
+  };
+  Community: undefined;
+  ItemShop: undefined;
+  Profile: undefined;
 };
 
 // Bottom Tab Parameters
@@ -70,7 +79,7 @@ export type LoginScreenProps = {
 };
 
 // Bottom Tab Navigation Props
-export type GoalsScreenNavigationProp = StackNavigationProp<BottomTabParamList, "Goals">;
+export type GoalsScreenNavigationProp = StackNavigationProp<RootStackParamList, "Goals">;
 export type GoalsScreenRouteProp = RouteProp<BottomTabParamList, "Goals">;
 
 export type GoalsScreenProps = {
