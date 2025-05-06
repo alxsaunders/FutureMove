@@ -1,0 +1,505 @@
+// src/screens/CommunityDetailScreen.tsx
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  Image,
+  TouchableOpacity,
+  FlatList,
+  ActivityIndicator,
+  SafeAreaView,
+} from "react-native";
+import { useRoute, useNavigation } from "@react-navigation/native";
+import { Ionicons } from "@expo/vector-icons";
+import { COLORS } from "../common/constants/colors";
+import { useAuth } from "../contexts/AuthContext";
+import {
+  getCommunityById,
+  joinCommunity,
+  leaveCommunity,
+} from "../services/CommunityService";
+import { fetchCommunityPosts } from "../services/CommunityPostService";
+import { Community, Post } from "../types";
+import CommunityPostItem from "../components/community/CommunityPostItem";
+
+const CommunityDetailScreen = () => {
+  const { currentUser } = useAuth();
+  const route = useRoute();
+  const navigation = useNavigation();
+  const { communityId } = route.params as { communityId: string };
+
+  const [community, setCommunity] = useState<Community | null>(null);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isJoining, setIsJoining] = useState(false);
+
+  // Fetch community details
+  const fetchCommunityDetails = useCallback(async () => {
+    if (!communityId) return;
+
+    setIsLoading(true);
+    try {
+      const communityData = await getCommunityById(communityId);
+      setCommunity(community);
+
+      // Also fetch posts
+      if (communityData) {
+        const postsData = await fetchCommunityPosts(communityId);
+        setPosts(postsData);
+      }
+    } catch (error) {
+      console.error("Error fetching community details:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [communityId]);
+
+  // Load data on initial render
+  useEffect(() => {
+    fetchCommunityDetails();
+  }, [fetchCommunityDetails]);
+
+  // Handle joining/leaving community
+  const handleToggleMembership = async () => {
+    if (!community || !currentUser) return;
+
+    setIsJoining(true);
+    try {
+      let success;
+      if (community.isJoined) {
+        success = await leaveCommunity(currentUser.id);
+      } else {
+        success = await joinCommunity(currentUser.id);
+      }
+
+      if (success) {
+        // Update local state
+        setCommunity({
+          ...community,
+          isJoined: !community.isJoined,
+          members: community.isJoined
+            ? Math.max(0, community.members - 1)
+            : community.members + 1,
+        });
+      }
+    } catch (error) {
+      console.error("Error toggling membership:", error);
+    } finally {
+      setIsJoining(false);
+    }
+  };
+
+  // Toggle like on a post
+  const handleLikePost = (postId: string) => {
+    setPosts((prevPosts) =>
+      prevPosts.map((post) =>
+        post.id === postId
+          ? {
+              ...post,
+              isLiked: !post.isLiked,
+              likes: post.isLiked ? post.likes - 1 : post.likes + 1,
+            }
+          : post
+      )
+    );
+  };
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Loading community...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (!community) {
+    return (
+      <SafeAreaView style={styles.errorContainer}>
+        <Ionicons
+          name="alert-circle-outline"
+          size={60}
+          color={COLORS.textSecondary}
+        />
+        <Text style={styles.errorTitle}>Community Not Found</Text>
+        <Text style={styles.errorMessage}>
+          Sorry, we couldn't find this community.
+        </Text>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={styles.backButtonText}>Go Back</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color={COLORS.text} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>{community.name}</Text>
+        <TouchableOpacity>
+          <Ionicons name="ellipsis-vertical" size={24} color={COLORS.text} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Community Details */}
+      <FlatList
+        data={posts}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => (
+          <CommunityPostItem
+            post={item}
+            onLikePress={() => handleLikePost(item.id)}
+            onCommentPress={() => {
+              // @ts-ignore - Ignoring type checking for navigation with params
+              navigation.navigate("PostDetail", { postId: item.id });
+            }}
+            onPostPress={() => {
+              // @ts-ignore - Ignoring type checking for navigation with params
+              navigation.navigate("PostDetail", { postId: item.id });
+            }}
+          />
+        )}
+        ListHeaderComponent={() => (
+          <View style={styles.communityInfo}>
+            <View style={styles.communityHeader}>
+              <Image
+                source={{ uri: community.image }}
+                style={styles.communityImage}
+                defaultSource={require("../assets/placeholder.png")}
+              />
+              <View style={styles.headerContent}>
+                <Text style={styles.communityName}>{community.name}</Text>
+                <View style={styles.communityStats}>
+                  <View style={styles.stat}>
+                    <Ionicons
+                      name="people"
+                      size={16}
+                      color={COLORS.textSecondary}
+                    />
+                    <Text style={styles.statText}>
+                      {community.members} members
+                    </Text>
+                  </View>
+                  <View style={styles.stat}>
+                    <Ionicons
+                      name="chatbubbles"
+                      size={16}
+                      color={COLORS.textSecondary}
+                    />
+                    <Text style={styles.statText}>{community.posts} posts</Text>
+                  </View>
+                </View>
+                <View
+                  style={[
+                    styles.categoryBadge,
+                    { backgroundColor: getCategoryColor(community.category) },
+                  ]}
+                >
+                  <Text style={styles.categoryText}>{community.category}</Text>
+                </View>
+              </View>
+            </View>
+
+            <Text style={styles.description}>{community.description}</Text>
+
+            <TouchableOpacity
+              style={[
+                styles.joinButton,
+                community.isJoined ? styles.leaveButton : null,
+              ]}
+              onPress={handleToggleMembership}
+              disabled={isJoining}
+            >
+              {isJoining ? (
+                <ActivityIndicator
+                  size="small"
+                  color={community.isJoined ? COLORS.primary : COLORS.white}
+                />
+              ) : (
+                <Text
+                  style={[
+                    styles.joinButtonText,
+                    community.isJoined ? styles.leaveButtonText : null,
+                  ]}
+                >
+                  {community.isJoined ? "Leave Community" : "Join Community"}
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            {posts.length > 0 && (
+              <View style={styles.postsHeader}>
+                <Text style={styles.postsTitle}>Latest Posts</Text>
+              </View>
+            )}
+          </View>
+        )}
+        ListEmptyComponent={() => (
+          <View style={styles.emptyPostsContainer}>
+            <Ionicons
+              name="newspaper-outline"
+              size={60}
+              color={COLORS.textSecondary}
+            />
+            <Text style={styles.emptyTitle}>No Posts Yet</Text>
+            <Text style={styles.emptyText}>
+              Be the first to post in this community!
+            </Text>
+            <TouchableOpacity
+              style={styles.createPostButton}
+              onPress={() => {
+                // @ts-ignore - Ignoring type checking for navigation
+                navigation.navigate("CreatePost", {
+                  communityId: community.id,
+                });
+              }}
+            >
+              <Text style={styles.createPostText}>Create Post</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        contentContainerStyle={styles.contentContainer}
+      />
+
+      {/* Floating Action Button for creating posts */}
+      {posts.length > 0 && (
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => {
+            // @ts-ignore - Ignoring type checking for navigation
+            navigation.navigate("CreatePost", { communityId: community.id });
+          }}
+        >
+          <Ionicons name="add" size={24} color={COLORS.white} />
+        </TouchableOpacity>
+      )}
+    </SafeAreaView>
+  );
+};
+
+// Helper function to get color for a category
+const getCategoryColor = (category: string) => {
+  const categoryColors: Record<string, string> = {
+    Personal: "#3B82F6", // Blue
+    Work: "#4CAF50", // Green
+    Learning: "#5E6CE7", // Purple
+    Health: "#F44336", // Red
+    Finance: "#FF9800", // Orange
+    Wellness: "#9C27B0", // Deep Purple
+    Repair: "#56C3B6", // Teal
+  };
+
+  return categoryColors[category] || "#3B82F6";
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: COLORS.background,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: COLORS.textSecondary,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: COLORS.background,
+    padding: 20,
+  },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: COLORS.text,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  errorMessage: {
+    fontSize: 16,
+    color: COLORS.textSecondary,
+    textAlign: "center",
+    marginBottom: 24,
+  },
+  backButton: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  backButtonText: {
+    color: COLORS.white,
+    fontWeight: "600",
+  },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    backgroundColor: COLORS.cardBackground,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: COLORS.text,
+  },
+  contentContainer: {
+    padding: 16,
+    paddingBottom: 80,
+  },
+  communityInfo: {
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  communityHeader: {
+    flexDirection: "row",
+    marginBottom: 16,
+  },
+  communityImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginRight: 16,
+  },
+  headerContent: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  communityName: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: COLORS.text,
+    marginBottom: 8,
+  },
+  communityStats: {
+    flexDirection: "row",
+    marginBottom: 8,
+  },
+  stat: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginRight: 16,
+  },
+  statText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginLeft: 6,
+  },
+  categoryBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 16,
+    alignSelf: "flex-start",
+  },
+  categoryText: {
+    fontSize: 12,
+    fontWeight: "bold",
+    color: COLORS.white,
+  },
+  description: {
+    fontSize: 16,
+    color: COLORS.text,
+    lineHeight: 24,
+    marginBottom: 16,
+  },
+  joinButton: {
+    backgroundColor: COLORS.primary,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  joinButtonText: {
+    color: COLORS.white,
+    fontWeight: "600",
+    fontSize: 16,
+  },
+  leaveButton: {
+    backgroundColor: COLORS.cardBackground,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+  },
+  leaveButtonText: {
+    color: COLORS.primary,
+  },
+  postsHeader: {
+    marginTop: 8,
+    marginBottom: 8,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    paddingTop: 16,
+  },
+  postsTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: COLORS.text,
+  },
+  emptyPostsContainer: {
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: 12,
+    padding: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: COLORS.text,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: COLORS.textSecondary,
+    textAlign: "center",
+    marginBottom: 24,
+  },
+  createPostButton: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  createPostText: {
+    color: COLORS.white,
+    fontWeight: "600",
+  },
+  fab: {
+    position: "absolute",
+    right: 20,
+    bottom: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: COLORS.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+});
+
+export default CommunityDetailScreen;

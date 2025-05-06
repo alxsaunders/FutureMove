@@ -3,7 +3,10 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const dotenv = require('dotenv');
 const admin = require('firebase-admin'); // Add Firebase Admin SDK
+const { DOMException } = require('domexception')
 
+// Make it global - this line assigns DOMException to the global object
+global.DOMException = DOMException
 dotenv.config();
 
 // Initialize Firebase Admin SDK with simple configuration
@@ -54,13 +57,20 @@ const authenticateFirebaseToken = (req, res, next) => {
   next();
 };
 
-// Apply middleware to routes
-app.use(authenticateFirebaseToken);
-
 // Routes
 app.get('/api/test', (req, res) => {
   res.json({ message: 'API is working!', user: req.user ? req.user.uid : 'none' });
 });
+
+// Import route modules
+const communityRoutes = require('./routes/community')(pool, authenticateFirebaseToken);
+const postsRoutes = require('./routes/posts')(pool, authenticateFirebaseToken);
+const commentsRoutes = require('./routes/comments')(pool, authenticateFirebaseToken);
+
+// Use route modules
+app.use('/api/communities', communityRoutes);
+app.use('/api/posts', postsRoutes);
+app.use('/api/comments', commentsRoutes);
 
 // ==== USER ROUTES ====
 
@@ -110,6 +120,7 @@ app.post('/api/users', async (req, res) => {
     level = 1,
     xp_points = 0,
     future_coins = 0,
+    profile_image = null,
     created_at = new Date(),
     last_login = null
   } = req.body;
@@ -125,9 +136,9 @@ app.post('/api/users', async (req, res) => {
 
   try {
     await pool.query(
-      `INSERT INTO users (user_id, username, name, email, password, level, xp_points, future_coins, created_at, last_login)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [user_id, username, name, email, password, level, xp_points, future_coins, created_at, last_login]
+      `INSERT INTO users (user_id, username, name, email, password, level, xp_points, future_coins, profile_image, created_at, last_login)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [user_id, username, name, email, password, level, xp_points, future_coins, profile_image, created_at, last_login]
     );
     res.status(201).json({ message: 'User created successfully' });
   } catch (error) {
@@ -161,13 +172,14 @@ app.put('/api/users/:userId/stats', async (req, res) => {
       try {
         // Create user in database
         await connection.query(
-          `INSERT INTO users (user_id, username, name, email, level, xp_points, future_coins, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO users (user_id, username, name, email, profile_image, level, xp_points, future_coins, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             userId,
             userId.substring(0, 20),
             'User',
             `${userId}@example.com`,
+            null,
             1,
             xp_points_to_add || 0,
             future_coins_to_add || 0,
@@ -323,13 +335,14 @@ app.get('/api/users/:userId/streak', async (req, res) => {
       // User doesn't exist, create a new user
       try {
         await pool.execute(`
-          INSERT INTO users (user_id, username, name, email, level, xp_points, future_coins, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO users (user_id, username, name, email, profile_image, level, xp_points, future_coins, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           userId,
           userId.substring(0, 20),
           'User',
           `${userId}@example.com`,
+          null,
           1, 0, 0, new Date()
         ]);
         
@@ -402,13 +415,14 @@ app.put('/api/users/:userId/streak', async (req, res) => {
       // User doesn't exist, create a new user
       try {
         await connection.execute(`
-          INSERT INTO users (user_id, username, name, email, level, xp_points, future_coins, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO users (user_id, username, name, email, profile_image, level, xp_points, future_coins, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           userId,
           userId.substring(0, 20),
           'User',
           `${userId}@example.com`,
+          null,
           1, 0, 0, new Date()
         ]);
         
@@ -692,13 +706,14 @@ app.post('/api/goals', async (req, res) => {
       
       try {
         await connection.execute(
-          `INSERT INTO users (user_id, username, name, email, level, xp_points, future_coins, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO users (user_id, username, name, email, profile_image, level, xp_points, future_coins, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             userId,
             userId.substring(0, 20),
             'User',
             `${userId}@example.com`,
+            null,
             1, // Default level
             0, // Default XP
             100, // Default coins
@@ -1089,6 +1104,330 @@ app.patch('/api/subgoals/:id/toggle', async (req, res) => {
     res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
+// ==== ITEM SHOP ROUTES ====
+
+// Create items table if it doesn't exist
+(async () => {
+  try {
+    const connection = await pool.getConnection();
+    
+    // Create items table if it doesn't exist
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS items (
+        item_id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        description TEXT,
+        image_url VARCHAR(255),
+        category VARCHAR(50) NOT NULL,
+        price INT NOT NULL,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
+    // Create user_items table if it doesn't exist (to track purchases)
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS user_items (
+        user_item_id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id VARCHAR(255) NOT NULL,
+        item_id INT NOT NULL,
+        purchased_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        is_equipped TINYINT(1) NOT NULL DEFAULT 0,
+        INDEX idx_user_items_user (user_id),
+        INDEX idx_user_items_item (item_id),
+        UNIQUE KEY unique_user_item (user_id, item_id)
+      )
+    `);
+    
+    connection.release();
+    console.log('Item shop tables created successfully!');
+  } catch (error) {
+    console.error('Error creating item shop tables:', error);
+  }
+})();
+
+// Get all items
+app.get('/api/items', async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT * FROM items WHERE is_active = 1 ORDER BY category, price'
+    );
+    
+    res.json({ items: rows });
+  } catch (error) {
+    console.error('Error fetching items:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+// Get user's purchased items
+app.get('/api/users/:userId/items', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    
+    // Check if user has permission
+    if (req.user && req.user.uid !== userId) {
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
+    
+    // Get user's items with item details
+    const [rows] = await pool.execute(`
+      SELECT i.*, ui.is_equipped, ui.purchased_at
+      FROM user_items ui
+      JOIN items i ON ui.item_id = i.item_id
+      WHERE ui.user_id = ?
+      ORDER BY ui.purchased_at DESC
+    `, [userId]);
+    
+    res.json({ items: rows });
+  } catch (error) {
+    console.error('Error fetching user items:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+// Purchase an item
+app.post('/api/users/:userId/items', async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    const userId = req.params.userId;
+    const { itemId } = req.body;
+    
+    // Check if user has permission
+    if (req.user && req.user.uid !== userId) {
+      await connection.release();
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
+    
+    if (!itemId) {
+      await connection.release();
+      return res.status(400).json({ error: 'Item ID is required' });
+    }
+    
+    await connection.beginTransaction();
+    
+    // Check if item exists and is active
+    const [itemRows] = await connection.execute(
+      'SELECT * FROM items WHERE item_id = ? AND is_active = 1',
+      [itemId]
+    );
+    
+    if (itemRows.length === 0) {
+      await connection.rollback();
+      await connection.release();
+      return res.status(404).json({ error: 'Item not found or not available' });
+    }
+    
+    const item = itemRows[0];
+    
+    // Check if user already owns this item
+    const [ownershipCheck] = await connection.execute(
+      'SELECT COUNT(*) as count FROM user_items WHERE user_id = ? AND item_id = ?',
+      [userId, itemId]
+    );
+    
+    if (ownershipCheck[0].count > 0) {
+      await connection.rollback();
+      await connection.release();
+      return res.status(400).json({ error: 'You already own this item' });
+    }
+    
+    // Check if user has enough coins
+    const [userRows] = await connection.execute(
+      'SELECT future_coins FROM users WHERE user_id = ?',
+      [userId]
+    );
+    
+    // Create user if doesn't exist
+    if (userRows.length === 0) {
+      try {
+        await connection.execute(
+          `INSERT INTO users (user_id, username, name, email, profile_image, level, xp_points, future_coins, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            userId,
+            userId.substring(0, 20),
+            'User',
+            `${userId}@example.com`,
+            null,
+            1, // Default level
+            0, // Default XP
+            100, // Default coins
+            new Date() // Current timestamp
+          ]
+        );
+        
+        // Check if user has enough coins after creation
+        if (100 < item.price) {
+          await connection.rollback();
+          await connection.release();
+          return res.status(400).json({ error: 'Not enough Future Coins' });
+        }
+      } catch (createError) {
+        console.error('Error creating user:', createError);
+        await connection.rollback();
+        await connection.release();
+        return res.status(500).json({ error: 'Failed to create user' });
+      }
+    } else if (userRows[0].future_coins < item.price) {
+      await connection.rollback();
+      await connection.release();
+      return res.status(400).json({ error: 'Not enough Future Coins' });
+    }
+    
+    // Deduct coins from user
+    await connection.execute(
+      'UPDATE users SET future_coins = future_coins - ? WHERE user_id = ?',
+      [item.price, userId]
+    );
+    
+    // Add item to user's inventory
+    await connection.execute(
+      'INSERT INTO user_items (user_id, item_id) VALUES (?, ?)',
+      [userId, itemId]
+    );
+    
+    // Commit transaction
+    await connection.commit();
+    
+    // Get updated user coins
+    const [updatedUser] = await connection.execute(
+      'SELECT future_coins FROM users WHERE user_id = ?',
+      [userId]
+    );
+    
+    res.status(201).json({
+      success: true,
+      message: `Successfully purchased ${item.name}`,
+      futureCoins: updatedUser[0].future_coins
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Error purchasing item:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  } finally {
+    connection.release();
+  }
+});
+
+// Toggle equip/unequip an item
+app.put('/api/users/:userId/items/:itemId/toggle', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const itemId = req.params.itemId;
+    
+    // Check if user has permission
+    if (req.user && req.user.uid !== userId) {
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
+    
+    // Check if user owns this item
+    const [ownershipCheck] = await pool.execute(
+      'SELECT * FROM user_items WHERE user_id = ? AND item_id = ?',
+      [userId, itemId]
+    );
+    
+    if (ownershipCheck.length === 0) {
+      return res.status(404).json({ error: 'Item not found in your inventory' });
+    }
+    
+    const isCurrentlyEquipped = ownershipCheck[0].is_equipped === 1;
+    
+    // Get item details to check category
+    const [itemDetails] = await pool.execute(
+      'SELECT * FROM items WHERE item_id = ?',
+      [itemId]
+    );
+    
+    if (itemDetails.length === 0) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+    
+    const item = itemDetails[0];
+    
+    // If equipping (not currently equipped), unequip other items in the same category
+    if (!isCurrentlyEquipped) {
+      await pool.execute(`
+        UPDATE user_items ui
+        JOIN items i ON ui.item_id = i.item_id
+        SET ui.is_equipped = 0
+        WHERE ui.user_id = ? AND i.category = ? AND ui.is_equipped = 1
+      `, [userId, item.category]);
+    }
+    
+    // Toggle equipped status
+    await pool.execute(
+      'UPDATE user_items SET is_equipped = ? WHERE user_id = ? AND item_id = ?',
+      [isCurrentlyEquipped ? 0 : 1, userId, itemId]
+    );
+    
+    res.json({
+      success: true,
+      message: isCurrentlyEquipped ? `Unequipped ${item.name}` : `Equipped ${item.name}`,
+      isEquipped: !isCurrentlyEquipped
+    });
+  } catch (error) {
+    console.error('Error toggling item equipped status:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+// Add a route to create sample shop items (for development/testing)
+app.post('/api/admin/setup-shop', async (req, res) => {
+  try {
+    // Check for token for security
+    const token = req.query.token || req.headers['x-admin-token'];
+    if (!token) {
+      return res.status(403).json({ error: 'Admin token required' });
+    }
+    
+    // Sample items
+    const sampleItems = [
+      {
+        name: 'Dark Theme',
+        description: 'A sleek dark theme for the app',
+        category: 'theme',
+        price: 150,
+        is_active: 1
+      },
+      {
+        name: 'Space Avatar',
+        description: 'An astronaut avatar for your profile',
+        category: 'avatar',
+        price: 200,
+        is_active: 1
+      },
+      {
+        name: 'Gold Badge Frame',
+        description: 'A special frame for your profile badges',
+        category: 'badge',
+        price: 250,
+        is_active: 1
+      },
+      {
+        name: 'Animated Celebrations',
+        description: 'Special animations when you complete goals',
+        category: 'feature',
+        price: 300,
+        is_active: 1
+      }
+    ];
+    
+    // Insert sample items
+    for (const item of sampleItems) {
+      await pool.execute(`
+        INSERT INTO items (name, description, category, price, is_active)
+        VALUES (?, ?, ?, ?, ?)
+      `, [item.name, item.description, item.category, item.price, item.is_active]);
+    }
+    
+    res.json({ success: true, message: 'Sample shop items created' });
+  } catch (error) {
+    console.error('Error setting up shop:', error);
+    res.status(500).json({ error: 'Failed to set up shop' });
+  }
+});
 
 // ==== ROUTINES ROUTES ====
 
@@ -1197,13 +1536,14 @@ app.get('/api/users/:id/futurecoins', async (req, res) => {
       // User doesn't exist, create them
       try {
         await pool.execute(
-          `INSERT INTO users (user_id, username, name, email, level, xp_points, future_coins, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO users (user_id, username, name, email, profile_image, level, xp_points, future_coins, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             userId,
             userId.substring(0, 20),
             'User',
             `${userId}@example.com`,
+            null,
             1, // Default level
             0, // Default XP
             100, // Default coins
@@ -1244,13 +1584,14 @@ app.put('/api/users/:id/futurecoins', async (req, res) => {
       // User doesn't exist, create them
       try {
         await pool.execute(
-          `INSERT INTO users (user_id, username, name, email, level, xp_points, future_coins, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO users (user_id, username, name, email, profile_image, level, xp_points, future_coins, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             userId,
             userId.substring(0, 20),
             'User',
             `${userId}@example.com`,
+            null,
             1, // Default level
             0, // Default XP
             amount > 0 ? amount : 0, // Start with the amount if positive
@@ -1297,13 +1638,14 @@ app.put('/api/users/:id/xp', async (req, res) => {
       // User doesn't exist, create them
       try {
         await pool.execute(
-          `INSERT INTO users (user_id, username, name, email, level, xp_points, future_coins, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO users (user_id, username, name, email, profile_image, level, xp_points, future_coins, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             userId,
             userId.substring(0, 20),
             'User',
             `${userId}@example.com`,
+            null,
             1, // Default level
             amount > 0 ? amount : 0, // Start with the amount if positive
             100, // Default coins
@@ -1406,6 +1748,7 @@ app.delete('/api/admin/clear-goals', async (req, res) => {
         name VARCHAR(255) NOT NULL,
         email VARCHAR(255) NOT NULL,
         password VARCHAR(255),
+        profile_image VARCHAR(255),
         level INT NOT NULL DEFAULT 1,
         xp_points INT NOT NULL DEFAULT 0,
         future_coins INT NOT NULL DEFAULT 0,
@@ -1413,6 +1756,142 @@ app.delete('/api/admin/clear-goals', async (req, res) => {
         last_login DATETIME
       )
     `);
+    
+    // First check if communities table exists
+    const [communitiesTables] = await connection.execute(`
+      SELECT TABLE_NAME 
+      FROM INFORMATION_SCHEMA.TABLES 
+      WHERE TABLE_SCHEMA = DATABASE() 
+      AND TABLE_NAME = 'communities'
+    `);
+    
+    // If not, create community tables using SQL from our community tables file
+    if (communitiesTables.length === 0) {
+      console.log('Creating community tables...');
+      
+      // These are the SQL statements from the communityTables file
+      await connection.execute(`
+        CREATE TABLE communities (
+          community_id INT AUTO_INCREMENT PRIMARY KEY,
+          name VARCHAR(100) NOT NULL,
+          description TEXT,
+          category VARCHAR(50) NOT NULL,
+          image_url VARCHAR(255),
+          created_by VARCHAR(255) NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (created_by) REFERENCES users(user_id) ON DELETE CASCADE
+        )
+      `);
+      
+      await connection.execute(`
+        CREATE TABLE community_members (
+          community_id INT NOT NULL,
+          user_id VARCHAR(255) NOT NULL,
+          joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (community_id, user_id),
+          FOREIGN KEY (community_id) REFERENCES communities(community_id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )
+      `);
+      
+      await connection.execute(`
+        CREATE TABLE posts (
+          post_id INT AUTO_INCREMENT PRIMARY KEY,
+          community_id INT NOT NULL,
+          user_id VARCHAR(255) NOT NULL,
+          content TEXT NOT NULL,
+          image_url VARCHAR(255),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (community_id) REFERENCES communities(community_id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )
+      `);
+      
+      await connection.execute(`
+        CREATE TABLE comments (
+          comment_id INT AUTO_INCREMENT PRIMARY KEY,
+          post_id INT NOT NULL,
+          user_id VARCHAR(255) NOT NULL,
+          content TEXT NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (post_id) REFERENCES posts(post_id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )
+      `);
+      
+      await connection.execute(`
+        CREATE TABLE post_likes (
+          post_id INT NOT NULL,
+          user_id VARCHAR(255) NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (post_id, user_id),
+          FOREIGN KEY (post_id) REFERENCES posts(post_id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )
+      `);
+      
+      await connection.execute(`
+        CREATE TABLE comment_likes (
+          comment_id INT NOT NULL,
+          user_id VARCHAR(255) NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (comment_id, user_id),
+          FOREIGN KEY (comment_id) REFERENCES comments(comment_id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )
+      `);
+      
+      await connection.execute(`
+        CREATE TABLE post_reports (
+          report_id INT AUTO_INCREMENT PRIMARY KEY,
+          post_id INT NOT NULL,
+          user_id VARCHAR(255) NOT NULL,
+          reason TEXT NOT NULL,
+          status ENUM('pending', 'reviewed', 'resolved') DEFAULT 'pending',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (post_id) REFERENCES posts(post_id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )
+      `);
+      
+      await connection.execute(`
+        CREATE TABLE comment_reports (
+          report_id INT AUTO_INCREMENT PRIMARY KEY,
+          comment_id INT NOT NULL,
+          user_id VARCHAR(255) NOT NULL,
+          reason TEXT NOT NULL,
+          status ENUM('pending', 'reviewed', 'resolved') DEFAULT 'pending',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (comment_id) REFERENCES comments(comment_id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )
+      `);
+      
+      await connection.execute(`
+        CREATE TABLE community_moderators (
+          community_id INT NOT NULL,
+          user_id VARCHAR(255) NOT NULL,
+          added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          added_by VARCHAR(255) NOT NULL,
+          PRIMARY KEY (community_id, user_id),
+          FOREIGN KEY (community_id) REFERENCES communities(community_id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+          FOREIGN KEY (added_by) REFERENCES users(user_id) ON DELETE CASCADE
+        )
+      `);
+      
+      // Create indexes
+      await connection.execute(`CREATE INDEX idx_posts_community_id ON posts(community_id)`);
+      await connection.execute(`CREATE INDEX idx_posts_user_id ON posts(user_id)`);
+      await connection.execute(`CREATE INDEX idx_comments_post_id ON comments(post_id)`);
+      await connection.execute(`CREATE INDEX idx_comments_user_id ON comments(user_id)`);
+      await connection.execute(`CREATE INDEX idx_community_members_user_id ON community_members(user_id)`);
+      
+      console.log('Community tables created successfully!');
+    }
     
     // Create goals table if it doesn't exist
     await connection.execute(`
@@ -1532,6 +2011,95 @@ app.delete('/api/admin/clear-goals', async (req, res) => {
       } catch (columnError) {
         console.error('Failed to add type column:', columnError);
       }
+    }
+    
+    // Create views for communities
+    try {
+      // Create post stats view
+      await connection.execute(`
+        CREATE OR REPLACE VIEW post_stats AS
+        SELECT 
+          p.post_id,
+          p.community_id,
+          p.user_id,
+          p.content,
+          p.image_url,
+          p.created_at,
+          p.updated_at,
+          COUNT(DISTINCT pl.user_id) as likes_count,
+          COUNT(DISTINCT c.comment_id) as comments_count
+        FROM posts p
+        LEFT JOIN post_likes pl ON p.post_id = pl.post_id
+        LEFT JOIN comments c ON p.post_id = c.post_id
+        GROUP BY p.post_id
+      `);
+      
+      // Create community stats view
+      await connection.execute(`
+        CREATE OR REPLACE VIEW community_stats AS
+        SELECT 
+          c.community_id,
+          c.name,
+          c.description,
+          c.category,
+          c.image_url,
+          c.created_by,
+          c.created_at,
+          COUNT(DISTINCT cm.user_id) as members_count,
+          COUNT(DISTINCT p.post_id) as posts_count
+        FROM communities c
+        LEFT JOIN community_members cm ON c.community_id = cm.community_id
+        LEFT JOIN posts p ON c.community_id = p.community_id
+        GROUP BY c.community_id
+      `);
+      
+      console.log('Created community stats views');
+    } catch(viewError) {
+      console.error('Error creating views:', viewError);
+    }
+    
+    // Create stored procedures
+    try {
+      // Check if procedure exists before creating
+      const [procedureCheck] = await connection.execute(`
+        SELECT ROUTINE_NAME
+        FROM INFORMATION_SCHEMA.ROUTINES
+        WHERE ROUTINE_SCHEMA = DATABASE()
+        AND ROUTINE_TYPE = 'PROCEDURE'
+        AND ROUTINE_NAME = 'get_communities_with_membership'
+      `);
+      
+      if (procedureCheck.length === 0) {
+        // Create the procedure
+        await connection.execute(`
+          CREATE PROCEDURE get_communities_with_membership(IN user_id_param VARCHAR(255))
+          BEGIN
+            SELECT 
+              c.community_id,
+              c.name,
+              c.description,
+              c.category,
+              c.image_url,
+              c.created_by,
+              c.created_at,
+              COUNT(DISTINCT cm_all.user_id) as members_count,
+              COUNT(DISTINCT p.post_id) as posts_count,
+              CASE WHEN cm_user.user_id IS NOT NULL THEN 1 ELSE 0 END as is_joined
+            FROM communities c
+            LEFT JOIN community_members cm_all ON c.community_id = cm_all.community_id
+            LEFT JOIN community_members cm_user ON c.community_id = cm_user.community_id AND cm_user.user_id = user_id_param
+            LEFT JOIN posts p ON c.community_id = p.community_id
+            GROUP BY c.community_id
+            ORDER BY c.name;
+          END
+        `);
+        
+        console.log('Created get_communities_with_membership procedure');
+      }
+      
+      // Check and create other procedures similarly
+    } catch(procError) {
+      console.error('Error creating stored procedures:', procError);
     }
     
     // Verify connection is good

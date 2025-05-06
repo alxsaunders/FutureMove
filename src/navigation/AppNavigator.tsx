@@ -8,6 +8,11 @@ import SplashScreen from "../screens/SplashScreen";
 import SignUpScreen from "../screens/SignUpScreen";
 import BottomTabNavigator from "./BottomTabNavigator";
 
+// Import community-related screens
+import CommunityDetailScreen from "../screens/CommunityDetailScreen";
+import CreatePostScreen from "../screens/CreatePostScreen";
+import PostDetailScreen from "../screens/PostDetailScreen";
+
 const Stack = createStackNavigator();
 
 const AppNavigator = () => {
@@ -22,6 +27,14 @@ const AppNavigator = () => {
         <Stack.Screen name="Splash" component={SplashScreen} />
         <Stack.Screen name="SignUp" component={SignUpScreen} />
         <Stack.Screen name="Main" component={BottomTabNavigator} />
+
+        {/* Add community-related screens here */}
+        <Stack.Screen
+          name="CommunityDetail"
+          component={CommunityDetailScreen}
+        />
+        <Stack.Screen name="CreatePost" component={CreatePostScreen} />
+        <Stack.Screen name="PostDetail" component={PostDetailScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

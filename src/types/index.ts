@@ -72,27 +72,46 @@ export interface Routine {
 
 // Community-related types
 export interface Community {
-  id: number;
+  id: string;
   name: string;
-  description: string;
-  memberCount: number;
   category: string;
-  image?: string;
+  members: number;
+  posts: number;
+  image: string;
+  description: string;
+  isJoined: boolean;
 }
 
-export interface CommunityPost {
-  id: number;
-  communityId: number;
+// Post type
+export interface Post {
+  id: string;
+  communityId: string;
+  communityName: string;
   userId: string;
-  username: string;
-  userImage?: string;
+  userName: string;
+  userAvatar: string;
   content: string;
-  timestamp: string;
-  likeCount: number;
-  commentCount: number;
+  image: string | null;
+  createdAt: string;
+  likes: number;
+  comments: number;
   isLiked: boolean;
 }
 
+// Comment type
+export interface Comment {
+  id: string;
+  postId: string;
+  userId: string;
+  userName: string;
+  userAvatar: string;
+  content: string;
+  createdAt: string;
+  likes: number;
+  isLiked: boolean;
+}
+
+// User type
 // News and quotes
 export interface News {
   id: number;

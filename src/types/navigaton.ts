@@ -23,9 +23,15 @@ export type RootStackParamList = {
     filterType?: string;
   };
   Community: undefined;
+  
   ItemShop: undefined;
   Profile: undefined;
+
+  CommunityDetail: { communityId: number | string };
+  CreatePost: { communityId?: number | string };
+  PostDetail: { postId: number | string };
 };
+
 
 // Bottom Tab Parameters
 export type BottomTabParamList = {
@@ -57,6 +63,23 @@ export type LoginScreenNavigationProp = StackNavigationProp<RootStackParamList, 
 export type HomeScreenRouteProp = RouteProp<RootStackParamList, "Home">;
 export type GoalDetailScreenRouteProp = RouteProp<RootStackParamList, "GoalDetail">;
 export type LoginScreenRouteProp = RouteProp<RootStackParamList, "Login">;
+
+// Add these to your navigation types file
+export type CommunityDetailScreenNavigationProp = StackNavigationProp<RootStackParamList, "CommunityDetail">;
+export type CommunityDetailScreenRouteProp = RouteProp<RootStackParamList, "CommunityDetail">;
+
+export type CommunityDetailScreenProps = {
+  navigation: CommunityDetailScreenNavigationProp;
+  route: CommunityDetailScreenRouteProp;
+};
+
+export type CreatePostScreenNavigationProp = StackNavigationProp<RootStackParamList, "CreatePost">;
+export type CreatePostScreenRouteProp = RouteProp<RootStackParamList, "CreatePost">;
+
+export type CreatePostScreenProps = {
+  navigation: CreatePostScreenNavigationProp;
+  route: CreatePostScreenRouteProp;
+};
 
 // Combined Screen Props
 export type HomeScreenProps = {
