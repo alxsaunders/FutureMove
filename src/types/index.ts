@@ -72,13 +72,13 @@ export interface Routine {
 
 // Community-related types
 export interface Community {
-  id: string;
+  id: string | number;
   name: string;
   category: string;
   members: number;
   posts: number;
-  image: string;
-  description: string;
+   image: string | null;  // Allow null 
+  description: string | null;  //
   isJoined: boolean;
 }
 

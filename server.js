@@ -3,7 +3,8 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const dotenv = require('dotenv');
 const admin = require('firebase-admin'); // Add Firebase Admin SDK
-const { DOMException } = require('domexception')
+const { DOMException } = require('domexception');
+const { initializeShopItems } = require('./routes/shopSetup'); // Add shop setup
 
 // Make it global - this line assigns DOMException to the global object
 global.DOMException = DOMException
@@ -66,11 +67,13 @@ app.get('/api/test', (req, res) => {
 const communityRoutes = require('./routes/community')(pool, authenticateFirebaseToken);
 const postsRoutes = require('./routes/posts')(pool, authenticateFirebaseToken);
 const commentsRoutes = require('./routes/comments')(pool, authenticateFirebaseToken);
+const itemShopRoutes = require('./routes/itemshop')(pool, authenticateFirebaseToken);
 
 // Use route modules
 app.use('/api/communities', communityRoutes);
 app.use('/api/posts', postsRoutes);
 app.use('/api/comments', commentsRoutes);
+app.use('/api/items', itemShopRoutes);  // Mount at /api/items instead of /api
 
 // ==== USER ROUTES ====
 
@@ -332,7 +335,7 @@ app.get('/api/users/:userId/streak', async (req, res) => {
     `, [userId]);
     
     if (userCheck[0].count === 0) {
-      // User doesn't exist, create a new user
+      // User doesn't exist, create them
       try {
         await pool.execute(`
           INSERT INTO users (user_id, username, name, email, profile_image, level, xp_points, future_coins, created_at)
@@ -1104,330 +1107,6 @@ app.patch('/api/subgoals/:id/toggle', async (req, res) => {
     res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
-// ==== ITEM SHOP ROUTES ====
-
-// Create items table if it doesn't exist
-(async () => {
-  try {
-    const connection = await pool.getConnection();
-    
-    // Create items table if it doesn't exist
-    await connection.execute(`
-      CREATE TABLE IF NOT EXISTS items (
-        item_id INT AUTO_INCREMENT PRIMARY KEY,
-        name VARCHAR(100) NOT NULL,
-        description TEXT,
-        image_url VARCHAR(255),
-        category VARCHAR(50) NOT NULL,
-        price INT NOT NULL,
-        is_active TINYINT(1) NOT NULL DEFAULT 1,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    
-    // Create user_items table if it doesn't exist (to track purchases)
-    await connection.execute(`
-      CREATE TABLE IF NOT EXISTS user_items (
-        user_item_id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id VARCHAR(255) NOT NULL,
-        item_id INT NOT NULL,
-        purchased_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        is_equipped TINYINT(1) NOT NULL DEFAULT 0,
-        INDEX idx_user_items_user (user_id),
-        INDEX idx_user_items_item (item_id),
-        UNIQUE KEY unique_user_item (user_id, item_id)
-      )
-    `);
-    
-    connection.release();
-    console.log('Item shop tables created successfully!');
-  } catch (error) {
-    console.error('Error creating item shop tables:', error);
-  }
-})();
-
-// Get all items
-app.get('/api/items', async (req, res) => {
-  try {
-    const [rows] = await pool.execute(
-      'SELECT * FROM items WHERE is_active = 1 ORDER BY category, price'
-    );
-    
-    res.json({ items: rows });
-  } catch (error) {
-    console.error('Error fetching items:', error);
-    res.status(500).json({ error: 'Internal server error', details: error.message });
-  }
-});
-
-// Get user's purchased items
-app.get('/api/users/:userId/items', async (req, res) => {
-  try {
-    const userId = req.params.userId;
-    
-    // Check if user has permission
-    if (req.user && req.user.uid !== userId) {
-      return res.status(403).json({ error: 'Unauthorized access' });
-    }
-    
-    // Get user's items with item details
-    const [rows] = await pool.execute(`
-      SELECT i.*, ui.is_equipped, ui.purchased_at
-      FROM user_items ui
-      JOIN items i ON ui.item_id = i.item_id
-      WHERE ui.user_id = ?
-      ORDER BY ui.purchased_at DESC
-    `, [userId]);
-    
-    res.json({ items: rows });
-  } catch (error) {
-    console.error('Error fetching user items:', error);
-    res.status(500).json({ error: 'Internal server error', details: error.message });
-  }
-});
-
-// Purchase an item
-app.post('/api/users/:userId/items', async (req, res) => {
-  const connection = await pool.getConnection();
-  
-  try {
-    const userId = req.params.userId;
-    const { itemId } = req.body;
-    
-    // Check if user has permission
-    if (req.user && req.user.uid !== userId) {
-      await connection.release();
-      return res.status(403).json({ error: 'Unauthorized access' });
-    }
-    
-    if (!itemId) {
-      await connection.release();
-      return res.status(400).json({ error: 'Item ID is required' });
-    }
-    
-    await connection.beginTransaction();
-    
-    // Check if item exists and is active
-    const [itemRows] = await connection.execute(
-      'SELECT * FROM items WHERE item_id = ? AND is_active = 1',
-      [itemId]
-    );
-    
-    if (itemRows.length === 0) {
-      await connection.rollback();
-      await connection.release();
-      return res.status(404).json({ error: 'Item not found or not available' });
-    }
-    
-    const item = itemRows[0];
-    
-    // Check if user already owns this item
-    const [ownershipCheck] = await connection.execute(
-      'SELECT COUNT(*) as count FROM user_items WHERE user_id = ? AND item_id = ?',
-      [userId, itemId]
-    );
-    
-    if (ownershipCheck[0].count > 0) {
-      await connection.rollback();
-      await connection.release();
-      return res.status(400).json({ error: 'You already own this item' });
-    }
-    
-    // Check if user has enough coins
-    const [userRows] = await connection.execute(
-      'SELECT future_coins FROM users WHERE user_id = ?',
-      [userId]
-    );
-    
-    // Create user if doesn't exist
-    if (userRows.length === 0) {
-      try {
-        await connection.execute(
-          `INSERT INTO users (user_id, username, name, email, profile_image, level, xp_points, future_coins, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            userId,
-            userId.substring(0, 20),
-            'User',
-            `${userId}@example.com`,
-            null,
-            1, // Default level
-            0, // Default XP
-            100, // Default coins
-            new Date() // Current timestamp
-          ]
-        );
-        
-        // Check if user has enough coins after creation
-        if (100 < item.price) {
-          await connection.rollback();
-          await connection.release();
-          return res.status(400).json({ error: 'Not enough Future Coins' });
-        }
-      } catch (createError) {
-        console.error('Error creating user:', createError);
-        await connection.rollback();
-        await connection.release();
-        return res.status(500).json({ error: 'Failed to create user' });
-      }
-    } else if (userRows[0].future_coins < item.price) {
-      await connection.rollback();
-      await connection.release();
-      return res.status(400).json({ error: 'Not enough Future Coins' });
-    }
-    
-    // Deduct coins from user
-    await connection.execute(
-      'UPDATE users SET future_coins = future_coins - ? WHERE user_id = ?',
-      [item.price, userId]
-    );
-    
-    // Add item to user's inventory
-    await connection.execute(
-      'INSERT INTO user_items (user_id, item_id) VALUES (?, ?)',
-      [userId, itemId]
-    );
-    
-    // Commit transaction
-    await connection.commit();
-    
-    // Get updated user coins
-    const [updatedUser] = await connection.execute(
-      'SELECT future_coins FROM users WHERE user_id = ?',
-      [userId]
-    );
-    
-    res.status(201).json({
-      success: true,
-      message: `Successfully purchased ${item.name}`,
-      futureCoins: updatedUser[0].future_coins
-    });
-  } catch (error) {
-    await connection.rollback();
-    console.error('Error purchasing item:', error);
-    res.status(500).json({ error: 'Internal server error', details: error.message });
-  } finally {
-    connection.release();
-  }
-});
-
-// Toggle equip/unequip an item
-app.put('/api/users/:userId/items/:itemId/toggle', async (req, res) => {
-  try {
-    const userId = req.params.userId;
-    const itemId = req.params.itemId;
-    
-    // Check if user has permission
-    if (req.user && req.user.uid !== userId) {
-      return res.status(403).json({ error: 'Unauthorized access' });
-    }
-    
-    // Check if user owns this item
-    const [ownershipCheck] = await pool.execute(
-      'SELECT * FROM user_items WHERE user_id = ? AND item_id = ?',
-      [userId, itemId]
-    );
-    
-    if (ownershipCheck.length === 0) {
-      return res.status(404).json({ error: 'Item not found in your inventory' });
-    }
-    
-    const isCurrentlyEquipped = ownershipCheck[0].is_equipped === 1;
-    
-    // Get item details to check category
-    const [itemDetails] = await pool.execute(
-      'SELECT * FROM items WHERE item_id = ?',
-      [itemId]
-    );
-    
-    if (itemDetails.length === 0) {
-      return res.status(404).json({ error: 'Item not found' });
-    }
-    
-    const item = itemDetails[0];
-    
-    // If equipping (not currently equipped), unequip other items in the same category
-    if (!isCurrentlyEquipped) {
-      await pool.execute(`
-        UPDATE user_items ui
-        JOIN items i ON ui.item_id = i.item_id
-        SET ui.is_equipped = 0
-        WHERE ui.user_id = ? AND i.category = ? AND ui.is_equipped = 1
-      `, [userId, item.category]);
-    }
-    
-    // Toggle equipped status
-    await pool.execute(
-      'UPDATE user_items SET is_equipped = ? WHERE user_id = ? AND item_id = ?',
-      [isCurrentlyEquipped ? 0 : 1, userId, itemId]
-    );
-    
-    res.json({
-      success: true,
-      message: isCurrentlyEquipped ? `Unequipped ${item.name}` : `Equipped ${item.name}`,
-      isEquipped: !isCurrentlyEquipped
-    });
-  } catch (error) {
-    console.error('Error toggling item equipped status:', error);
-    res.status(500).json({ error: 'Internal server error', details: error.message });
-  }
-});
-
-// Add a route to create sample shop items (for development/testing)
-app.post('/api/admin/setup-shop', async (req, res) => {
-  try {
-    // Check for token for security
-    const token = req.query.token || req.headers['x-admin-token'];
-    if (!token) {
-      return res.status(403).json({ error: 'Admin token required' });
-    }
-    
-    // Sample items
-    const sampleItems = [
-      {
-        name: 'Dark Theme',
-        description: 'A sleek dark theme for the app',
-        category: 'theme',
-        price: 150,
-        is_active: 1
-      },
-      {
-        name: 'Space Avatar',
-        description: 'An astronaut avatar for your profile',
-        category: 'avatar',
-        price: 200,
-        is_active: 1
-      },
-      {
-        name: 'Gold Badge Frame',
-        description: 'A special frame for your profile badges',
-        category: 'badge',
-        price: 250,
-        is_active: 1
-      },
-      {
-        name: 'Animated Celebrations',
-        description: 'Special animations when you complete goals',
-        category: 'feature',
-        price: 300,
-        is_active: 1
-      }
-    ];
-    
-    // Insert sample items
-    for (const item of sampleItems) {
-      await pool.execute(`
-        INSERT INTO items (name, description, category, price, is_active)
-        VALUES (?, ?, ?, ?, ?)
-      `, [item.name, item.description, item.category, item.price, item.is_active]);
-    }
-    
-    res.json({ success: true, message: 'Sample shop items created' });
-  } catch (error) {
-    console.error('Error setting up shop:', error);
-    res.status(500).json({ error: 'Failed to set up shop' });
-  }
-});
 
 // ==== ROUTINES ROUTES ====
 
@@ -1520,62 +1199,10 @@ app.put('/api/routines/:id/toggle', async (req, res) => {
 
 // ==== USER DATA ENDPOINTS ====
 
-app.get('/api/users/:id/futurecoins', async (req, res) => {
-  try {
-    const userId = req.params.id;
-    
-    // Check if user has permission
-    if (req.user && req.user.uid !== userId) {
-      return res.status(403).json({ error: 'Unauthorized access' });
-    }
-    
-    // Check if user exists first
-    const [userCheck] = await pool.execute(`SELECT COUNT(*) as count FROM users WHERE user_id = ?`, [userId]);
-    
-    if (userCheck[0].count === 0) {
-      // User doesn't exist, create them
-      try {
-        await pool.execute(
-          `INSERT INTO users (user_id, username, name, email, profile_image, level, xp_points, future_coins, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            userId,
-            userId.substring(0, 20),
-            'User',
-            `${userId}@example.com`,
-            null,
-            1, // Default level
-            0, // Default XP
-            100, // Default coins
-            new Date() // Current timestamp
-          ]
-        );
-        
-        return res.json({ futureCoins: 100 });
-      } catch (createError) {
-        console.error('Error creating user:', createError);
-        return res.status(500).json({ error: 'Failed to create user' });
-      }
-    }
-    
-    const [rows] = await pool.execute(`SELECT future_coins FROM users WHERE user_id = ?`, [userId]);
-    res.json({ futureCoins: rows[0]?.future_coins || 0 });
-  } catch (error) {
-    console.error('Error fetching future coins:', error);
-    res.status(500).json({ error: 'Internal server error', details: error.message });
-  }
-});
-
-// Used by GoalService.updateUserCoins
 app.put('/api/users/:id/futurecoins', async (req, res) => {
   try {
     const userId = req.params.id;
     const amount = Number(req.body.amount || 0);
-    
-    // Check if user has permission
-    if (req.user && req.user.uid !== userId) {
-      return res.status(403).json({ error: 'Unauthorized access' });
-    }
     
     // Check if user exists
     const [userCheck] = await pool.execute(`SELECT COUNT(*) as count FROM users WHERE user_id = ?`, [userId]);
@@ -1625,11 +1252,6 @@ app.put('/api/users/:id/xp', async (req, res) => {
   try {
     const userId = req.params.id;
     const amount = Number(req.body.amount || 0);
-    
-    // Check if user has permission
-    if (req.user && req.user.uid !== userId) {
-      return res.status(403).json({ error: 'Unauthorized access' });
-    }
     
     // Check if user exists
     const [userCheck] = await pool.execute(`SELECT COUNT(*) as count FROM users WHERE user_id = ?`, [userId]);
@@ -2013,6 +1635,62 @@ app.delete('/api/admin/clear-goals', async (req, res) => {
       }
     }
     
+    // Create item shop tables
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS items (
+        item_id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        description TEXT,
+        image_url VARCHAR(255),
+        category VARCHAR(50) NOT NULL,
+        price INT NOT NULL,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS user_items (
+        user_item_id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id VARCHAR(255) NOT NULL,
+        item_id INT NOT NULL,
+        purchased_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        is_equipped TINYINT(1) NOT NULL DEFAULT 0,
+        INDEX idx_user_items_user (user_id),
+        INDEX idx_user_items_item (item_id),
+        UNIQUE KEY unique_user_item (user_id, item_id)
+      )
+    `);
+    
+    // Check if shop_items table exists (old structure)
+    const [shopItemsTables] = await connection.execute(`
+      SELECT TABLE_NAME 
+      FROM INFORMATION_SCHEMA.TABLES 
+      WHERE TABLE_SCHEMA = DATABASE() 
+      AND TABLE_NAME = 'shop_items'
+    `);
+    
+    // If shop_items exists, migrate data to items table
+    if (shopItemsTables.length > 0) {
+      // Check if items table is empty
+      const [itemsCount] = await connection.execute(`SELECT COUNT(*) as count FROM items`);
+      
+      if (itemsCount[0].count === 0) {
+        // Copy data from shop_items to items
+        await connection.execute(`
+          INSERT INTO items (name, description, image_url, category, price, is_active, created_at)
+          SELECT name, description, image_url, category, price, is_active, created_at
+          FROM shop_items
+        `);
+        
+        console.log('Migrated data from shop_items to items table');
+      }
+      
+      // Drop the old shop_items table
+      await connection.execute(`DROP TABLE shop_items`);
+      console.log('Dropped old shop_items table');
+    }
+    
     // Create views for communities
     try {
       // Create post stats view
@@ -2101,6 +1779,13 @@ app.delete('/api/admin/clear-goals', async (req, res) => {
     } catch(procError) {
       console.error('Error creating stored procedures:', procError);
     }
+
+    // Initialize shop items
+    try {
+      await initializeShopItems(pool);
+    } catch (shopError) {
+      console.error('Error during shop initialization:', shopError);
+    }
     
     // Verify connection is good
     await connection.ping();
@@ -2108,6 +1793,7 @@ app.delete('/api/admin/clear-goals', async (req, res) => {
 
     app.listen(3001, '0.0.0.0', () => {
       console.log(`\u2705 Server running on port 3001`);
+      console.log(`\u2705 Shop initialized and ready`);
     });
   } catch (error) {
     console.error('\u274C Unable to connect to database:', error);

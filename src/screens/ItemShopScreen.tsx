@@ -1,398 +1,507 @@
-import React, { useState, useEffect, useCallback } from "react";
+// Log user ID and route params
+
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
-  TouchableOpacity,
-  Image,
-  Alert,
   ActivityIndicator,
+  TouchableOpacity,
+  Platform,
+  Alert,
+  Image,
+  SafeAreaView,
+  StatusBar,
+  Dimensions,
+  Modal,
+  ScrollView,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useAuth } from "../contexts/AuthContext";
-import { useIsFocused } from "@react-navigation/native";
-import axios from "axios";
-import { getApiBaseUrl } from "../services/itemService";
 
-// Define TypeScript interfaces
-interface Item {
-  item_id: number;
-  name: string;
-  description: string;
-  image_url: string | null;
-  category: string;
-  price: number;
-  is_active: number;
-  created_at: string;
-}
+// Get screen width for calculating item width
+const screenWidth = Dimensions.get("window").width;
 
-interface UserItem extends Item {
-  is_equipped: number;
-  purchased_at: string;
-}
+// API URL based on platform
+const API_URL =
+  Platform.OS === "android"
+    ? "http://10.0.2.2:3001/api"
+    : "http://localhost:3001/api";
 
-const ItemShopScreen = () => {
-  const [items, setItems] = useState<Item[]>([]);
-  const [userItems, setUserItems] = useState<UserItem[]>([]);
-  const [futureCoins, setFutureCoins] = useState<number>(0);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [activeTab, setActiveTab] = useState<"shop" | "inventory">("shop");
+// EMERGENCY FALLBACK - replace with a valid user ID from your database
+const FALLBACK_USER_ID = "KbtY3t4Tatd0r5tCjnjlmJyNT5R2";
 
-  // Use the correct auth hook that gives access to currentUser
-  const { currentUser, updateUserCoins } = useAuth();
-  const isFocused = useIsFocused();
+const ItemShopScreen = ({ route, navigation }) => {
+  // Screen state
+  const [items, setItems] = useState([]);
+  const [userItems, setUserItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [coins, setCoins] = useState(0);
+  const [activeTab, setActiveTab] = useState("shop"); // 'shop' or 'inventory'
+  const [refreshKey, setRefreshKey] = useState(0); // Add state for forcing refresh
 
-  // Use API base URL from service with error handling
-  const API_URL = React.useMemo(() => {
-    try {
-      return getApiBaseUrl();
-    } catch (error) {
-      console.error("Error getting API URL:", error);
-      // Fallback URL to prevent crashes
-      return "http://localhost:3001/api";
-    }
-  }, []);
+  // Modal state
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedItem, setSelectedItem] = useState(null);
 
-  // Fetch data with error handling
-  const fetchData = useCallback(async () => {
-    if (!currentUser) {
+  // Get userId from route params or use fallback
+  const userId = route.params?.userId || FALLBACK_USER_ID;
+
+  // Add focus listener to refresh when screen is focused
+  useEffect(() => {
+    // This will trigger whenever the screen comes into focus
+    const unsubscribe = navigation.addListener("focus", () => {
+      console.log("[SHOP] Screen focused - refreshing data");
+      // Perform a full data refresh
+      fetchData();
+    });
+
+    // Clean up the listener when component unmounts
+    return unsubscribe;
+  }, [navigation, fetchData]);
+
+  // Fetch shop data when params or refresh key changes
+  useEffect(() => {
+    fetchData();
+  }, [userId, route.params?.forceRefresh, refreshKey]);
+
+  const fetchData = async () => {
+    if (!userId) {
+      console.log("[SHOP] No userId available, skipping fetch");
       setLoading(false);
       return;
     }
 
     setLoading(true);
+    console.log(`[SHOP] Fetching data for user ${userId}`);
+
     try {
-      // Fetch all available shop items with error handling
-      let itemsData: Item[] = [];
-      try {
-        const itemsResponse = await axios.get(`${API_URL}/items`, {
-          timeout: 10000, // 10 second timeout
-        });
-        itemsData = itemsResponse.data.items || [];
-        setItems(itemsData);
-      } catch (itemsError) {
-        console.error("Error fetching shop items:", itemsError);
-        // Don't fail completely, continue to try fetching user items
-      }
+      // Get shop items
+      const shopResponse = await fetch(`${API_URL}/items`);
+      const shopData = await shopResponse.json();
+      setItems(shopData);
+      console.log(`[SHOP] Fetched ${shopData.length} shop items`);
 
-      // Fetch user's purchased items with error handling
-      try {
-        const userItemsResponse = await axios.get(
-          `${API_URL}/users/${currentUser.id}/items`,
-          {
-            timeout: 10000, // 10 second timeout
-          }
-        );
-        const userItemsData = userItemsResponse.data.items || [];
-        setUserItems(userItemsData);
-      } catch (userItemsError) {
-        console.error("Error fetching user items:", userItemsError);
-        // Continue with the coins fetch
-      }
+      // Get user coins
+      const coinsResponse = await fetch(`${API_URL}/items/coins/${userId}`);
+      const coinsData = await coinsResponse.json();
+      setCoins(coinsData.futureCoins);
+      console.log(`[SHOP] User has ${coinsData.futureCoins} coins`);
 
-      // Use the current user's coins from context
-      if (currentUser.future_coins !== undefined) {
-        setFutureCoins(currentUser.future_coins);
-      }
+      // Get user inventory
+      const inventoryResponse = await fetch(`${API_URL}/items/user/${userId}`);
+      const inventoryData = await inventoryResponse.json();
+      setUserItems(inventoryData);
+      console.log(`[SHOP] User has ${inventoryData.length} items in inventory`);
     } catch (error) {
-      console.error("Error in fetchData:", error);
-      Alert.alert("Error", "Failed to load shop data. Please try again.");
+      console.error("[SHOP] Error fetching data:", error);
+      Alert.alert("Error", "Could not load shop data. Please try again later.");
     } finally {
       setLoading(false);
     }
-  }, [API_URL, currentUser]);
-
-  // Fetch data on screen focus
-  useEffect(() => {
-    if (isFocused) {
-      fetchData();
-    }
-  }, [isFocused, fetchData]);
-
-  // Handle purchase with better error handling
-  const handlePurchase = async (item: Item) => {
-    if (!currentUser) {
-      Alert.alert("Error", "You must be logged in to make purchases.");
-      return;
-    }
-
-    // Check if user already owns this item
-    const alreadyOwned = userItems.some(
-      (userItem) => userItem.item_id === item.item_id
-    );
-    if (alreadyOwned) {
-      Alert.alert("Already Owned", "You already own this item.");
-      return;
-    }
-
-    // Check if user has enough coins
-    if (futureCoins < item.price) {
-      Alert.alert(
-        "Not Enough Coins",
-        "You need more FutureCoins to purchase this item."
-      );
-      return;
-    }
-
-    // Confirm purchase
-    Alert.alert(
-      "Confirm Purchase",
-      `Do you want to purchase ${item.name} for ${item.price} FutureCoins?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Purchase",
-          onPress: async () => {
-            try {
-              setLoading(true);
-              const response = await axios.post(
-                `${API_URL}/users/${currentUser.id}/items`,
-                {
-                  itemId: item.item_id,
-                },
-                {
-                  timeout: 10000, // 10 second timeout
-                }
-              );
-
-              // Update future coins using context method
-              const newCoinsAmount = response.data.futureCoins;
-              if (typeof newCoinsAmount === "number") {
-                const coinDifference = newCoinsAmount - futureCoins;
-                try {
-                  await updateUserCoins(coinDifference);
-                } catch (updateCoinsError) {
-                  console.error("Error updating user coins:", updateCoinsError);
-                }
-
-                // Update local state
-                setFutureCoins(newCoinsAmount);
-              }
-
-              // Fetch updated user items
-              try {
-                const userItemsResponse = await axios.get(
-                  `${API_URL}/users/${currentUser.id}/items`,
-                  {
-                    timeout: 5000, // 5 second timeout
-                  }
-                );
-                setUserItems(userItemsResponse.data.items || []);
-              } catch (fetchError) {
-                console.error("Error fetching updated user items:", fetchError);
-              }
-
-              Alert.alert("Success", `You have purchased ${item.name}!`);
-            } catch (error) {
-              console.error("Error purchasing item:", error);
-              Alert.alert(
-                "Error",
-                "Failed to purchase item. Please try again."
-              );
-            } finally {
-              setLoading(false);
-            }
-          },
-        },
-      ]
-    );
   };
 
-  // Handle toggle equip with better error handling
-  const handleToggleEquip = async (item: UserItem) => {
-    if (!currentUser) {
-      Alert.alert("Error", "You must be logged in to equip items.");
-      return;
-    }
+  // Function to force a screen refresh
+  const refreshScreen = () => {
+    setRefreshKey((prevKey) => prevKey + 1);
+  };
+
+  // Show item detail in modal instead of navigating to another screen
+  const showItemDetail = (item) => {
+    // Make sure we have the latest data before showing details
+    refreshScreen();
+
+    const isOwned = userItems.some(
+      (userItem) => userItem.item_id === item.item_id
+    );
+
+    // Set the selected item with ownership status
+    setSelectedItem({
+      ...item,
+      isOwned,
+    });
+
+    // Show the modal
+    setModalVisible(true);
+  };
+
+  // Handle item purchase
+  const handlePurchase = async (itemId) => {
+    if (!userId) return;
 
     try {
       setLoading(true);
-      const response = await axios.put(
-        `${API_URL}/users/${currentUser.id}/items/${item.item_id}/toggle`,
-        {},
+      const response = await fetch(
+        `${API_URL}/items/purchase/${userId}/${itemId}`,
         {
-          timeout: 5000, // 5 second timeout
+          method: "POST",
         }
       );
 
-      // Update user items with the new equipped status
-      try {
-        const userItemsResponse = await axios.get(
-          `${API_URL}/users/${currentUser.id}/items`,
-          {
-            timeout: 5000,
-          }
-        );
-        setUserItems(userItemsResponse.data.items || []);
-      } catch (fetchError) {
-        console.error("Error fetching updated user items:", fetchError);
-      }
+      const result = await response.json();
 
-      Alert.alert("Success", response.data.message || "Item status updated");
+      if (result.success) {
+        // Close the modal if open
+        if (modalVisible) {
+          setModalVisible(false);
+        }
+
+        // Switch to inventory tab to show the new item
+        setActiveTab("inventory");
+
+        // Perform a full refresh of the screen data
+        await fetchData();
+
+        Alert.alert(
+          "Success",
+          "Item purchased successfully! Check your inventory."
+        );
+      } else {
+        Alert.alert("Purchase Failed", result.message);
+      }
     } catch (error) {
-      console.error("Error toggling item:", error);
-      Alert.alert("Error", "Failed to toggle item. Please try again.");
+      console.error("[SHOP] Error during purchase:", error);
+      Alert.alert("Error", "Could not complete purchase. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
-  // Helper function to get category color
-  const getCategoryColor = (category: string): string => {
-    switch (category.toLowerCase()) {
-      case "theme":
-        return "#6A5ACD"; // SlateBlue
-      case "avatar":
-        return "#20B2AA"; // LightSeaGreen
-      case "badge":
-        return "#FFD700"; // Gold
-      case "feature":
-        return "#FF6347"; // Tomato
-      default:
-        return "#2196F3"; // Blue
+  // Handle equip/unequip
+  const toggleEquip = async (itemId) => {
+    if (!userId) return;
+
+    try {
+      setLoading(true);
+      const response = await fetch(
+        `${API_URL}/items/toggle/${userId}/${itemId}`,
+        {
+          method: "PUT",
+        }
+      );
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Perform a full refresh of all screen data
+        await fetchData();
+
+        // Update modal item if it's currently displayed
+        if (modalVisible && selectedItem && selectedItem.item_id === itemId) {
+          // Find the updated item from the refreshed userItems state
+          const updatedItem = userItems.find((item) => item.item_id === itemId);
+          if (updatedItem) {
+            setSelectedItem({
+              ...selectedItem,
+              is_equipped: updatedItem.is_equipped,
+            });
+          }
+        }
+
+        Alert.alert("Success", result.message);
+      } else {
+        Alert.alert("Failed", result.message);
+      }
+    } catch (error) {
+      console.error("[SHOP] Error toggling item:", error);
+      Alert.alert("Error", "Could not update item. Please try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Helper function to get user-friendly category label
-  const getCategoryLabel = (category: string): string => {
-    return category.charAt(0).toUpperCase() + category.slice(1);
+  // Handle tab switching without refreshing
+  const handleTabSwitch = (tab) => {
+    // Only change tabs if different
+    if (tab !== activeTab) {
+      setActiveTab(tab);
+      // No data refresh when switching between Shop and Inventory tabs
+    }
   };
 
-  // Render shop item with error handling for images
-  const renderShopItem = ({ item }: { item: Item }) => {
-    const owned = userItems.some(
-      (userItem) => userItem.item_id === item.item_id
-    );
-
+  // Show loading state
+  if (loading) {
     return (
-      <View style={styles.itemCard}>
-        <View style={styles.itemImageContainer}>
-          {item.image_url ? (
-            <Image
-              source={{ uri: item.image_url }}
-              style={styles.itemImage}
-              defaultSource={require("../assets/placeholder.png")}
-              onError={(e) =>
-                console.warn(
-                  `Failed to load image: ${item.image_url}`,
-                  e.nativeEvent.error
-                )
-              }
-            />
-          ) : (
-            <View
-              style={[
-                styles.placeholderImage,
-                { backgroundColor: getCategoryColor(item.category) },
-              ]}
-            >
-              <Text style={styles.placeholderText}>{item.name.charAt(0)}</Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.itemDetails}>
-          <Text style={styles.itemName}>{item.name}</Text>
-          <Text style={styles.itemCategory}>
-            {getCategoryLabel(item.category)}
-          </Text>
-          <Text style={styles.itemDescription}>{item.description}</Text>
-          <View style={styles.itemPriceContainer}>
-            <Text style={styles.itemPrice}>{item.price} FutureCoins</Text>
-          </View>
-        </View>
-
-        <TouchableOpacity
-          style={[
-            styles.actionButton,
-            owned
-              ? styles.ownedButton
-              : futureCoins >= item.price
-              ? styles.buyButton
-              : styles.disabledButton,
-          ]}
-          onPress={() => !owned && handlePurchase(item)}
-          disabled={owned || futureCoins < item.price}
-        >
-          <Text style={styles.actionButtonText}>{owned ? "Owned" : "Buy"}</Text>
-        </TouchableOpacity>
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#6A5ACD" />
+        <Text style={styles.loadingText}>Loading shop items...</Text>
       </View>
     );
-  };
+  }
 
-  // Render inventory item with error handling for images
-  const renderInventoryItem = ({ item }: { item: UserItem }) => {
+  // Render shop item (Grid Layout)
+  const renderShopItem = ({ item }) => {
+    const isOwned = userItems.some(
+      (userItem) => userItem.item_id === item.item_id
+    );
+    const canAfford = coins >= item.price;
+
     return (
-      <View style={styles.itemCard}>
-        <View style={styles.itemImageContainer}>
+      <TouchableOpacity
+        style={styles.gridItem}
+        onPress={() => showItemDetail(item)}
+      >
+        {/* Item image or placeholder */}
+        <View style={styles.gridImageContainer}>
           {item.image_url ? (
             <Image
               source={{ uri: item.image_url }}
-              style={styles.itemImage}
-              defaultSource={require("../assets/placeholder.png")}
-              onError={(e) =>
-                console.warn(
-                  `Failed to load image: ${item.image_url}`,
-                  e.nativeEvent.error
-                )
-              }
+              style={styles.gridItemImage}
             />
           ) : (
-            <View
+            <View style={[styles.gridItemImage, styles.placeholder]}>
+              <Text style={styles.placeholderText}>
+                {item.category?.charAt(0).toUpperCase() || "I"}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {/* Item details */}
+        <View style={styles.gridItemDetails}>
+          <Text
+            style={styles.gridItemName}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            {item.name}
+          </Text>
+          <Text
+            style={styles.gridItemCategory}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            {item.category}
+          </Text>
+
+          <View style={styles.itemPriceContainer}>
+            <Image
+              source={require("../assets/images/future_coin.png")}
+              style={styles.coinIcon}
+            />
+            <Text style={styles.itemPrice}>{item.price}</Text>
+          </View>
+
+          {/* Purchase or status button */}
+          {isOwned ? (
+            <View style={styles.ownedBadge}>
+              <Text style={styles.ownedText}>Owned</Text>
+            </View>
+          ) : (
+            <TouchableOpacity
               style={[
-                styles.placeholderImage,
-                { backgroundColor: getCategoryColor(item.category) },
+                styles.purchaseButton,
+                !canAfford && styles.disabledButton,
               ]}
+              onPress={(e) => {
+                e.stopPropagation(); // Prevent triggering the card's onPress
+                handlePurchase(item.item_id);
+              }}
+              disabled={!canAfford}
             >
-              <Text style={styles.placeholderText}>{item.name.charAt(0)}</Text>
+              <Text style={styles.buttonText}>
+                {canAfford ? "Buy" : "Not enough"}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  // Render inventory item (Grid Layout)
+  const renderInventoryItem = ({ item }) => {
+    const isEquipped = item.is_equipped === 1;
+
+    return (
+      <TouchableOpacity
+        style={[styles.gridItem, isEquipped && styles.equippedCard]}
+        onPress={() => showItemDetail(item)}
+      >
+        {/* Item image or placeholder */}
+        <View style={styles.gridImageContainer}>
+          {item.image_url ? (
+            <Image
+              source={{ uri: item.image_url }}
+              style={styles.gridItemImage}
+            />
+          ) : (
+            <View style={[styles.gridItemImage, styles.placeholder]}>
+              <Text style={styles.placeholderText}>
+                {item.category?.charAt(0).toUpperCase() || "I"}
+              </Text>
             </View>
           )}
 
-          {item.is_equipped === 1 && (
+          {/* Equipped badge */}
+          {isEquipped && (
             <View style={styles.equippedBadge}>
               <Text style={styles.equippedText}>Equipped</Text>
             </View>
           )}
         </View>
 
-        <View style={styles.itemDetails}>
-          <Text style={styles.itemName}>{item.name}</Text>
-          <Text style={styles.itemCategory}>
-            {getCategoryLabel(item.category)}
+        {/* Item details */}
+        <View style={styles.gridItemDetails}>
+          <Text
+            style={styles.gridItemName}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            {item.name}
           </Text>
-          <Text style={styles.itemDescription}>{item.description}</Text>
-        </View>
+          <Text
+            style={styles.gridItemCategory}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            {item.category}
+          </Text>
 
-        <TouchableOpacity
-          style={[
-            styles.actionButton,
-            item.is_equipped === 1 ? styles.equippedButton : styles.equipButton,
-          ]}
-          onPress={() => handleToggleEquip(item)}
-        >
-          <Text style={styles.actionButtonText}>
-            {item.is_equipped === 1 ? "Unequip" : "Equip"}
-          </Text>
-        </TouchableOpacity>
-      </View>
+          {/* Toggle equip button */}
+          <TouchableOpacity
+            style={[styles.equipButton, isEquipped && styles.unequipButton]}
+            onPress={(e) => {
+              e.stopPropagation(); // Prevent triggering the card's onPress
+              toggleEquip(item.item_id);
+            }}
+          >
+            <Text style={styles.buttonText}>
+              {isEquipped ? "Unequip" : "Equip"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  // Item Detail Modal Component
+  const ItemDetailModal = () => {
+    if (!selectedItem) return null;
+
+    const isOwned =
+      selectedItem.isOwned ||
+      userItems.some((item) => item.item_id === selectedItem.item_id);
+    const isEquipped = selectedItem.is_equipped === 1;
+    const canAfford = coins >= selectedItem.price;
+
+    return (
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            {/* Close button */}
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={() => setModalVisible(false)}
+            >
+              <Text style={styles.closeButtonText}>✕</Text>
+            </TouchableOpacity>
+
+            {/* Scrollable content */}
+            <ScrollView>
+              {/* Item image */}
+              <View style={styles.modalImageContainer}>
+                {selectedItem.image_url ? (
+                  <Image
+                    source={{ uri: selectedItem.image_url }}
+                    style={styles.modalImage}
+                  />
+                ) : (
+                  <View style={[styles.modalImage, styles.placeholder]}>
+                    <Text style={styles.modalPlaceholderText}>
+                      {selectedItem.category?.charAt(0).toUpperCase() || "I"}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Item details */}
+              <Text style={styles.modalTitle}>{selectedItem.name}</Text>
+              <View style={styles.modalCategoryContainer}>
+                <Text style={styles.modalCategory}>
+                  {selectedItem.category}
+                </Text>
+              </View>
+
+              {/* Price */}
+              {!isOwned && (
+                <View style={styles.modalPriceContainer}>
+                  <Image
+                    source={require("../assets/images/future_coin.png")}
+                    style={styles.modalCoinIcon}
+                  />
+                  <Text style={styles.modalPrice}>{selectedItem.price}</Text>
+                </View>
+              )}
+
+              {/* Description */}
+              <Text style={styles.modalDescriptionTitle}>Description:</Text>
+              <Text style={styles.modalDescription}>
+                {selectedItem.description || "No description available."}
+              </Text>
+
+              {/* Action buttons */}
+              {isOwned ? (
+                <TouchableOpacity
+                  style={[
+                    styles.modalActionButton,
+                    isEquipped ? styles.unequipButton : styles.equipButton,
+                  ]}
+                  onPress={() => toggleEquip(selectedItem.item_id)}
+                >
+                  <Text style={styles.modalButtonText}>
+                    {isEquipped ? "Unequip" : "Equip"}
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[
+                    styles.modalActionButton,
+                    !canAfford && styles.disabledButton,
+                  ]}
+                  onPress={() => handlePurchase(selectedItem.item_id)}
+                  disabled={!canAfford}
+                >
+                  <Text style={styles.modalButtonText}>
+                    {canAfford ? "Purchase" : "Not enough coins"}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     );
   };
 
   return (
     <SafeAreaView style={styles.container}>
+      <StatusBar backgroundColor="#6A5ACD" barStyle="light-content" />
+
+      {/* Header with Title on left and Coins on right */}
       <View style={styles.header}>
-        <Text style={styles.title}>Item Shop</Text>
-        <View style={styles.coinContainer}>
-          <Text style={styles.coinIcon}>💰</Text>
-          <Text style={styles.coinText}>{futureCoins} FutureCoins</Text>
+        {/* Left side - Title */}
+        <Text style={styles.headerTitle}>Item Shop</Text>
+
+        {/* Right side - Coins */}
+        <View style={styles.coinsContainer}>
+          <Image
+            source={require("../assets/images/future_coin.png")}
+            style={styles.coinIconLarge}
+          />
+          <Text style={styles.coinsText}>{coins}</Text>
         </View>
       </View>
 
-      <View style={styles.tabContainer}>
+      {/* Tab Navigation */}
+      <View style={styles.tabs}>
         <TouchableOpacity
           style={[styles.tab, activeTab === "shop" && styles.activeTab]}
-          onPress={() => setActiveTab("shop")}
+          onPress={() => handleTabSwitch("shop")}
         >
           <Text
             style={[
@@ -403,9 +512,10 @@ const ItemShopScreen = () => {
             Shop
           </Text>
         </TouchableOpacity>
+
         <TouchableOpacity
           style={[styles.tab, activeTab === "inventory" && styles.activeTab]}
-          onPress={() => setActiveTab("inventory")}
+          onPress={() => handleTabSwitch("inventory")}
         >
           <Text
             style={[
@@ -418,40 +528,43 @@ const ItemShopScreen = () => {
         </TouchableOpacity>
       </View>
 
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#2196F3" />
-        </View>
-      ) : activeTab === "shop" ? (
-        <FlatList
-          data={items}
-          renderItem={renderShopItem}
-          keyExtractor={(item) => `shop-item-${item.item_id}`}
-          contentContainerStyle={styles.listContainer}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>
-                No items available in the shop.
-              </Text>
-            </View>
-          }
-        />
-      ) : (
+      {/* Content based on active tab - GRID LAYOUT */}
+      {activeTab === "shop" ? (
+        items.length > 0 ? (
+          <FlatList
+            data={items}
+            renderItem={renderShopItem}
+            keyExtractor={(item) =>
+              item.item_id?.toString() || Math.random().toString()
+            }
+            contentContainerStyle={styles.gridList}
+            numColumns={2} // Display 2 items per row
+            columnWrapperStyle={styles.gridRow} // Style for each row
+          />
+        ) : (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyText}>No items available in the shop</Text>
+          </View>
+        )
+      ) : userItems.length > 0 ? (
         <FlatList
           data={userItems}
           renderItem={renderInventoryItem}
-          keyExtractor={(item) => `inventory-item-${item.item_id}`}
-          contentContainerStyle={styles.listContainer}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>You don't own any items yet.</Text>
-              <TouchableOpacity onPress={() => setActiveTab("shop")}>
-                <Text style={styles.emptyActionText}>Visit the shop</Text>
-              </TouchableOpacity>
-            </View>
+          keyExtractor={(item) =>
+            item.user_item_id?.toString() || `user-item-${item.item_id}`
           }
+          contentContainerStyle={styles.gridList}
+          numColumns={2} // Display 2 items per row
+          columnWrapperStyle={styles.gridRow} // Style for each row
         />
+      ) : (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyText}>You don't own any items yet</Text>
+        </View>
       )}
+
+      {/* Item Detail Modal */}
+      <ItemDetailModal />
     </SafeAreaView>
   );
 };
@@ -459,189 +572,348 @@ const ItemShopScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F8F8F8",
+    backgroundColor: "#f5f5f5",
   },
+  // Header with Title and Coins
   header: {
+    backgroundColor: "#6A5ACD",
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: 20,
-    backgroundColor: "#FFFFFF",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E0E0E0",
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 5,
   },
-  title: {
-    fontSize: 24,
+  headerTitle: {
+    color: "#FFFFFF",
+    fontSize: 22,
     fontWeight: "bold",
-    color: "#333333",
   },
-  coinContainer: {
+  coinsContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFD700",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    paddingVertical: 8,
+    paddingHorizontal: 15,
     borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.3)",
+  },
+  coinIconLarge: {
+    width: 20,
+    height: 20,
+    marginRight: 8,
+  },
+  coinsText: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#FFFFFF",
+  },
+  itemPriceContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 5,
   },
   coinIcon: {
+    width: 14,
+    height: 14,
     marginRight: 4,
-    fontSize: 16,
   },
-  coinText: {
-    fontWeight: "bold",
-    color: "#333333",
-  },
-  tabContainer: {
+  // Tab Navigation
+  tabs: {
     flexDirection: "row",
-    backgroundColor: "#FFFFFF",
-    marginBottom: 8,
+    backgroundColor: "#fff",
+    padding: 15,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
   },
   tab: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 10,
     alignItems: "center",
     borderBottomWidth: 2,
     borderBottomColor: "transparent",
   },
   activeTab: {
-    borderBottomColor: "#2196F3",
+    borderBottomColor: "#6A5ACD",
   },
   tabText: {
     fontSize: 16,
+    color: "#777",
     fontWeight: "500",
-    color: "#757575",
   },
   activeTabText: {
-    color: "#2196F3",
+    color: "#6A5ACD",
+    fontWeight: "bold",
   },
-  loadingContainer: {
+
+  // Grid Layout Styles
+  gridList: {
+    padding: 10,
+  },
+  gridRow: {
+    justifyContent: "space-between",
+  },
+  gridItem: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    marginBottom: 10,
+    padding: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+    width: screenWidth / 2 - 15, // 2 items per row with margins
+  },
+  gridImageContainer: {
+    position: "relative",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  gridItemImage: {
+    width: "100%",
+    height: 120,
+    borderRadius: 8,
+    resizeMode: "cover",
+  },
+  gridItemDetails: {
+    alignItems: "center",
+  },
+  gridItemName: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#333",
+    textAlign: "center",
+    marginBottom: 2,
+  },
+  gridItemCategory: {
+    fontSize: 13,
+    color: "#666",
+    textAlign: "center",
+    marginBottom: 5,
+  },
+
+  // Modal styles
+  modalOverlay: {
     flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
     justifyContent: "center",
     alignItems: "center",
   },
-  listContainer: {
-    padding: 12,
-  },
-  itemCard: {
-    flexDirection: "row",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
-    elevation: 2,
+  modalContent: {
+    backgroundColor: "#fff",
+    borderRadius: 15,
+    width: "90%",
+    maxHeight: "80%",
+    padding: 20,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 1.5,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
   },
-  itemImageContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 8,
-    marginRight: 12,
-    position: "relative",
+  closeButton: {
+    position: "absolute",
+    right: 15,
+    top: 15,
+    zIndex: 1,
+    width: 30,
+    height: 30,
+    backgroundColor: "rgba(0, 0, 0, 0.1)",
+    borderRadius: 15,
+    justifyContent: "center",
+    alignItems: "center",
   },
-  itemImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 8,
+  closeButtonText: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#333",
   },
-  placeholderImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 8,
+  modalImageContainer: {
+    alignItems: "center",
+    marginBottom: 15,
+  },
+  modalImage: {
+    width: "100%",
+    height: 200,
+    borderRadius: 10,
+    resizeMode: "cover",
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#333",
+    textAlign: "center",
+    marginBottom: 10,
+  },
+  modalCategoryContainer: {
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  modalCategory: {
+    fontSize: 16,
+    color: "#666",
+    backgroundColor: "#f0f0f0",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  modalPriceContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginVertical: 15,
+  },
+  modalCoinIcon: {
+    width: 20,
+    height: 20,
+    marginRight: 8,
+  },
+  modalPrice: {
+    fontSize: 22,
+    fontWeight: "bold",
+    color: "#6A5ACD",
+  },
+  modalDescriptionTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#333",
+    marginTop: 10,
+    marginBottom: 5,
+  },
+  modalDescription: {
+    fontSize: 16,
+    color: "#555",
+    lineHeight: 24,
+    marginBottom: 20,
+  },
+  modalActionButton: {
+    backgroundColor: "#6A5ACD",
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  modalButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  modalPlaceholderText: {
+    fontSize: 40,
+    fontWeight: "bold",
+    color: "#757575",
+  },
+
+  // Original styles kept for backward compatibility
+  placeholder: {
+    backgroundColor: "#e0e0e0",
     justifyContent: "center",
     alignItems: "center",
   },
   placeholderText: {
     fontSize: 28,
     fontWeight: "bold",
-    color: "#FFFFFF",
-  },
-  itemDetails: {
-    flex: 1,
-    justifyContent: "center",
-  },
-  itemName: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#333333",
-    marginBottom: 4,
-  },
-  itemCategory: {
-    fontSize: 12,
     color: "#757575",
-    marginBottom: 4,
   },
-  itemDescription: {
-    fontSize: 14,
-    color: "#505050",
-    marginBottom: 4,
+  equippedCard: {
+    borderWidth: 2,
+    borderColor: "#6A5ACD",
   },
-  itemPriceContainer: {
-    flexDirection: "row",
-    alignItems: "center",
+  equippedBadge: {
+    position: "absolute",
+    top: -5,
+    right: -5,
+    backgroundColor: "#6A5ACD",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1.5,
+    elevation: 2,
+  },
+  equippedText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "bold",
   },
   itemPrice: {
     fontSize: 14,
     fontWeight: "bold",
-    color: "#2196F3",
+    color: "#6A5ACD",
   },
-  actionButton: {
-    justifyContent: "center",
-    alignItems: "center",
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    alignSelf: "center",
-    marginLeft: 8,
-  },
-  buyButton: {
-    backgroundColor: "#2196F3",
-  },
-  ownedButton: {
+  ownedBadge: {
     backgroundColor: "#4CAF50",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 5,
+    marginTop: 5,
   },
-  disabledButton: {
-    backgroundColor: "#BDBDBD",
+  ownedText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 12,
+  },
+  purchaseButton: {
+    backgroundColor: "#6A5ACD",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginTop: 5,
   },
   equipButton: {
-    backgroundColor: "#2196F3",
-  },
-  equippedButton: {
-    backgroundColor: "#FF9800",
-  },
-  actionButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "bold",
-    fontSize: 14,
-  },
-  equippedBadge: {
-    position: "absolute",
-    top: -8,
-    right: -8,
     backgroundColor: "#4CAF50",
-    borderRadius: 10,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginTop: 5,
   },
-  equippedText: {
-    color: "#FFFFFF",
-    fontSize: 10,
+  unequipButton: {
+    backgroundColor: "#FF5722",
+  },
+  disabledButton: {
+    backgroundColor: "#c0c0c0",
+  },
+  buttonText: {
+    color: "#fff",
     fontWeight: "bold",
+    fontSize: 12,
   },
-  emptyContainer: {
-    padding: 24,
+  // Loading and Empty States
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
     alignItems: "center",
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: "#666",
+    marginBottom: 20,
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
   },
   emptyText: {
     fontSize: 16,
-    color: "#757575",
-    marginBottom: 12,
-  },
-  emptyActionText: {
-    fontSize: 16,
-    color: "#2196F3",
-    fontWeight: "500",
+    color: "#666",
+    textAlign: "center",
   },
 });
 

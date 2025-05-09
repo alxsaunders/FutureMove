@@ -75,19 +75,23 @@ const transformCommunity = (community: any): Community | null => {
 // Fetch all communities
 export const fetchCommunities = async (): Promise<Community[]> => {
   try {
-    // Get current user ID
-    const currentUserId = await getCurrentUserId();
+    // Get current user ID directly from Firebase
+    let userId;
+    try {
+      userId = await getCurrentUserId();
+      console.log("Firebase user ID for fetching communities:", userId);
+    } catch (error) {
+      console.error("Failed to get user ID from Firebase:", error);
+      return [];
+    }
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
     
     const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/communities?userId=${currentUserId}`, {
-      signal: controller.signal,
-      headers: {
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      }
+    const res = await fetch(`${apiUrl}/communities?userId=${userId}`, {
+      signal: controller.signal
     });
     
     clearTimeout(timeoutId);
@@ -132,21 +136,25 @@ export const fetchCommunities = async (): Promise<Community[]> => {
 };
 
 // Fetch communities that a user has joined
-export const fetchJoinedCommunities = async (userId?: string): Promise<Community[]> => {
+export const fetchJoinedCommunities = async (): Promise<Community[]> => {
   try {
-    // Get current user ID if not provided
-    const currentUserId = userId || await getCurrentUserId();
+    // Get current user ID directly from Firebase
+    let userId;
+    try {
+      userId = await getCurrentUserId();
+      console.log("Firebase user ID for fetching joined communities:", userId);
+    } catch (error) {
+      console.error("Failed to get user ID from Firebase:", error);
+      return [];
+    }
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
     
     const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/communities/user/${currentUserId}/joined`, {
-      signal: controller.signal,
-      headers: {
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      }
+    const res = await fetch(`${apiUrl}/communities/user/${userId}/joined`, {
+      signal: controller.signal
     });
     
     clearTimeout(timeoutId);
@@ -193,8 +201,15 @@ export const fetchJoinedCommunities = async (userId?: string): Promise<Community
 // Get a single community by ID
 export const getCommunityById = async (communityId: string | number): Promise<Community | null> => {
   try {
-    // Get current user ID
-    const currentUserId = await getCurrentUserId();
+    // Get current user ID directly from Firebase
+    let userId;
+    try {
+      userId = await getCurrentUserId();
+      console.log("Firebase user ID for getting community by ID:", userId);
+    } catch (error) {
+      console.error("Failed to get user ID from Firebase:", error);
+      return null;
+    }
     
     // Validate communityId
     if (!communityId) {
@@ -206,47 +221,55 @@ export const getCommunityById = async (communityId: string | number): Promise<Co
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
     
-    const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/communities/${communityId}?userId=${currentUserId}`, {
-      signal: controller.signal,
-      headers: {
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
+    try {
+      const apiUrl = getApiBaseUrl();
+      const res = await fetch(`${apiUrl}/communities/${communityId}?userId=${userId}`, {
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      // Handle different response status codes
+      if (res.status === 404) {
+        console.warn(`Community not found with ID: ${communityId}`);
+        return null;
       }
-    });
-    
-    clearTimeout(timeoutId);
-    
-    // Handle different response status codes
-    if (res.status === 404) {
-      console.warn(`Community not found with ID: ${communityId}`);
+      
+      if (!res.ok) {
+        console.warn(`Error response from API: ${res.status} ${res.statusText}`);
+        throw new Error(`Failed to fetch community: ${res.status} ${res.statusText}`);
+      }
+      
+      const data = await res.json();
+      const communityData = data.community || data;
+      
+      // Enhanced validation: try to transform the community
+      const community = transformCommunity(communityData);
+      
+      if (!community) {
+        console.warn(`Invalid community data returned for ID: ${communityId}`);
+        return null;
+      }
+      
+      return community;
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      
+      // Safe error handling without DOMException
+      if (fetchError && typeof fetchError === 'object' && 'name' in fetchError) {
+        if (fetchError.name === 'AbortError') {
+          console.error(`Fetch request for community ${communityId} timed out`);
+        } else {
+          console.error(`Error fetching community by ID: ${communityId}`, fetchError);
+        }
+      } else {
+        console.error(`Unknown error fetching community by ID: ${communityId}`);
+      }
+      
       return null;
     }
-    
-    if (!res.ok) {
-      console.warn(`Error response from API: ${res.status} ${res.statusText}`);
-      throw new Error(`Failed to fetch community: ${res.status} ${res.statusText}`);
-    }
-    
-    const data = await res.json();
-    const communityData = data.community || data;
-    
-    // Enhanced validation: try to transform the community
-    const community = transformCommunity(communityData);
-    
-    if (!community) {
-      console.warn(`Invalid community data returned for ID: ${communityId}`);
-      return null;
-    }
-    
-    return community;
-  } catch (err: any) {
-    // Check if error is from AbortController (timeout)
-    if (err && err.name === 'AbortError') {
-      console.error(`Fetch request for community ${communityId} timed out`);
-    } else {
-      console.error(`Error fetching community by ID: ${communityId}`, err);
-    }
-    
+  } catch (err) {
+    console.error(`Error in getCommunityById function:`, err);
     return null;
   }
 };
@@ -262,49 +285,66 @@ export const joinCommunity = async (communityId: string | number): Promise<boole
       return false;
     }
     
-    // Get user ID
-    const currentUserId = await getCurrentUserId();
+    // Get user ID directly from Firebase
+    let userId;
+    try {
+      userId = await getCurrentUserId();
+      console.log("Firebase user ID for joining community:", userId);
+    } catch (error) {
+      console.error("Failed to get user ID from Firebase:", error);
+      return false;
+    }
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
     
     const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/communities/${communityId}/join`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      },
-      body: JSON.stringify({ userId: currentUserId }),
-      signal: controller.signal
-    });
     
-    clearTimeout(timeoutId);
-    
-    if (!res.ok) {
-      console.warn(`Error joining community: ${res.status} ${res.statusText}`);
+    try {
+      const res = await fetch(`${apiUrl}/communities/${communityId}/join`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ userId: userId }),
+        signal: controller.signal
+      });
       
-      // For connectivity issues, still return success for optimistic UI update
-      if (res.status === 0 || res.status >= 500) {
-        console.log('Server error during community join, using optimistic update');
-        return true;
+      clearTimeout(timeoutId);
+      
+      console.log("Join community response status:", res.status);
+      
+      if (!res.ok) {
+        console.warn(`Error joining community: ${res.status} ${res.statusText}`);
+        
+        // For connectivity issues, still return success for optimistic UI update
+        if (res.status === 0 || res.status >= 500) {
+          console.log('Server error during community join, using optimistic update');
+          return true;
+        }
+        
+        return false;
       }
       
-      return false;
+      console.log(`Successfully joined community: ${communityId}`);
+      return true;
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      
+      // Check if error is from AbortController (timeout)
+      if (fetchError && typeof fetchError === 'object' && 'name' in fetchError && fetchError.name === 'AbortError') {
+        console.error(`Fetch request for joining community ${communityId} timed out`);
+      } else {
+        console.error(`Error joining community: ${communityId}`, fetchError);
+      }
+      
+      // For network errors, still return success for optimistic UI update
+      return true;
     }
-    
-    console.log(`Successfully joined community: ${communityId}`);
-    return true;
-  } catch (err: any) {
-    // Check if error is from AbortController (timeout)
-    if (err && err.name === 'AbortError') {
-      console.error(`Fetch request for joining community ${communityId} timed out`);
-    } else {
-      console.error(`Error joining community: ${communityId}`, err);
-    }
-    
-    // For network errors, still return success for optimistic UI update
+  } catch (err) {
+    console.error(`Error in joinCommunity function:`, err);
+    // For general errors, return success for optimistic UI update
     return true;
   }
 };
@@ -320,8 +360,15 @@ export const leaveCommunity = async (communityId: string | number): Promise<bool
       return false;
     }
     
-    // Get user ID
-    const currentUserId = await getCurrentUserId();
+    // Get user ID directly from Firebase
+    let userId;
+    try {
+      userId = await getCurrentUserId();
+      console.log("Firebase user ID for leaving community:", userId);
+    } catch (error) {
+      console.error("Failed to get user ID from Firebase:", error);
+      return false;
+    }
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
@@ -331,10 +378,9 @@ export const leaveCommunity = async (communityId: string | number): Promise<bool
     const res = await fetch(`${apiUrl}/communities/${communityId}/leave`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
+        'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ userId: currentUserId }),
+      body: JSON.stringify({ userId: userId }),
       signal: controller.signal
     });
     
@@ -388,8 +434,15 @@ export const createCommunity = async (
       return null;
     }
     
-    // Get current user ID
-    const currentUserId = await getCurrentUserId();
+    // Get current user ID directly from Firebase
+    let userId;
+    try {
+      userId = await getCurrentUserId();
+      console.log("Firebase user ID for creating community:", userId);
+    } catch (error) {
+      console.error("Failed to get user ID from Firebase:", error);
+      return null;
+    }
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
@@ -399,15 +452,14 @@ export const createCommunity = async (
     const res = await fetch(`${apiUrl}/communities`, {
       method: 'POST',
       headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         name,
         category,
         description: description || null,
         image_url: imageUrl || null,
-        created_by: currentUserId
+        created_by: userId
       }),
       signal: controller.signal
     });
@@ -455,19 +507,23 @@ export const searchCommunities = async (query: string): Promise<Community[]> => 
       return [];
     }
     
-    // Get current user ID
-    const currentUserId = await getCurrentUserId();
+    // Get current user ID directly from Firebase
+    let userId;
+    try {
+      userId = await getCurrentUserId();
+      console.log("Firebase user ID for searching communities:", userId);
+    } catch (error) {
+      console.error("Failed to get user ID from Firebase:", error);
+      return [];
+    }
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
     
     const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/communities/search?q=${encodeURIComponent(query)}&userId=${currentUserId}`, {
-      signal: controller.signal,
-      headers: {
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      }
+    const res = await fetch(`${apiUrl}/communities/search?q=${encodeURIComponent(query)}&userId=${userId}`, {
+      signal: controller.signal
     });
     
     clearTimeout(timeoutId);

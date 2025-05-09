@@ -1,15 +1,10 @@
-import { Platform } from 'react-native';
-import { auth } from '../config/firebase.js';
+// services/itemService.ts
+import axios, { AxiosError } from 'axios';
 
-// Use a more React Native compatible error handling approach
-// instead of directly importing DOMException which might not be available
-const createAbortError = () => {
-  const error = new Error('The operation was aborted');
-  error.name = 'AbortError';
-  return error;
-};
+// Debug flag - set to true to enable detailed logging
+const DEBUG_SHOP = true;
 
-// Define item interfaces
+// Types
 export interface Item {
   item_id: number;
   name: string;
@@ -18,602 +13,230 @@ export interface Item {
   category: string;
   price: number;
   is_active: number;
-  created_at: string;
+  created_at?: string;
 }
 
 export interface UserItem extends Item {
-  is_equipped: number;
+  user_item_id: number;
+  user_id: string;
   purchased_at: string;
+  is_equipped: number;
 }
 
-// Get API base URL based on platform with error handling
-export const getApiBaseUrl = () => {
-  try {
-    if (Platform.OS === "android") {
-      return "http://10.0.2.2:3001/api";
+export interface PurchaseResponse {
+  success: boolean;
+  message: string;
+  futureCoins?: number;
+}
+
+export interface ToggleResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface ApiErrorResponse {
+  error: string;
+  details?: string;
+  success?: boolean;
+  message?: string;
+}
+
+// Utility function for logging
+const logDebug = (message: string, data?: any) => {
+  if (DEBUG_SHOP) {
+    if (data) {
+      console.log(`[SHOP CLIENT] ${message}`, data);
     } else {
-      // For iOS or development on Mac
-      return "http://localhost:3001/api";
+      console.log(`[SHOP CLIENT] ${message}`);
     }
-  } catch (error) {
-    console.error("Error determining API base URL:", error);
-    // Return a fallback URL to prevent crashes
-    return "http://localhost:3001/api";
   }
 };
 
-// Helper function to get current user ID from Firebase
-export const getCurrentUserId = async (): Promise<string> => {
+// API Base URL - use environment variable if available
+export const getApiBaseUrl = (): string => {
+  // Use your environment configuration here
+  logDebug("Getting API base URL");
+  return 'http://10.0.2.2:3001/api'; // Default for Android emulator
+};
+
+// Fetch all available shop items
+export const fetchShopItems = async (): Promise<Item[]> => {
   try {
-    const currentUser = auth.currentUser;
-    if (currentUser) {
-      return currentUser.uid;
-    }
-    throw new Error('No authenticated user found');
+    logDebug("Fetching shop items");
+    // IMPORTANT: Use /items instead of /shop/items because of the new route pattern
+    const response = await axios.get(`${getApiBaseUrl()}/items`);
+    logDebug(`Shop items received: ${response.data.length}`);
+    return response.data;
   } catch (error) {
-    console.error("Error getting current user ID:", error);
+    console.error('Error fetching shop items:', error);
+    logDebug(`Error fetching items: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
     throw error;
   }
 };
 
-// Transform raw item data to ensure it matches the Item interface
-const transformItem = (item: any): Item | null => {
-  // First, check if we have a valid item object with required fields
-  if (!item || typeof item !== 'object') {
-    console.warn('Invalid item object received:', item);
-    return null;
-  }
-
-  // Check for the most essential fields
-  if (!item.item_id && !item.id) {
-    console.warn('Item missing ID field:', item);
-    return null;
-  }
-
-  // Extract all the fields with proper fallbacks
+// Fetch user's purchased items
+export const fetchUserItems = async (userId: string): Promise<UserItem[]> => {
   try {
-    const transformedItem: Item = {
-      item_id: item.item_id || item.id,
-      name: item.name || 'Unnamed Item',
-      description: item.description || '',
-      image_url: item.image_url || null,
-      category: item.category || 'misc',
-      price: typeof item.price === 'number' ? item.price : 0,
-      is_active: item.is_active === 1 || item.is_active === true ? 1 : 0,
-      created_at: item.created_at || new Date().toISOString()
-    };
-
-    return transformedItem;
+    logDebug(`Fetching items for user: ${userId}`);
+    // IMPORTANT: Use /items/user/:userId instead of /users/:userId/items
+    const response = await axios.get(`${getApiBaseUrl()}/items/user/${userId}`);
+    logDebug(`User items received: ${response.data.length}`);
+    return response.data;
   } catch (error) {
-    console.error('Error transforming item data:', error);
-    return null;
+    console.error('Error fetching user items:', error);
+    logDebug(`Error fetching user items: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    throw error;
   }
 };
 
-// Transform raw user item data
-const transformUserItem = (item: any): UserItem | null => {
-  // First transform as standard item
-  const baseItem = transformItem(item);
-  if (!baseItem) return null;
-
-  // Then add user item specific fields
+// Fetch user's FutureCoins
+export const fetchUserFutureCoins = async (userId: string): Promise<number> => {
   try {
-    return {
-      ...baseItem,
-      is_equipped: item.is_equipped === 1 || item.is_equipped === true ? 1 : 0,
-      purchased_at: item.purchased_at || new Date().toISOString()
-    };
+    logDebug(`Fetching FutureCoins for user: ${userId}`);
+    // IMPORTANT: Use /items/coins/:userId instead of /users/:userId/futurecoins
+    const response = await axios.get(`${getApiBaseUrl()}/items/coins/${userId}`);
+    logDebug(`Received FutureCoins: ${response.data.futureCoins}`);
+    return response.data.futureCoins;
   } catch (error) {
-    console.error('Error transforming user item data:', error);
-    return null;
-  }
-};
-
-// Get all available items in the shop
-export const fetchShopItems = async (): Promise<Item[]> => {
-  try {
-    // Add timeout to prevent hanging requests
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-    
-    const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/items`, {
-      signal: controller.signal
-    });
-    
-    clearTimeout(timeoutId);
-    
-    if (!res.ok) {
-      console.warn(`Error response from API: ${res.status} ${res.statusText}`);
-      return [];
+    console.error('Error fetching FutureCoins:', error);
+    logDebug(`Error fetching coins: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
     }
-    
-    const data = await res.json();
-    
-    // Handle different response formats
-    if (data.items && Array.isArray(data.items)) {
-      // Transform items and filter out any null values (invalid items)
-      const validItems = data.items.map(transformItem).filter(item => item !== null) as Item[];
-      console.log(`Fetched ${validItems.length} valid items from ${data.items.length} total items`);
-      return validItems;
-    } else if (Array.isArray(data)) {
-      // Transform items and filter out any null values (invalid items)
-      const validItems = data.map(transformItem).filter(item => item !== null) as Item[];
-      console.log(`Fetched ${validItems.length} valid items from ${data.length} total items`);
-      return validItems;
-    }
-    
-    // If no valid format is found
-    console.warn('Invalid format for items data:', data);
-    return [];
-  } catch (err: unknown) {
-    // Handle fetch timeout/abort error specifically
-    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
-      console.error('Fetch request for items timed out');
-    } else {
-      console.error('Error fetching shop items:', err);
-    }
-    return [];
-  }
-};
-
-// Get user's purchased items
-export const fetchUserItems = async (userId?: string): Promise<UserItem[]> => {
-  try {
-    // Get current user ID if not provided
-    let uid: string;
-    if (!userId) {
-      try {
-        uid = await getCurrentUserId();
-      } catch (authError) {
-        console.warn('Failed to get user ID:', authError);
-        return [];
-      }
-    } else {
-      uid = userId;
-    }
-    
-    // Add timeout to prevent hanging requests
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-    
-    const apiUrl = getApiBaseUrl();
-    const token = auth.currentUser ? await auth.currentUser.getIdToken() : '';
-    const res = await fetch(`${apiUrl}/users/${uid}/items`, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      },
-      signal: controller.signal
-    });
-    
-    clearTimeout(timeoutId);
-    
-    if (!res.ok) {
-      console.warn(`Error response from API: ${res.status} ${res.statusText}`);
-      return [];
-    }
-    
-    const data = await res.json();
-    
-    // Handle different response formats
-    if (data.items && Array.isArray(data.items)) {
-      // Transform user items and filter out any null values
-      const validItems = data.items.map(transformUserItem).filter(item => item !== null) as UserItem[];
-      console.log(`Fetched ${validItems.length} valid user items from ${data.items.length} total items`);
-      return validItems;
-    } else if (Array.isArray(data)) {
-      // Transform user items and filter out any null values
-      const validItems = data.map(transformUserItem).filter(item => item !== null) as UserItem[];
-      console.log(`Fetched ${validItems.length} valid user items from ${data.length} total items`);
-      return validItems;
-    }
-    
-    // If no valid format is found
-    console.warn('Invalid format for user items data:', data);
-    return [];
-  } catch (err: unknown) {
-    // Handle fetch timeout/abort error specifically
-    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
-      console.error('Fetch request for items timed out');
-    } else {
-      console.error('Error fetching user items:', err);
-    }
-    return [];
+    throw error;
   }
 };
 
 // Purchase an item
-export const purchaseItem = async (itemId: number): Promise<{
-  success: boolean;
-  message: string;
-  futureCoins?: number;
-}> => {
+export const purchaseItem = async (userId: string, itemId: number): Promise<PurchaseResponse> => {
   try {
-    // Get current user ID
-    let userId: string;
-    try {
-      userId = await getCurrentUserId();
-    } catch (authError) {
-      console.warn('Failed to get user ID for purchase:', authError);
-      return { success: false, message: 'Authentication required to purchase items' };
-    }
-    
-    console.log(`Attempting to purchase item ${itemId} for user ${userId}`);
-    
-    // Validate item ID
-    if (!itemId || isNaN(Number(itemId))) {
-      console.warn(`Invalid item ID for purchase: ${itemId}`);
-      return { success: false, message: 'Invalid item ID' };
-    }
-    
-    // Add timeout to prevent hanging requests
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-    
-    // Make purchase request
-    const apiUrl = getApiBaseUrl();
-    const token = auth.currentUser ? await auth.currentUser.getIdToken() : '';
-    const res = await fetch(`${apiUrl}/users/${userId}/items`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({ itemId }),
-      signal: controller.signal
-    });
-    
-    clearTimeout(timeoutId);
-    
-    // Handle different response status codes
-    if (res.status === 400) {
-      const errorData = await res.json();
-      console.warn('Purchase error 400:', errorData);
-      return { 
-        success: false, 
-        message: errorData.error || 'Failed to purchase item'
-      };
-    }
-    
-    if (res.status === 404) {
-      console.warn(`Item not found with ID: ${itemId}`);
-      return { success: false, message: 'Item not found' };
-    }
-    
-    if (!res.ok) {
-      console.warn(`Error response from API: ${res.status} ${res.statusText}`);
-      return { success: false, message: 'Failed to purchase item. Please try again.' };
-    }
-    
-    // Parse successful response
-    try {
-      const data = await res.json();
-      console.log(`Successfully purchased item ${itemId}`, data);
-      return {
-        success: true,
-        message: data.message || 'Item purchased successfully',
-        futureCoins: data.futureCoins
-      };
-    } catch (parseError) {
-      console.error('Error parsing purchase response:', parseError);
-      return { success: true, message: 'Item purchased, but failed to get updated coins' };
-    }
-  } catch (err: unknown) {
-    // Handle fetch timeout/abort error specifically
-    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
-      console.error('Fetch request for purchase timed out');
-      return { success: false, message: 'Purchase request timed out. Please try again.' };
-    } else {
-      console.error('Error purchasing item:', err);
-      return { success: false, message: 'Failed to purchase item due to network error' };
-    }
-  }
-};
-
-// Rest of the code remains functionally the same with the same error handling pattern
-// for the remaining functions...
-
-// Toggle an item's equipped status
-export const toggleItemEquipped = async (itemId: number): Promise<{
-  success: boolean;
-  message: string;
-  isEquipped?: boolean;
-}> => {
-  try {
-    // Get current user ID
-    let userId: string;
-    try {
-      userId = await getCurrentUserId();
-    } catch (authError) {
-      console.warn('Failed to get user ID for toggle:', authError);
-      return { success: false, message: 'Authentication required to equip items' };
-    }
-    
-    console.log(`Attempting to toggle equipped status for item ${itemId}`);
-    
-    // Validate item ID
-    if (!itemId || isNaN(Number(itemId))) {
-      console.warn(`Invalid item ID for toggle: ${itemId}`);
-      return { success: false, message: 'Invalid item ID' };
-    }
-    
-    // Add timeout to prevent hanging requests
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-    
-    // Make toggle request
-    const apiUrl = getApiBaseUrl();
-    const token = auth.currentUser ? await auth.currentUser.getIdToken() : '';
-    const res = await fetch(`${apiUrl}/users/${userId}/items/${itemId}/toggle`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      },
-      signal: controller.signal
-    });
-    
-    clearTimeout(timeoutId);
-    
-    // Handle different response status codes
-    if (res.status === 404) {
-      console.warn(`Item not found with ID: ${itemId}`);
-      return { success: false, message: 'Item not found in your inventory' };
-    }
-    
-    if (!res.ok) {
-      console.warn(`Error response from API: ${res.status} ${res.statusText}`);
-      return { success: false, message: 'Failed to toggle item. Please try again.' };
-    }
-    
-    // Parse successful response
-    try {
-      const data = await res.json();
-      console.log(`Successfully toggled item ${itemId}`, data);
-      return {
-        success: true,
-        message: data.message || 'Item status updated',
-        isEquipped: data.isEquipped
-      };
-    } catch (parseError) {
-      console.error('Error parsing toggle response:', parseError);
-      return { success: true, message: 'Item status updated successfully' };
-    }
-  } catch (err: unknown) {
-    // Handle fetch timeout/abort error specifically
-    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
-      console.error('Fetch request for toggle timed out');
-      return { success: false, message: 'Request timed out. Please try again.' };
-    } else {
-      console.error('Error toggling item:', err);
-      return { success: false, message: 'Failed to update item due to network error' };
-    }
-  }
-};
-
-// Get user's equipped items
-export const getEquippedItems = async (userId?: string): Promise<UserItem[]> => {
-  try {
-    // Fetch all user items first
-    const userItems = await fetchUserItems(userId);
-    
-    // Filter to get only equipped items
-    return userItems.filter(item => item.is_equipped === 1);
+    logDebug(`Purchasing item ${itemId} for user ${userId}`);
+    // IMPORTANT: Use /items/purchase/:userId/:itemId instead of /users/:userId/purchase/:itemId
+    const response = await axios.post(`${getApiBaseUrl()}/items/purchase/${userId}/${itemId}`);
+    logDebug(`Purchase response:`, response.data);
+    return response.data;
   } catch (error) {
-    console.error('Error getting equipped items:', error);
-    return [];
+    console.error('Error purchasing item:', error);
+    logDebug(`Error purchasing: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+      return error.response.data as PurchaseResponse;
+    }
+    return { success: false, message: 'An unexpected error occurred' };
   }
 };
 
-// Get equipped item in a specific category
-export const getEquippedItemByCategory = async (category: string, userId?: string): Promise<UserItem | null> => {
+// Toggle item equipped status
+export const toggleItemEquipped = async (userId: string, itemId: number): Promise<ToggleResponse> => {
   try {
-    // Fetch all user items first
-    const userItems = await fetchUserItems(userId);
-    
-    // Find the equipped item in the specified category
-    return userItems.find(item => 
-      item.category === category && item.is_equipped === 1
-    ) || null;
+    logDebug(`Toggling item ${itemId} equipped status for user ${userId}`);
+    // IMPORTANT: Use /items/toggle/:userId/:itemId instead of /users/:userId/items/:itemId/toggle
+    const response = await axios.put(`${getApiBaseUrl()}/items/toggle/${userId}/${itemId}`);
+    logDebug(`Toggle response:`, response.data);
+    return response.data;
   } catch (error) {
-    console.error(`Error getting equipped item for category ${category}:`, error);
-    return null;
+    console.error('Error toggling item equipped status:', error);
+    logDebug(`Error toggling: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+      return error.response.data as ToggleResponse;
+    }
+    return { success: false, message: 'An unexpected error occurred' };
   }
 };
 
-// Get item details by ID
-export const getItemById = async (itemId: number): Promise<Item | null> => {
+// Update user's FutureCoins
+export const updateUserFutureCoins = async (userId: string, amount: number): Promise<number> => {
   try {
-    // Validate item ID
-    if (!itemId || isNaN(Number(itemId))) {
-      console.warn(`Invalid item ID: ${itemId}`);
-      return null;
-    }
-    
-    // First check if it's in user items
-    try {
-      const userItems = await fetchUserItems();
-      const userItem = userItems.find(item => item.item_id === itemId);
-      if (userItem) return userItem;
-    } catch (userItemsError) {
-      console.warn('Failed to check user items:', userItemsError);
-      // Continue to check shop items
-    }
-    
-    // If not found in user items, check shop items
-    try {
-      const shopItems = await fetchShopItems();
-      return shopItems.find(item => item.item_id === itemId) || null;
-    } catch (shopItemsError) {
-      console.warn('Failed to check shop items:', shopItemsError);
-      return null;
-    }
+    logDebug(`Updating user ${userId} FutureCoins by ${amount}`);
+    // IMPORTANT: Use /items/coins/:userId instead of /users/:userId/futurecoins
+    const response = await axios.put(`${getApiBaseUrl()}/items/coins/${userId}`, { amount });
+    logDebug(`Update coins response:`, response.data);
+    return response.data.futureCoins;
   } catch (error) {
-    console.error(`Error getting item by ID ${itemId}:`, error);
-    return null;
+    console.error('Error updating FutureCoins:', error);
+    logDebug(`Error updating coins: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    throw error;
   }
 };
 
-// Check if user owns a specific item
-export const checkIfUserOwnsItem = async (itemId: number, userId?: string): Promise<boolean> => {
-  try {
-    // Get user items
-    const userItems = await fetchUserItems(userId);
-    
-    // Check if the item is in the user's inventory
-    return userItems.some(item => item.item_id === itemId);
-  } catch (error) {
-    console.error(`Error checking if user owns item ${itemId}:`, error);
-    return false;
-  }
+// Utility functions
+export const isItemOwned = (userItems: UserItem[], itemId: number): boolean => {
+  return userItems.some(item => item.item_id === itemId);
 };
 
-// Get user's future coins balance
-export const getUserFutureCoins = async (userId?: string): Promise<number> => {
-  try {
-    // Get current user ID if not provided
-    let uid: string;
-    if (!userId) {
-      try {
-        uid = await getCurrentUserId();
-      } catch (authError) {
-        console.warn('Failed to get user ID for coins:', authError);
-        return 0;
-      }
-    } else {
-      uid = userId;
-    }
-    
-    // Add timeout to prevent hanging requests
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-    
-    const apiUrl = getApiBaseUrl();
-    const token = auth.currentUser ? await auth.currentUser.getIdToken() : '';
-    const res = await fetch(`${apiUrl}/users/${uid}/futurecoins`, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      },
-      signal: controller.signal
-    });
-    
-    clearTimeout(timeoutId);
-    
-    if (!res.ok) {
-      console.warn(`Error fetching future coins: ${res.status} ${res.statusText}`);
-      return 0;
-    }
-    
-    const data = await res.json();
-    return data.futureCoins || 0;
-  } catch (err: unknown) {
-    // Handle fetch timeout/abort error specifically
-    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
-      console.error('Fetch request for coins timed out');
-    } else {
-      console.error('Error fetching future coins:', err);
-    }
-    return 0;
-  }
+export const canAffordItem = (futureCoins: number, price: number): boolean => {
+  return futureCoins >= price;
 };
 
-// The utility functions below remain unchanged as they don't interact with APIs
-// and are less likely to cause startup errors
-
-// Get item usage instructions based on category
-export const getItemUsageInstructions = (category: string): string => {
+export const getCategoryColor = (category: string): string => {
   switch (category.toLowerCase()) {
     case 'theme':
-      return 'Go to Settings and select Appearance to apply this theme.';
+      return '#4A6572';
     case 'avatar':
-      return 'Visit your Profile and tap on your current avatar to change it.';
+      return '#F9A826';
     case 'badge':
-      return 'Badges are displayed on your profile automatically once equipped.';
+      return '#6A0DAD';
     case 'feature':
-      return 'This feature is now unlocked and available in your app.';
+      return '#388E3C';
     default:
-      return 'Equip this item from your inventory to use it.';
+      return '#2196F3';
   }
 };
 
-// Get color associated with item category
-export const getCategoryColor = (category?: string): string => {
-  const categoryColors: Record<string, string> = {
-    'theme': '#6A5ACD',   // SlateBlue
-    'avatar': '#20B2AA',  // LightSeaGreen
-    'badge': '#FFD700',   // Gold
-    'feature': '#FF6347', // Tomato
-    'misc': '#9C27B0'     // Purple
-  };
-  
-  return category && categoryColors[category.toLowerCase()] 
-    ? categoryColors[category.toLowerCase()] 
-    : '#9C27B0'; // Default color
+export const getCategoryLabel = (category: string): string => {
+  switch (category.toLowerCase()) {
+    case 'theme':
+      return 'App Theme';
+    case 'avatar':
+      return 'Profile Avatar';
+    case 'badge':
+      return 'Profile Badge';
+    case 'feature':
+      return 'Special Feature';
+    default:
+      return category;
+  }
 };
 
-// Get user-friendly category label
-export const getCategoryLabel = (category: string): string => {
-  const categoryLabels: Record<string, string> = {
-    'theme': 'Theme',
-    'avatar': 'Avatar',
-    'badge': 'Badge',
-    'feature': 'Feature',
-    'misc': 'Miscellaneous'
-  };
-  
-  return category && categoryLabels[category.toLowerCase()]
-    ? categoryLabels[category.toLowerCase()]
-    : category.charAt(0).toUpperCase() + category.slice(1);
+// Find equipped item in a category
+export const getEquippedItemInCategory = (userItems: UserItem[], category: string): UserItem | undefined => {
+  return userItems.find(item => item.category.toLowerCase() === category.toLowerCase() && item.is_equipped === 1);
 };
 
 // Group items by category
-export const groupItemsByCategory = (items: Item[] | UserItem[]): Record<string, (Item | UserItem)[]> => {
-  return items.reduce((groups: Record<string, (Item | UserItem)[]>, item) => {
+export const groupItemsByCategory = (items: Item[]): Record<string, Item[]> => {
+  return items.reduce((groups, item) => {
     const category = item.category.toLowerCase();
     if (!groups[category]) {
       groups[category] = [];
     }
     groups[category].push(item);
     return groups;
-  }, {});
+  }, {} as Record<string, Item[]>);
 };
 
-// Apply item effects - this would integrate with other parts of your app
-export const applyItemEffects = async (item: UserItem): Promise<boolean> => {
-  try {
-    console.log(`Applying effects for ${item.name} (${item.category})`);
-    
-    // Based on item category, apply different effects
-    switch (item.category.toLowerCase()) {
-      case 'theme':
-        // Apply theme changes
-        console.log(`Applying theme: ${item.name}`);
-        // You would integrate with your theme system here
-        return true;
-        
-      case 'avatar':
-        // Update user's avatar
-        console.log(`Setting avatar: ${item.name}`);
-        // You would update the user's profile here
-        return true;
-        
-      case 'badge':
-        // Apply badge to user profile
-        console.log(`Applying badge: ${item.name}`);
-        // You would update the user's badges here
-        return true;
-        
-      case 'feature':
-        // Unlock feature
-        console.log(`Unlocking feature: ${item.name}`);
-        // You would update app settings to enable the feature
-        return true;
-        
-      default:
-        console.log(`No specific effects for ${item.category} items`);
-        return true;
+// Get the equipped items for each category
+export const getEquippedItems = (userItems: UserItem[]): Record<string, UserItem> => {
+  return userItems.reduce((result, item) => {
+    if (item.is_equipped === 1) {
+      result[item.category.toLowerCase()] = item;
     }
-  } catch (error) {
-    console.error(`Error applying item effects for ${item.name}:`, error);
-    return false;
-  }
+    return result;
+  }, {} as Record<string, UserItem>);
 };

@@ -2,21 +2,22 @@ import React from "react";
 import { Image, StyleSheet, Text, View, TouchableOpacity } from "react-native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { BottomTabParamList } from "../types/navigaton";
+import { useAuth } from "../contexts/AuthContext";
 
 // Import screen components
 import HomeScreenWrapper from "../components/HomeScreenWrapper";
-import CommunityScreen from "../screens/CommunityScreen";
 import ProfileScreen from "../screens/ProfileScreen";
-import ItemShopScreen from "../screens/ItemShopScreen";
 
-// Import Goals Stack Navigator instead of direct GoalsScreen
+import ItemShopStackNavigator from "./ItemShopStackNavigator";
+
+// Import Stack Navigators
 import GoalsStackNavigator from "./GoalsStackNavigator";
+import CommunityStackNavigator from "./CommmunityStackNavigator"
 
 // Create bottom tab navigator with proper typing
 const Tab = createBottomTabNavigator<BottomTabParamList>();
 
 // Import icons
-// Make sure these files exist in your assets folder
 const homeIcon = require("../assets/icons/home.png");
 const goalsIcon = require("../assets/icons/target.png");
 const communityIcon = require("../assets/icons/community.png");
@@ -99,6 +100,7 @@ function MyTabBar({ state, descriptors, navigation }) {
 }
 
 const BottomTabNavigator = () => {
+  const { currentUser } = useAuth();
   return (
     <Tab.Navigator
       initialRouteName="Home"
@@ -109,10 +111,17 @@ const BottomTabNavigator = () => {
       }}
     >
       <Tab.Screen name="Home" component={HomeScreenWrapper} />
-      {/* Use GoalsStackNavigator instead of GoalsScreen directly */}
       <Tab.Screen name="Goals" component={GoalsStackNavigator} />
-      <Tab.Screen name="Community" component={CommunityScreen} />
-      <Tab.Screen name="ItemShop" component={ItemShopScreen} />
+      {/* Use CommunityStackNavigator instead of CommunityScreen directly */}
+      <Tab.Screen name="Community" component={CommunityStackNavigator} />
+      <Tab.Screen
+        name="ItemShop"
+        component={ItemShopStackNavigator}
+        initialParams={{
+          userId: currentUser?.id,
+          forceRefresh: Date.now(),
+        }}
+      />
       <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
   );

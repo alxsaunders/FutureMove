@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   ScrollView,
   Dimensions,
+  Alert,
 } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { CommonActions } from "@react-navigation/native"; // 👈 Import CommonActions
@@ -23,7 +24,7 @@ import {
   leaveCommunity,
 } from "../../services/CommunityService";
 import { Community } from "../../types";
-
+import { auth } from "../../config/firebase.js"; // 👈 Import Firebase auth directly
 
 // Get screen width for category pills
 const { width } = Dimensions.get("window");
@@ -53,43 +54,158 @@ const CommunityHubTab = () => {
     { id: "Repair", name: "Repair", width: PILL_WIDTH },
   ];
 
+  // Check Firebase auth status when component mounts
+  useEffect(() => {
+    const checkFirebaseAuth = () => {
+      const firebaseUser = auth.currentUser;
+      console.log(
+        "Firebase auth user:",
+        firebaseUser ? firebaseUser.uid : "not logged in"
+      );
+
+      if (!firebaseUser) {
+        // If in development mode, show a warning
+        if (__DEV__) {
+          console.warn(
+            "No Firebase user available. Some features may not work."
+          );
+        }
+      }
+    };
+
+    checkFirebaseAuth();
+
+    // Set up auth state listener
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      console.log(
+        "Firebase auth state changed:",
+        user ? user.uid : "signed out"
+      );
+      // You could refresh data here if needed
+    });
+
+    // Clean up listener
+    return () => unsubscribe();
+  }, []);
+
   // Function to navigate to CommunityDetail
   const navigateToCommunityDetail = (communityId: string | number) => {
-    // Use CommonActions to navigate to a screen in a parent navigator
-    navigation.dispatch(
-      CommonActions.navigate({
-        name: "CommunityDetail",
-        params: { communityId },
-      })
-    );
+    // Use same approach for consistent navigation
+    navigation.getParent()?.navigate("CommunityDetail", {
+      communityId: String(communityId),
+    });
   };
 
   // Function to navigate to CreatePost
   const navigateToCreatePost = (communityId?: string | number) => {
-    // Use CommonActions to navigate to a screen in a parent navigator
-    navigation.dispatch(
-      CommonActions.navigate({
-        name: "CreatePost",
-        params: { communityId },
-      })
-    );
+    // This is the key fix - use the proper nesting path
+    navigation.getParent()?.navigate("CreatePost", {
+      communityId: communityId ? String(communityId) : undefined,
+    });
   };
 
-  // Fetch communities
+  // Fetch communities with enhanced error handling
   const fetchCommunityData = useCallback(async () => {
     setIsLoading(true);
     try {
-      // Fetch communities and map to the expected format
+      // Check Firebase auth directly
+      const firebaseUser = auth.currentUser;
+      console.log(
+        "Firebase auth user when fetching communities:",
+        firebaseUser ? firebaseUser.uid : "not logged in"
+      );
+
+      if (!firebaseUser) {
+        console.warn("Cannot fetch communities: No Firebase user");
+        // If in development, provide mock data for testing
+        if (__DEV__) {
+          console.log("Using mock data for development");
+          const mockCommunities = [
+            {
+              id: "1",
+              name: "Health & Fitness",
+              description: "Share health tips and fitness routines",
+              category: "Health",
+              imageUrl: "https://via.placeholder.com/150",
+              createdBy: "dev-user",
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              memberCount: 24,
+              isJoined: false,
+            },
+            {
+              id: "2",
+              name: "Learning Together",
+              description: "A community for continuous education",
+              category: "Learning",
+              imageUrl: "https://via.placeholder.com/150",
+              createdBy: "dev-user",
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              memberCount: 18,
+              isJoined: true,
+            },
+          ];
+
+          // Map mock communities to app format
+          const mappedMockCommunities = mockCommunities.map((community) => ({
+            id: String(community.id),
+            name: community.name,
+            description: community.description,
+            category: community.category,
+            members: community.memberCount,
+            posts: 0,
+            image: community.imageUrl,
+            isJoined: community.isJoined,
+          }));
+
+          setCommunities(mappedMockCommunities);
+          setFilteredCommunities(mappedMockCommunities);
+        } else {
+          setCommunities([]);
+          setFilteredCommunities([]);
+        }
+        setIsLoading(false);
+        return;
+      }
+
+      // Fetch communities from the service (which will get Firebase user ID internally)
       const serviceData = await fetchCommunities();
+      console.log("Fetched service data:", serviceData.length, "communities");
+
+      // Map service communities to app communities with proper type handling
+      const mappedCommunities = serviceData.map((community) => ({
+        id: String(community.id),
+        name: community.name || "",
+        description: community.description || "",
+        category: community.category || "General",
+        members: community.memberCount || 0,
+        posts: 0, // Default value since the service doesn't provide this
+        image: community.imageUrl || "https://via.placeholder.com/150",
+        isJoined: Boolean(community.isJoined),
+      }));
+
+      console.log("Mapped communities:", mappedCommunities.length);
+
+      // Set both state values
+      setCommunities(mappedCommunities);
+      setFilteredCommunities(mappedCommunities);
     } catch (error) {
       console.error("Error fetching communities:", error);
       // Set empty arrays to avoid errors
       setCommunities([]);
       setFilteredCommunities([]);
+
+      if (__DEV__) {
+        Alert.alert(
+          "Error Fetching Communities",
+          "Check your connection and Firebase auth status."
+        );
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [currentUser]);
+  }, []);
 
   // Apply filters
   const applyFilters = useCallback(() => {
@@ -132,33 +248,77 @@ const CommunityHubTab = () => {
     applyFilters();
   }, [applyFilters, selectedCategory, showJoinedOnly, searchQuery]);
 
-  // Join or leave a community
+  // Join or leave a community with improved Firebase auth handling
   const toggleJoinCommunity = async (
-    id: string,
+    id: string | number,
     isCurrentlyJoined: boolean
   ) => {
-    if (!currentUser) return;
+    // Check Firebase auth directly
+    const firebaseUser = auth.currentUser;
+
+    if (!firebaseUser) {
+      console.log("Cannot join/leave: No Firebase user");
+
+      if (__DEV__) {
+        Alert.alert(
+          "Authentication Required",
+          "Please sign in to join or leave communities."
+        );
+      }
+      return;
+    }
+
+    const idStr = String(id);
+    console.log(
+      `Attempting to ${isCurrentlyJoined ? "leave" : "join"} community:`,
+      idStr
+    );
+    console.log("Using Firebase user ID:", firebaseUser.uid);
 
     try {
       let success;
       if (isCurrentlyJoined) {
-        success = await leaveCommunity(id);
+        console.log("Calling leaveCommunity API...");
+        success = await leaveCommunity(idStr);
       } else {
-        success = await joinCommunity(id);
+        console.log("Calling joinCommunity API...");
+        success = await joinCommunity(idStr);
       }
 
+      console.log("API call result:", success);
+
       if (success) {
-        // Update local state
+        // Create a properly typed helper function to update a community
+        const updateCommunity = (community: Community) => {
+          // Compare as strings to avoid type mismatches
+          return String(community.id) === idStr
+            ? { ...community, isJoined: !isCurrentlyJoined }
+            : community;
+        };
+
+        // Update both state variables directly
         setCommunities((prevCommunities) =>
-          prevCommunities.map((community) =>
-            community.id === id
-              ? { ...community, isJoined: !isCurrentlyJoined }
-              : community
-          )
+          prevCommunities.map(updateCommunity)
         );
+
+        setFilteredCommunities((prevFiltered) =>
+          prevFiltered.map(updateCommunity)
+        );
+
+        // Force a re-render
+        setSearchQuery(searchQuery);
       }
     } catch (error) {
       console.error("Error toggling community membership:", error);
+
+      if (__DEV__) {
+        Alert.alert(
+          "Error",
+          `Failed to ${
+            isCurrentlyJoined ? "leave" : "join"
+          } community. Please try again.`
+        );
+      }
     }
   };
 
@@ -331,7 +491,7 @@ const CommunityHubTab = () => {
         <FlatList
           data={filteredCommunities}
           renderItem={renderCommunityItem}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item) => String(item.id)}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
         />

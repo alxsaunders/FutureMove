@@ -41,15 +41,31 @@ const CommunityDetailScreen = () => {
     setIsLoading(true);
     try {
       const communityData = await getCommunityById(communityId);
-      setCommunity(community);
 
-      // Also fetch posts
       if (communityData) {
+        // Transform API Community type to component Community type
+        const transformedCommunity: Community = {
+          id: String(communityData.id),
+          name: communityData.name,
+          category: communityData.category || "General",
+          members: communityData.memberCount || 0,
+          posts: 0, // Default since API doesn't provide this
+          image: communityData.imageUrl || "https://via.placeholder.com/150",
+          description: communityData.description || "",
+          isJoined: !!communityData.isJoined,
+        };
+
+        setCommunity(transformedCommunity);
+
+        // Fetch posts
         const postsData = await fetchCommunityPosts(communityId);
         setPosts(postsData);
+      } else {
+        setCommunity(null);
       }
     } catch (error) {
       console.error("Error fetching community details:", error);
+      setCommunity(null);
     } finally {
       setIsLoading(false);
     }
@@ -67,10 +83,12 @@ const CommunityDetailScreen = () => {
     setIsJoining(true);
     try {
       let success;
+
+      // Use correct ID parameter
       if (community.isJoined) {
-        success = await leaveCommunity(currentUser.id);
+        success = await leaveCommunity(communityId);
       } else {
-        success = await joinCommunity(currentUser.id);
+        success = await joinCommunity(communityId);
       }
 
       if (success) {
@@ -84,6 +102,7 @@ const CommunityDetailScreen = () => {
         });
       }
     } catch (error) {
+      // Improved error handling
       console.error("Error toggling membership:", error);
     } finally {
       setIsJoining(false);
@@ -158,11 +177,9 @@ const CommunityDetailScreen = () => {
             post={item}
             onLikePress={() => handleLikePost(item.id)}
             onCommentPress={() => {
-              // @ts-ignore - Ignoring type checking for navigation with params
               navigation.navigate("PostDetail", { postId: item.id });
             }}
             onPostPress={() => {
-              // @ts-ignore - Ignoring type checking for navigation with params
               navigation.navigate("PostDetail", { postId: item.id });
             }}
           />
@@ -194,7 +211,7 @@ const CommunityDetailScreen = () => {
                       size={16}
                       color={COLORS.textSecondary}
                     />
-                    <Text style={styles.statText}>{community.posts} posts</Text>
+                    <Text style={styles.statText}>{posts.length} posts</Text>
                   </View>
                 </View>
                 <View
@@ -256,7 +273,6 @@ const CommunityDetailScreen = () => {
             <TouchableOpacity
               style={styles.createPostButton}
               onPress={() => {
-                // @ts-ignore - Ignoring type checking for navigation
                 navigation.navigate("CreatePost", {
                   communityId: community.id,
                 });
@@ -274,7 +290,6 @@ const CommunityDetailScreen = () => {
         <TouchableOpacity
           style={styles.fab}
           onPress={() => {
-            // @ts-ignore - Ignoring type checking for navigation
             navigation.navigate("CreatePost", { communityId: community.id });
           }}
         >

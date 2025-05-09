@@ -146,7 +146,7 @@ export const fetchFeedPosts = async (userId?: string): Promise<Post[]> => {
     return [];
   } catch (err) {
     // Handle fetch timeout/abort error specifically
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error('Fetch request for feed posts timed out');
     } else {
       console.error('Error fetching feed posts:', err);
@@ -161,10 +161,10 @@ export const fetchFeedPosts = async (userId?: string): Promise<Post[]> => {
 export const fetchCommunityPosts = async (communityId: string): Promise<Post[]> => {
   try {
     // Validate community ID
-    if (!communityId || communityId.trim() === '') {
-      console.warn('Invalid community ID for post fetch');
-      return [];
-    }
+    if (typeof communityId !== 'string' || communityId.trim() === '') {
+  console.warn('Invalid community ID for post fetch');
+  return [];
+}
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
@@ -206,7 +206,7 @@ export const fetchCommunityPosts = async (communityId: string): Promise<Post[]> 
     return [];
   } catch (err) {
     // Handle fetch timeout/abort error specifically
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for community ${communityId} posts timed out`);
     } else {
       console.error(`Error fetching posts for community: ${communityId}`, err);
@@ -265,7 +265,7 @@ export const fetchPost = async (postId: string): Promise<Post | null> => {
     return post;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for post ${postId} timed out`);
     } else {
       console.error(`Error fetching post by ID: ${postId}`, err);
@@ -347,7 +347,7 @@ export const createPost = async (
     }
   } catch (err) {
     // Handle fetch timeout/abort error specifically
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error('Fetch request for post creation timed out');
     } else {
       console.error('Error creating post:', err);
@@ -411,7 +411,7 @@ export const toggleLikePost = async (
     return true;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for like toggle on post ${postId} timed out`);
     } else {
       console.error(`Error toggling like for post: ${postId}`, err);
@@ -471,7 +471,7 @@ export const fetchComments = async (postId: string): Promise<Comment[]> => {
     return [];
   } catch (err) {
     // Handle fetch timeout/abort error specifically
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for comments on post ${postId} timed out`);
     } else {
       console.error(`Error fetching comments for post: ${postId}`, err);
@@ -548,7 +548,7 @@ export const createComment = async (
     }
   } catch (err) {
     // Handle fetch timeout/abort error specifically
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for comment on post ${postId} creation timed out`);
     } else {
       console.error(`Error creating comment on post: ${postId}`, err);
@@ -612,7 +612,7 @@ export const toggleLikeComment = async (
     return true;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for comment like toggle ${commentId} timed out`);
     } else {
       console.error(`Error toggling like for comment: ${commentId}`, err);
@@ -670,7 +670,7 @@ export const deletePost = async (postId: string): Promise<boolean> => {
     return true;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for post deletion ${postId} timed out`);
     } else {
       console.error(`Error deleting post: ${postId}`, err);
@@ -728,7 +728,7 @@ export const deleteComment = async (commentId: string): Promise<boolean> => {
     return true;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for comment deletion ${commentId} timed out`);
     } else {
       console.error(`Error deleting comment: ${commentId}`, err);
@@ -810,7 +810,7 @@ export const editPost = async (
     }
   } catch (err) {
     // Handle fetch timeout/abort error specifically
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for post edit ${postId} timed out`);
     } else {
       console.error(`Error editing post: ${postId}`, err);
@@ -886,7 +886,7 @@ export const editComment = async (
     }
   } catch (err) {
     // Handle fetch timeout/abort error specifically
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for comment edit ${commentId} timed out`);
     } else {
       console.error(`Error editing comment: ${commentId}`, err);
@@ -954,7 +954,7 @@ export const reportPost = async (
     return true;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for post report ${postId} timed out`);
     } else {
       console.error(`Error reporting post: ${postId}`, err);
@@ -1023,7 +1023,7 @@ export const reportComment = async (
     return true;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for comment report ${commentId} timed out`);
     } else {
       console.error(`Error reporting comment: ${commentId}`, err);
@@ -1077,7 +1077,7 @@ export const getTrendingPosts = async (limit: number = 10): Promise<Post[]> => {
     return [];
   } catch (err) {
     // Handle fetch timeout/abort error specifically
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error('Fetch request for trending posts timed out');
     } else {
       console.error('Error fetching trending posts:', err);
@@ -1134,7 +1134,7 @@ export const searchPosts = async (query: string): Promise<Post[]> => {
     return [];
   } catch (err) {
     // Handle fetch timeout/abort error specifically
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error('Fetch request for post search timed out');
     } else {
       console.error('Error searching posts:', err);
