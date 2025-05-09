@@ -2,6 +2,7 @@
 import { Post, Comment } from "../types";
 import { Platform } from "react-native";
 import { auth } from "../config/firebase.js";
+import { fetchJoinedCommunities } from "./CommunityService";
 
 // Get API base URL based on platform
 export const getApiBaseUrl = () => {
@@ -103,10 +104,11 @@ export const fetchFeedPosts = async (userId?: string): Promise<Post[]> => {
   try {
     // Get current user ID if not provided
     const currentUserId = userId || await getCurrentUserId();
+    console.log(`Fetching feed posts for user: ${currentUserId}`);
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
     
     const apiUrl = getApiBaseUrl();
     const res = await fetch(`${apiUrl}/posts/feed?userId=${currentUserId}`, {
@@ -120,7 +122,31 @@ export const fetchFeedPosts = async (userId?: string): Promise<Post[]> => {
     
     if (!res.ok) {
       console.warn(`Error response from API: ${res.status} ${res.statusText}`);
-      throw new Error(`Failed to fetch feed posts: ${res.status} ${res.statusText}`);
+      
+      // If the feed endpoint returns an error, fall back to fetching posts from joined communities
+      console.log("Falling back to fetching posts from joined communities");
+      const joinedCommunities = await fetchJoinedCommunities();
+      
+      if (joinedCommunities.length === 0) {
+        console.log("User hasn't joined any communities");
+        return [];
+      }
+      
+      let allPosts: Post[] = [];
+      
+      // Fetch posts for each joined community
+      for (const community of joinedCommunities) {
+        try {
+          console.log(`Fetching posts for community: ${community.id}`);
+          const communityPosts = await fetchCommunityPosts(String(community.id));
+          allPosts = [...allPosts, ...communityPosts];
+        } catch (communityError) {
+          console.error(`Error fetching posts for community ${community.id}:`, communityError);
+        }
+      }
+      
+      console.log(`Fetched ${allPosts.length} total posts from all joined communities`);
+      return allPosts;
     }
     
     const data = await res.json();
@@ -152,8 +178,34 @@ export const fetchFeedPosts = async (userId?: string): Promise<Post[]> => {
       console.error('Error fetching feed posts:', err);
     }
     
-    // Return empty array instead of mock data
-    return [];
+    // Fall back to fetching from joined communities on error
+    try {
+      console.log("Error with feed API, falling back to community posts");
+      const joinedCommunities = await fetchJoinedCommunities();
+      
+      if (joinedCommunities.length === 0) {
+        return [];
+      }
+      
+      let allPosts: Post[] = [];
+      
+      // Fetch posts for each joined community
+      for (const community of joinedCommunities) {
+        try {
+          console.log(`Fetching posts for community: ${community.id}`);
+          const communityPosts = await fetchCommunityPosts(String(community.id));
+          allPosts = [...allPosts, ...communityPosts];
+        } catch (communityError) {
+          console.error(`Error fetching posts for community ${community.id}:`, communityError);
+        }
+      }
+      
+      console.log(`Fetched ${allPosts.length} total posts from all joined communities (fallback)`);
+      return allPosts;
+    } catch (fallbackError) {
+      console.error("Error in fallback post fetch:", fallbackError);
+      return [];
+    }
   }
 };
 
@@ -162,57 +214,61 @@ export const fetchCommunityPosts = async (communityId: string): Promise<Post[]> 
   try {
     // Validate community ID
     if (typeof communityId !== 'string' || communityId.trim() === '') {
-  console.warn('Invalid community ID for post fetch');
-  return [];
-}
+      console.warn('Invalid community ID for post fetch');
+      return [];
+    }
+    
+    // Check if user is authenticated
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      console.warn('User not authenticated when fetching community posts');
+      return [];
+    }
+    
+    console.log(`Fetching posts for community: ${communityId}`);
+    
+    // Try to get a token
+    const token = await currentUser.getIdToken();
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
     
     const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/communities/${communityId}/posts`, {
+    
+    // This is the endpoint we need to add to the server
+    const res = await fetch(`${apiUrl}/posts/community/${communityId}?userId=${currentUser.uid}`, {
       signal: controller.signal,
       headers: {
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
       }
     });
     
     clearTimeout(timeoutId);
     
     if (!res.ok) {
-      console.warn(`Error response from API: ${res.status} ${res.statusText}`);
-      throw new Error(`Failed to fetch community posts: ${res.status} ${res.statusText}`);
+      console.warn(`Error fetching posts: ${res.status} ${res.statusText}`);
+      
+      if (res.status === 404) {
+        console.warn(`Community ${communityId} might not exist`);
+      }
+      
+      throw new Error(`Failed to fetch community posts: ${res.status}`);
     }
     
     const data = await res.json();
     
-    // Handle different response formats
-    if (Array.isArray(data)) {
-      // Transform posts and filter out any null values
-      const validPosts = data.map(transformPost).filter(post => post !== null) as Post[];
-      return validPosts;
-    }
-    
-    // If it's in the { posts: [] } format
-    if (data.posts && Array.isArray(data.posts)) {
-      // Transform posts and filter out any null values
-      const validPosts = data.posts.map(transformPost).filter(post => post !== null) as Post[];
-      return validPosts;
-    }
-    
-    // If no valid format is found
-    console.warn('Invalid format for community posts data:', data);
-    return [];
+    // Transform posts and filter out any null values
+    const validPosts = Array.isArray(data) 
+      ? data.map(transformPost).filter(post => post !== null) as Post[]
+      : [];
+      
+    console.log(`Successfully fetched ${validPosts.length} posts for community ${communityId}`);
+    return validPosts;
   } catch (err) {
-    // Handle fetch timeout/abort error specifically
-    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
-      console.error(`Fetch request for community ${communityId} posts timed out`);
-    } else {
-      console.error(`Error fetching posts for community: ${communityId}`, err);
-    }
-    
-    // Return empty array instead of mock data
+    console.error(`Error fetching posts for community: ${communityId}`, err);
+    // Return empty array for better UX
     return [];
   }
 };

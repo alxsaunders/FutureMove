@@ -4,7 +4,7 @@ const router = express.Router();
 // Helper functions
 const handleError = (res, error, message = 'Server error') => {
   console.error(`${message}:`, error);
-  res.status(500).json({ error: message, details: error.message });
+  res.status(500).json({ error: message, details: error.message, success: false });
 };
 
 module.exports = (pool, authenticateFirebaseToken) => {
@@ -17,15 +17,75 @@ module.exports = (pool, authenticateFirebaseToken) => {
       const userId = req.user ? req.user.uid : req.query.userId;
       
       if (!userId) {
-        return res.status(400).json({ error: 'User ID is required' });
+        return res.status(400).json({ error: 'User ID is required', success: false });
       }
       
-      // Get posts for the user's feed
-      const [rows] = await pool.execute('CALL get_feed_posts(?)', [userId]);
+      console.log(`Fetching feed posts for user: ${userId}`);
       
-      res.json(rows[0]);
+      // First get all communities the user has joined
+      const [joinedCommunitiesQuery] = await pool.execute(
+        `SELECT community_id 
+         FROM community_members 
+         WHERE user_id = ?`,
+        [userId]
+      );
+      
+      if (joinedCommunitiesQuery.length === 0) {
+        console.log(`User ${userId} hasn't joined any communities`);
+        return res.json([]);
+      }
+      
+      // Extract community IDs
+      const communityIds = joinedCommunitiesQuery.map(row => row.community_id);
+      console.log(`User ${userId} has joined communities: ${communityIds.join(', ')}`);
+      
+      // Create a placeholder string for the IN clause
+      const placeholders = communityIds.map(() => '?').join(',');
+      
+      // Use IN clause to get posts from all joined communities
+      const [postsQuery] = await pool.execute(
+        `SELECT 
+          p.post_id,
+          p.community_id,
+          c.name as community_name,
+          p.user_id,
+          u.username as user_name,
+          u.profile_image as user_avatar,
+          p.content,
+          p.image_url,
+          p.created_at,
+          COUNT(DISTINCT pl_all.user_id) as likes_count,
+          COUNT(DISTINCT com.comment_id) as comments_count,
+          MAX(CASE WHEN pl_user.user_id IS NOT NULL THEN 1 ELSE 0 END) as is_liked
+        FROM posts p
+        JOIN communities c ON p.community_id = c.community_id
+        JOIN users u ON p.user_id = u.user_id
+        LEFT JOIN post_likes pl_all ON p.post_id = pl_all.post_id
+        LEFT JOIN post_likes pl_user ON p.post_id = pl_user.post_id AND pl_user.user_id = ?
+        LEFT JOIN comments com ON p.post_id = com.post_id
+        WHERE p.community_id IN (${placeholders})
+        GROUP BY p.post_id, p.community_id, c.name, p.user_id, u.username, u.profile_image, p.content, p.image_url, p.created_at
+        ORDER BY p.created_at DESC
+        LIMIT 100`,
+        [userId, ...communityIds]
+      );
+      
+      console.log(`Found ${postsQuery.length} posts for user ${userId}'s feed`);
+      
+      // Send the posts as the response
+      res.json(postsQuery);
     } catch (error) {
-      handleError(res, error, 'Error fetching feed posts');
+      console.error(`Error fetching feed posts:`, error);
+      
+      // Try the stored procedure as a fallback
+      try {
+        console.log(`Falling back to stored procedure for user feed: ${userId}`);
+        const [rows] = await pool.execute('CALL get_feed_posts(?)', [userId]);
+        console.log(`Retrieved ${rows[0]?.length || 0} posts using stored procedure`);
+        return res.json(rows[0] || []);
+      } catch (fallbackError) {
+        handleError(res, fallbackError, 'Error fetching feed posts (fallback failed)');
+      }
     }
   });
 
@@ -36,7 +96,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       const limit = parseInt(req.query.limit) || 10;
       
       if (!userId) {
-        return res.status(400).json({ error: 'User ID is required' });
+        return res.status(400).json({ error: 'User ID is required', success: false });
       }
       
       // Get trending posts
@@ -55,7 +115,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       const userId = req.user ? req.user.uid : req.query.userId;
       
       if (!userId) {
-        return res.status(400).json({ error: 'User ID is required' });
+        return res.status(400).json({ error: 'User ID is required', success: false });
       }
       
       if (!query) {
@@ -103,7 +163,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       const userId = req.user ? req.user.uid : req.query.userId;
       
       if (!userId) {
-        return res.status(400).json({ error: 'User ID is required' });
+        return res.status(400).json({ error: 'User ID is required', success: false });
       }
       
       // Get post details
@@ -133,7 +193,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       );
       
       if (rows.length === 0) {
-        return res.status(404).json({ error: 'Post not found' });
+        return res.status(404).json({ error: 'Post not found', success: false });
       }
       
       res.json(rows[0]);
@@ -152,12 +212,12 @@ module.exports = (pool, authenticateFirebaseToken) => {
       
       if (!userId) {
         connection.release();
-        return res.status(400).json({ error: 'User ID is required' });
+        return res.status(400).json({ error: 'User ID is required', success: false });
       }
       
       if (!community_id || !content) {
         connection.release();
-        return res.status(400).json({ error: 'Community ID and content are required' });
+        return res.status(400).json({ error: 'Community ID and content are required', success: false });
       }
       
       await connection.beginTransaction();
@@ -193,7 +253,19 @@ module.exports = (pool, authenticateFirebaseToken) => {
       if (communityCheck[0].count === 0) {
         await connection.rollback();
         connection.release();
-        return res.status(404).json({ error: 'Community not found' });
+        return res.status(404).json({ error: 'Community not found', success: false });
+      }
+      
+      // Check if user is a member of this community
+      const [memberCheck] = await connection.execute(
+        'SELECT COUNT(*) as count FROM community_members WHERE community_id = ? AND user_id = ?',
+        [community_id, userId]
+      );
+      
+      if (memberCheck[0].count === 0) {
+        await connection.rollback();
+        connection.release();
+        return res.status(403).json({ error: 'You must be a member of this community to post', success: false });
       }
       
       // Create the post
@@ -228,7 +300,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       
       await connection.commit();
       
-      res.status(201).json(postRows[0]);
+      res.status(201).json({ ...postRows[0], success: true });
     } catch (error) {
       await connection.rollback();
       handleError(res, error, 'Error creating post');
@@ -245,11 +317,11 @@ module.exports = (pool, authenticateFirebaseToken) => {
       const userId = req.user ? req.user.uid : req.body.userId;
       
       if (!userId) {
-        return res.status(400).json({ error: 'User ID is required' });
+        return res.status(400).json({ error: 'User ID is required', success: false });
       }
       
       if (!content) {
-        return res.status(400).json({ error: 'Content is required' });
+        return res.status(400).json({ error: 'Content is required', success: false });
       }
       
       // Check if post exists and belongs to the user
@@ -259,11 +331,11 @@ module.exports = (pool, authenticateFirebaseToken) => {
       );
       
       if (postRows.length === 0) {
-        return res.status(404).json({ error: 'Post not found' });
+        return res.status(404).json({ error: 'Post not found', success: false });
       }
       
       if (postRows[0].user_id !== userId) {
-        return res.status(403).json({ error: 'Not authorized to update this post' });
+        return res.status(403).json({ error: 'Not authorized to update this post', success: false });
       }
       
       // Update the post
@@ -299,7 +371,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
         [userId, postId]
       );
       
-      res.json(updatedRows[0]);
+      res.json({ ...updatedRows[0], success: true });
     } catch (error) {
       handleError(res, error, 'Error updating post');
     }
@@ -312,7 +384,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       const userId = req.user ? req.user.uid : req.body.userId;
       
       if (!userId) {
-        return res.status(400).json({ error: 'User ID is required' });
+        return res.status(400).json({ error: 'User ID is required', success: false });
       }
       
       // Check if post exists and belongs to the user
@@ -322,11 +394,11 @@ module.exports = (pool, authenticateFirebaseToken) => {
       );
       
       if (postRows.length === 0) {
-        return res.status(404).json({ error: 'Post not found' });
+        return res.status(404).json({ error: 'Post not found', success: false });
       }
       
       if (postRows[0].user_id !== userId) {
-        return res.status(403).json({ error: 'Not authorized to delete this post' });
+        return res.status(403).json({ error: 'Not authorized to delete this post', success: false });
       }
       
       // Delete the post (will cascade delete comments and likes via foreign keys)
@@ -345,7 +417,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       const userId = req.user ? req.user.uid : req.body.userId;
       
       if (!userId) {
-        return res.status(400).json({ error: 'User ID is required' });
+        return res.status(400).json({ error: 'User ID is required', success: false });
       }
       
       // Check if post exists
@@ -355,7 +427,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       );
       
       if (postRows.length === 0) {
-        return res.status(404).json({ error: 'Post not found' });
+        return res.status(404).json({ error: 'Post not found', success: false });
       }
       
       // Check if already liked
@@ -365,7 +437,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       );
       
       if (likeRows[0].count > 0) {
-        return res.status(200).json({ message: 'Post already liked' });
+        return res.status(200).json({ message: 'Post already liked', success: true });
       }
       
       // Add the like
@@ -387,7 +459,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       const userId = req.user ? req.user.uid : req.body.userId;
       
       if (!userId) {
-        return res.status(400).json({ error: 'User ID is required' });
+        return res.status(400).json({ error: 'User ID is required', success: false });
       }
       
       // Check if post exists
@@ -397,7 +469,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       );
       
       if (postRows.length === 0) {
-        return res.status(404).json({ error: 'Post not found' });
+        return res.status(404).json({ error: 'Post not found', success: false });
       }
       
       // Check if liked
@@ -407,7 +479,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       );
       
       if (likeRows[0].count === 0) {
-        return res.status(200).json({ message: 'Post not liked' });
+        return res.status(200).json({ message: 'Post not liked', success: true });
       }
       
       // Remove the like
@@ -429,7 +501,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       const userId = req.user ? req.user.uid : req.query.userId;
       
       if (!userId) {
-        return res.status(400).json({ error: 'User ID is required' });
+        return res.status(400).json({ error: 'User ID is required', success: false });
       }
       
       // Check if post exists
@@ -439,7 +511,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       );
       
       if (postRows.length === 0) {
-        return res.status(404).json({ error: 'Post not found' });
+        return res.status(404).json({ error: 'Post not found', success: false });
       }
       
       // Get comments for the post
@@ -448,6 +520,61 @@ module.exports = (pool, authenticateFirebaseToken) => {
       res.json(rows[0]);
     } catch (error) {
       handleError(res, error, 'Error fetching comments');
+    }
+  });
+
+  // GET - Posts for a specific community
+  router.get('/community/:communityId', async (req, res) => {
+    try {
+      const communityId = req.params.communityId;
+      const userId = req.user ? req.user.uid : req.query.userId;
+      
+      console.log(`Fetching posts for community: ${communityId}`);
+      
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID is required', success: false });
+      }
+      
+      // Check if community exists
+      const [communityCheck] = await pool.execute(
+        'SELECT community_id FROM communities WHERE community_id = ?',
+        [communityId]
+      );
+      
+      if (communityCheck.length === 0) {
+        return res.status(404).json({ error: 'Community not found', success: false });
+      }
+      
+      // Get posts for the community
+      const [rows] = await pool.execute(
+        `SELECT 
+          p.post_id,
+          p.community_id,
+          c.name as community_name,
+          p.user_id,
+          u.username as user_name,
+          u.profile_image as user_avatar,
+          p.content,
+          p.image_url,
+          p.created_at,
+          COUNT(DISTINCT pl_all.user_id) as likes_count,
+          COUNT(DISTINCT com.comment_id) as comments_count,
+          MAX(CASE WHEN pl_user.user_id IS NOT NULL THEN 1 ELSE 0 END) as is_liked
+        FROM posts p
+        JOIN communities c ON p.community_id = c.community_id
+        JOIN users u ON p.user_id = u.user_id
+        LEFT JOIN post_likes pl_all ON p.post_id = pl_all.post_id
+        LEFT JOIN post_likes pl_user ON p.post_id = pl_user.post_id AND pl_user.user_id = ?
+        LEFT JOIN comments com ON p.post_id = com.post_id
+        WHERE p.community_id = ?
+        GROUP BY p.post_id, p.community_id, c.name, p.user_id, u.username, u.profile_image, p.content, p.image_url, p.created_at
+        ORDER BY p.created_at DESC`,
+        [userId, communityId]
+      );
+      
+      res.json(rows);
+    } catch (error) {
+      handleError(res, error, 'Error fetching community posts');
     }
   });
 
@@ -462,12 +589,12 @@ module.exports = (pool, authenticateFirebaseToken) => {
       
       if (!userId) {
         connection.release();
-        return res.status(400).json({ error: 'User ID is required' });
+        return res.status(400).json({ error: 'User ID is required', success: false });
       }
       
       if (!content) {
         connection.release();
-        return res.status(400).json({ error: 'Content is required' });
+        return res.status(400).json({ error: 'Content is required', success: false });
       }
       
       await connection.beginTransaction();
@@ -503,7 +630,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       if (postCheck.length === 0) {
         await connection.rollback();
         connection.release();
-        return res.status(404).json({ error: 'Post not found' });
+        return res.status(404).json({ error: 'Post not found', success: false });
       }
       
       // Create the comment
@@ -534,7 +661,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       
       await connection.commit();
       
-      res.status(201).json(rows[0]);
+      res.status(201).json({ ...rows[0], success: true });
     } catch (error) {
       await connection.rollback();
       handleError(res, error, 'Error creating comment');
@@ -551,11 +678,11 @@ module.exports = (pool, authenticateFirebaseToken) => {
       const userId = req.user ? req.user.uid : req.body.userId;
       
       if (!userId) {
-        return res.status(400).json({ error: 'User ID is required' });
+        return res.status(400).json({ error: 'User ID is required', success: false });
       }
       
       if (!reason) {
-        return res.status(400).json({ error: 'Reason is required' });
+        return res.status(400).json({ error: 'Reason is required', success: false });
       }
       
       // Check if post exists
@@ -565,7 +692,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       );
       
       if (postRows.length === 0) {
-        return res.status(404).json({ error: 'Post not found' });
+        return res.status(404).json({ error: 'Post not found', success: false });
       }
       
       // Check if already reported
@@ -575,7 +702,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       );
       
       if (reportRows[0].count > 0) {
-        return res.status(200).json({ message: 'You have already reported this post' });
+        return res.status(200).json({ message: 'You have already reported this post', success: true });
       }
       
       // Create the report

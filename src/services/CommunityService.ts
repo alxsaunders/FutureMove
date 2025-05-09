@@ -61,10 +61,15 @@ const transformCommunity = (community: any): Community | null => {
       createdAt: community.created_at || community.createdAt || new Date().toISOString(),
       updatedAt: community.updated_at || community.updatedAt || new Date().toISOString(),
       memberCount: typeof community.member_count === 'number' ? community.member_count : 
-                  typeof community.memberCount === 'number' ? community.memberCount : 0,
-      isJoined: community.is_joined === true || community.isJoined === true || false
+                  typeof community.memberCount === 'number' ? community.memberCount : 
+                  typeof community.members_count === 'number' ? community.members_count : 0,
+      // FIXED: Ensure isJoined is properly interpreted from all possible formats
+      isJoined: community.is_joined === true || community.is_joined === 1 || 
+                community.is_joined === "1" || community.isJoined === true ||
+                community.isJoined === 1 || community.isJoined === "1" || false
     };
 
+    console.log(`Transformed community ${transformedCommunity.id} with isJoined=${transformedCommunity.isJoined}`);
     return transformedCommunity;
   } catch (error) {
     console.error('Error transforming community data:', error);
@@ -91,7 +96,10 @@ export const fetchCommunities = async (): Promise<Community[]> => {
     
     const apiUrl = getApiBaseUrl();
     const res = await fetch(`${apiUrl}/communities?userId=${userId}`, {
-      signal: controller.signal
+      signal: controller.signal,
+      headers: {
+        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
+      }
     });
     
     clearTimeout(timeoutId);
@@ -154,7 +162,10 @@ export const fetchJoinedCommunities = async (): Promise<Community[]> => {
     
     const apiUrl = getApiBaseUrl();
     const res = await fetch(`${apiUrl}/communities/user/${userId}/joined`, {
-      signal: controller.signal
+      signal: controller.signal,
+      headers: {
+        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
+      }
     });
     
     clearTimeout(timeoutId);
@@ -223,8 +234,13 @@ export const getCommunityById = async (communityId: string | number): Promise<Co
     
     try {
       const apiUrl = getApiBaseUrl();
-      const res = await fetch(`${apiUrl}/communities/${communityId}?userId=${userId}`, {
-        signal: controller.signal
+
+      // IMPORTANT: Adding userId to make sure we get the correct join status for this user
+      const res = await fetch(`${apiUrl}/communities/${communityId}?userId=${encodeURIComponent(userId)}`, {
+        signal: controller.signal,
+        headers: {
+          'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
+        }
       });
       
       clearTimeout(timeoutId);
@@ -243,6 +259,13 @@ export const getCommunityById = async (communityId: string | number): Promise<Co
       const data = await res.json();
       const communityData = data.community || data;
       
+      console.log("Received community data:", JSON.stringify(communityData, null, 2));
+      
+      // Make sure isJoined is correctly parsed as a boolean
+      if (communityData && (communityData.is_joined === 1 || communityData.is_joined === "1")) {
+        communityData.is_joined = true;
+      }
+      
       // Enhanced validation: try to transform the community
       const community = transformCommunity(communityData);
       
@@ -250,6 +273,8 @@ export const getCommunityById = async (communityId: string | number): Promise<Co
         console.warn(`Invalid community data returned for ID: ${communityId}`);
         return null;
       }
+      
+      console.log("Transformed community:", JSON.stringify(community, null, 2));
       
       return community;
     } catch (fetchError) {
@@ -274,7 +299,7 @@ export const getCommunityById = async (communityId: string | number): Promise<Co
   }
 };
 
-// Join a community
+// Join a community - UPDATED FUNCTION
 export const joinCommunity = async (communityId: string | number): Promise<boolean> => {
   try {
     console.log(`Joining community: ${communityId}`);
@@ -285,71 +310,64 @@ export const joinCommunity = async (communityId: string | number): Promise<boole
       return false;
     }
     
-    // Get user ID directly from Firebase
-    let userId;
-    try {
-      userId = await getCurrentUserId();
-      console.log("Firebase user ID for joining community:", userId);
-    } catch (error) {
-      console.error("Failed to get user ID from Firebase:", error);
+    // Check if user is authenticated
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      console.warn('User not authenticated when joining community');
       return false;
+    }
+    
+    // Try to get a token
+    let token;
+    try {
+      token = await currentUser.getIdToken(true); // Force refresh
+      console.log('Successfully obtained fresh authentication token for joining community');
+    } catch (tokenError) {
+      console.error('Error getting fresh token:', tokenError);
+      // Continue without token refresh as a fallback
+      token = await currentUser.getIdToken();
     }
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
     
     const apiUrl = getApiBaseUrl();
     
+    console.log(`Sending join request to: ${apiUrl}/communities/${communityId}/join`);
+    
+    const res = await fetch(`${apiUrl}/communities/${communityId}/join`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ userId: currentUser.uid }),
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    
+    // Log the response status
+    console.log(`Join community response status: ${res.status}`);
+    
+    // Try to get response text for better debugging
+    let responseText = '';
     try {
-      const res = await fetch(`${apiUrl}/communities/${communityId}/join`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ userId: userId }),
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-      
-      console.log("Join community response status:", res.status);
-      
-      if (!res.ok) {
-        console.warn(`Error joining community: ${res.status} ${res.statusText}`);
-        
-        // For connectivity issues, still return success for optimistic UI update
-        if (res.status === 0 || res.status >= 500) {
-          console.log('Server error during community join, using optimistic update');
-          return true;
-        }
-        
-        return false;
-      }
-      
-      console.log(`Successfully joined community: ${communityId}`);
-      return true;
-    } catch (fetchError) {
-      clearTimeout(timeoutId);
-      
-      // Check if error is from AbortController (timeout)
-      if (fetchError && typeof fetchError === 'object' && 'name' in fetchError && fetchError.name === 'AbortError') {
-        console.error(`Fetch request for joining community ${communityId} timed out`);
-      } else {
-        console.error(`Error joining community: ${communityId}`, fetchError);
-      }
-      
-      // For network errors, still return success for optimistic UI update
-      return true;
+      responseText = await res.text();
+      console.log(`Join community response: ${responseText}`);
+    } catch (e) {
+      console.warn('Could not read response text');
     }
+    
+    return res.ok;
   } catch (err) {
     console.error(`Error in joinCommunity function:`, err);
-    // For general errors, return success for optimistic UI update
-    return true;
+    return false;
   }
 };
 
-// Leave a community
+// Leave a community - UPDATED FUNCTION
 export const leaveCommunity = async (communityId: string | number): Promise<boolean> => {
   try {
     console.log(`Leaving community: ${communityId}`);
@@ -360,56 +378,60 @@ export const leaveCommunity = async (communityId: string | number): Promise<bool
       return false;
     }
     
-    // Get user ID directly from Firebase
-    let userId;
-    try {
-      userId = await getCurrentUserId();
-      console.log("Firebase user ID for leaving community:", userId);
-    } catch (error) {
-      console.error("Failed to get user ID from Firebase:", error);
+    // Check if user is authenticated
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      console.warn('User not authenticated when leaving community');
       return false;
+    }
+    
+    // Try to get a token
+    let token;
+    try {
+      token = await currentUser.getIdToken(true); // Force refresh
+      console.log('Successfully obtained fresh authentication token for leaving community');
+    } catch (tokenError) {
+      console.error('Error getting fresh token:', tokenError);
+      // Continue without token refresh as a fallback
+      token = await currentUser.getIdToken();
     }
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
     
     const apiUrl = getApiBaseUrl();
+    
+    console.log(`Sending leave request to: ${apiUrl}/communities/${communityId}/leave`);
+    
     const res = await fetch(`${apiUrl}/communities/${communityId}/leave`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify({ userId: userId }),
+      body: JSON.stringify({ userId: currentUser.uid }),
       signal: controller.signal
     });
     
     clearTimeout(timeoutId);
     
-    if (!res.ok) {
-      console.warn(`Error leaving community: ${res.status} ${res.statusText}`);
-      
-      // For connectivity issues, still return success for optimistic UI update
-      if (res.status === 0 || res.status >= 500) {
-        console.log('Server error during community leave, using optimistic update');
-        return true;
-      }
-      
-      return false;
+    // Log the response status
+    console.log(`Leave community response status: ${res.status}`);
+    
+    // Try to get response text for better debugging
+    let responseText = '';
+    try {
+      responseText = await res.text();
+      console.log(`Leave community response: ${responseText}`);
+    } catch (e) {
+      console.warn('Could not read response text');
     }
     
-    console.log(`Successfully left community: ${communityId}`);
-    return true;
-  } catch (err: any) {
-    // Check if error is from AbortController (timeout)
-    if (err && err.name === 'AbortError') {
-      console.error(`Fetch request for leaving community ${communityId} timed out`);
-    } else {
-      console.error(`Error leaving community: ${communityId}`, err);
-    }
-    
-    // For network errors, still return success for optimistic UI update
-    return true;
+    return res.ok;
+  } catch (err) {
+    console.error(`Error in leaveCommunity function:`, err);
+    return false;
   }
 };
 
@@ -452,7 +474,8 @@ export const createCommunity = async (
     const res = await fetch(`${apiUrl}/communities`, {
       method: 'POST',
       headers: { 
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
       },
       body: JSON.stringify({
         name,
@@ -523,7 +546,10 @@ export const searchCommunities = async (query: string): Promise<Community[]> => 
     
     const apiUrl = getApiBaseUrl();
     const res = await fetch(`${apiUrl}/communities/search?q=${encodeURIComponent(query)}&userId=${userId}`, {
-      signal: controller.signal
+      signal: controller.signal,
+      headers: {
+        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
+      }
     });
     
     clearTimeout(timeoutId);

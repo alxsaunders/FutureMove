@@ -14,13 +14,19 @@ import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "../../common/constants/colors";
 import { useAuth } from "../../contexts/AuthContext";
 import CommunityPostItem from "./CommunityPostItem";
-import { Post } from "../../types";
-import { fetchFeedPosts } from "../../services/CommunityPostService";
+import { Post, Community } from "../../types";
+import {
+  fetchFeedPosts,
+  fetchCommunityPosts,
+} from "../../services/CommunityPostService";
 import { fetchJoinedCommunities } from "../../services/CommunityService";
+// Import the adapter function from CreatePostScreen or create a utility file for it
+import { adaptCommunity } from "../../screens/CreatePostScreen";
 
 const CommunityMyFeedTab = () => {
   const { currentUser } = useAuth();
   const [posts, setPosts] = useState<Post[]>([]);
+  const [joinedCommunities, setJoinedCommunities] = useState<Community[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [hasJoinedCommunities, setHasJoinedCommunities] = useState(true);
@@ -29,11 +35,22 @@ const CommunityMyFeedTab = () => {
   // Check if user has joined any communities
   const checkJoinedCommunities = useCallback(async () => {
     try {
-      const communities = await fetchJoinedCommunities();
-      setHasJoinedCommunities(communities.length > 0);
+      console.log("Checking joined communities");
+      const communitiesFromApi = await fetchJoinedCommunities();
+      console.log(`Fetched ${communitiesFromApi.length} joined communities`);
+
+      // Convert API communities to UI communities using the adapter
+      const adaptedCommunities = communitiesFromApi.map(adaptCommunity);
+
+      setJoinedCommunities(adaptedCommunities);
+      setHasJoinedCommunities(adaptedCommunities.length > 0);
+
+      return adaptedCommunities;
     } catch (error) {
       console.error("Error checking joined communities:", error);
+      setJoinedCommunities([]);
       setHasJoinedCommunities(false);
+      return [];
     }
   }, []);
 
@@ -41,16 +58,57 @@ const CommunityMyFeedTab = () => {
   const fetchPosts = useCallback(async () => {
     setIsLoading(true);
     try {
-      if (currentUser) {
-        // First check if user has joined any communities
-        await checkJoinedCommunities();
-
-        // Then fetch the feed posts
-        const feedPosts = await fetchFeedPosts(currentUser.id);
-        setPosts(feedPosts);
-      } else {
-        // If not logged in, use empty array
+      if (!currentUser) {
+        console.log("No current user, skipping post fetch");
         setPosts([]);
+        setIsLoading(false);
+        return;
+      }
+
+      // First check if user has joined any communities
+      const communities = await checkJoinedCommunities();
+
+      if (communities.length === 0) {
+        console.log("User hasn't joined any communities, no posts to show");
+        setPosts([]);
+        setIsLoading(false);
+        return;
+      }
+
+      // Use fetchFeedPosts with the current user ID
+      console.log(`Fetching feed posts for user ${currentUser.id}`);
+      const feedPosts = await fetchFeedPosts(currentUser.id);
+      console.log(`Fetched ${feedPosts.length} feed posts`);
+
+      if (feedPosts.length === 0) {
+        // If the backend feed API isn't working, we can try to fetch posts manually
+        // from each joined community - this is a fallback approach
+        console.log(
+          "No posts returned from feed API, trying alternative approach"
+        );
+        let allPosts: Post[] = [];
+
+        for (const community of communities) {
+          try {
+            // This assumes you have a function to fetch posts for a specific community
+            const communityPosts = await fetchCommunityPosts(
+              String(community.id)
+            );
+            allPosts = [...allPosts, ...communityPosts];
+          } catch (err) {
+            console.error(
+              `Error fetching posts for community ${community.id}:`,
+              err
+            );
+          }
+        }
+
+        console.log(
+          `Fetched ${allPosts.length} posts from individual communities`
+        );
+        setPosts(allPosts);
+      } else {
+        setPosts(feedPosts);
       }
     } catch (error) {
       console.error("Error fetching posts:", error);
@@ -86,8 +144,31 @@ const CommunityMyFeedTab = () => {
   useFocusEffect(
     useCallback(() => {
       fetchPosts();
+
+      // Set up a refresh interval when screen is active
+      const refreshTimer = setInterval(() => {
+        fetchPosts();
+      }, 30000); // Refresh every 30 seconds
+
+      return () => {
+        clearInterval(refreshTimer);
+      };
     }, [fetchPosts])
   );
+
+  // Create post navigation with community selector
+  const navigateToCreatePost = () => {
+    if (joinedCommunities.length === 1) {
+      // If user has only joined one community, navigate directly with that communityId
+      navigation.navigate("CreatePost", {
+        communityId: joinedCommunities[0].id,
+      });
+    } else {
+      // If user has joined multiple communities, navigate to create post
+      // without a pre-selected community (the user will choose on that screen)
+      navigation.navigate("CreatePost");
+    }
+  };
 
   // Empty feed view when user has joined communities but there are no posts
   const EmptyFeedView = () => (
@@ -103,10 +184,7 @@ const CommunityMyFeedTab = () => {
       </Text>
       <TouchableOpacity
         style={styles.emptyButton}
-        onPress={() => {
-          // @ts-ignore - Ignoring type checking for navigation
-          navigation.navigate("CreatePost");
-        }}
+        onPress={navigateToCreatePost}
       >
         <Text style={styles.emptyButtonText}>Create Post</Text>
       </TouchableOpacity>
@@ -124,8 +202,8 @@ const CommunityMyFeedTab = () => {
       <TouchableOpacity
         style={styles.emptyButton}
         onPress={() => {
-          // @ts-ignore - Ignoring type checking for navigation
-          navigation.navigate("Hub");
+          // Update to use correct screen name
+          navigation.navigate("Home"); // Update this to your actual hub screen name
         }}
       >
         <Text style={styles.emptyButtonText}>Find Communities</Text>
@@ -150,11 +228,9 @@ const CommunityMyFeedTab = () => {
               post={item}
               onLikePress={() => toggleLikePost(item.id)}
               onCommentPress={() => {
-                // @ts-ignore - Ignoring type checking for navigation with params
                 navigation.navigate("PostDetail", { postId: item.id });
               }}
               onPostPress={() => {
-                // @ts-ignore - Ignoring type checking for navigation with params
                 navigation.navigate("PostDetail", { postId: item.id });
               }}
             />
@@ -179,10 +255,7 @@ const CommunityMyFeedTab = () => {
       {hasJoinedCommunities && (
         <TouchableOpacity
           style={styles.createButton}
-          onPress={() => {
-            // @ts-ignore - Ignoring type checking for navigation
-            navigation.navigate("CreatePost");
-          }}
+          onPress={navigateToCreatePost}
         >
           <Ionicons name="add" size={24} color={COLORS.white} />
         </TouchableOpacity>

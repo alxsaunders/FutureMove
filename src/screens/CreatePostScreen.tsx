@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -17,16 +17,44 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { COLORS } from "../common/constants/colors";
 import { useAuth } from "../contexts/AuthContext";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import { fetchJoinedCommunities } from "../services/CommunityService";
 import { createPost } from "../services/CommunityPostService";
 import { Community } from "../types";
 
+// Define interface for route params
+interface RouteParams {
+  communityId?: string;
+}
+
+// Define adapter function to convert API Community to UI Community
+// Export this function so it can be used in other components
+export const adaptCommunity = (apiCommunity: any): Community => {
+  return {
+    id: apiCommunity.id || apiCommunity.community_id,
+    name: apiCommunity.name,
+    description: apiCommunity.description || "",
+    category: apiCommunity.category || "",
+    image: apiCommunity.image_url || apiCommunity.image || "",
+    members: apiCommunity.members_count || apiCommunity.members || 0,
+    posts: apiCommunity.posts_count || apiCommunity.posts || 0,
+    createdBy: apiCommunity.created_by || apiCommunity.createdBy || "",
+    isJoined: apiCommunity.is_joined || apiCommunity.isJoined || false,
+  };
+};
+
 const CreatePostScreen = () => {
   const { currentUser } = useAuth();
   const navigation = useNavigation();
+  const route = useRoute();
+  // Properly type the route params
+  const { communityId: preselectedCommunityId } =
+    (route.params as RouteParams) || {};
+
   const [postContent, setPostContent] = useState("");
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedImage, setSelectedImage] = useState<string | undefined>(
+    undefined
+  ); // Changed null to undefined
   const [isUploading, setIsUploading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showCommunityModal, setShowCommunityModal] = useState(false);
@@ -34,32 +62,69 @@ const CreatePostScreen = () => {
   const [selectedCommunity, setSelectedCommunity] = useState<Community | null>(
     null
   );
-  const [isLoadingCommunities, setIsLoadingCommunities] = useState(false);
+  const [isLoadingCommunities, setIsLoadingCommunities] = useState(true);
 
   // Fetch joined communities
-  useEffect(() => {
-    const getJoinedCommunities = async () => {
-      if (!currentUser) return;
+  const fetchUserCommunities = useCallback(async () => {
+    if (!currentUser) return;
 
-      setIsLoadingCommunities(true);
-      try {
-        const joinedCommunities = await fetchJoinedCommunities();
-        setCommunities(joinedCommunities);
+    setIsLoadingCommunities(true);
+    try {
+      console.log("Fetching joined communities for user");
+      const joinedCommunitiesApi = await fetchJoinedCommunities();
+      console.log(
+        `Retrieved ${joinedCommunitiesApi.length} joined communities`
+      );
 
-        // Set default community if available
-        if (joinedCommunities.length > 0) {
-          setSelectedCommunity(joinedCommunities[0]);
-        }
-      } catch (error) {
-        console.error("Error fetching joined communities:", error);
-        Alert.alert("Error", "Failed to load your communities");
-      } finally {
+      if (joinedCommunitiesApi.length === 0) {
+        console.log("User hasn't joined any communities");
+        setCommunities([]);
+        setSelectedCommunity(null);
         setIsLoadingCommunities(false);
+        return;
       }
-    };
 
-    getJoinedCommunities();
-  }, [currentUser]);
+      // Convert API communities to UI communities
+      const adaptedCommunities = joinedCommunitiesApi.map(adaptCommunity);
+      setCommunities(adaptedCommunities);
+
+      // If a community ID was passed as a parameter, select that community
+      if (preselectedCommunityId) {
+        console.log(
+          `Looking for preselected community ID: ${preselectedCommunityId}`
+        );
+        const preselectedCommunity = adaptedCommunities.find(
+          (community) => String(community.id) === String(preselectedCommunityId)
+        );
+
+        if (preselectedCommunity) {
+          console.log(
+            `Found preselected community: ${preselectedCommunity.name}`
+          );
+          setSelectedCommunity(preselectedCommunity);
+        } else {
+          console.log("Preselected community not found, using first community");
+          // Set default community if preselected not found
+          setSelectedCommunity(adaptedCommunities[0]);
+        }
+      } else if (adaptedCommunities.length > 0) {
+        // No preselected community, use the first one
+        console.log(`Setting default community: ${adaptedCommunities[0].name}`);
+        setSelectedCommunity(adaptedCommunities[0]);
+      }
+    } catch (error) {
+      console.error("Error fetching joined communities:", error);
+      Alert.alert("Error", "Failed to load your communities");
+      setCommunities([]);
+    } finally {
+      setIsLoadingCommunities(false);
+    }
+  }, [currentUser, preselectedCommunityId]);
+
+  // Initial load
+  useEffect(() => {
+    fetchUserCommunities();
+  }, [fetchUserCommunities]);
 
   // Handle image picking
   const pickImage = async () => {
@@ -111,7 +176,7 @@ const CreatePostScreen = () => {
 
   // Remove selected image
   const removeImage = () => {
-    setSelectedImage(null);
+    setSelectedImage(undefined); // Changed null to undefined
   };
 
   // Submit post
@@ -129,19 +194,28 @@ const CreatePostScreen = () => {
     setIsSubmitting(true);
 
     try {
-      // In a real app, this would be an API call to create a post
-      // Simulate API request with timeout
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      console.log(`Creating post in community: ${selectedCommunity.id}`);
+      const response = await createPost(
+        String(selectedCommunity.id),
+        postContent,
+        selectedImage
+      );
 
-      // Clear form and navigate back
-      setPostContent("");
-      setSelectedImage(null);
+      if (response) {
+        console.log("Post created successfully");
 
-      // Navigate back to community screen
-      navigation.goBack();
+        // Clear form
+        setPostContent("");
+        setSelectedImage(undefined); // Changed null to undefined
 
-      // Show success message
-      Alert.alert("Success", "Your post has been published!");
+        // Navigate back
+        navigation.goBack();
+
+        // Show success message
+        Alert.alert("Success", "Your post has been published!");
+      } else {
+        throw new Error("Failed to create post");
+      }
     } catch (error) {
       console.error("Error submitting post:", error);
       Alert.alert("Error", "Failed to publish your post. Please try again.");
@@ -168,11 +242,16 @@ const CreatePostScreen = () => {
           </View>
 
           {isLoadingCommunities ? (
-            <ActivityIndicator size="large" color={COLORS.primary} />
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={COLORS.primary} />
+              <Text style={styles.loadingText}>
+                Loading your communities...
+              </Text>
+            </View>
           ) : communities.length > 0 ? (
             <FlatList
               data={communities}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item) => String(item.id)}
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={[
@@ -185,8 +264,9 @@ const CreatePostScreen = () => {
                     setShowCommunityModal(false);
                   }}
                 >
+                  {/* Fixed Image source prop */}
                   <Image
-                    source={{ uri: item.image }}
+                    source={{ uri: item.image || undefined }}
                     style={styles.communityImage}
                     defaultSource={require("../assets/placeholder.png")}
                   />
@@ -224,7 +304,8 @@ const CreatePostScreen = () => {
                 style={styles.joinCommunityButton}
                 onPress={() => {
                   setShowCommunityModal(false);
-                  navigation.navigate("Community" as never);
+                  // Changed string navigation to use proper screen name
+                  navigation.navigate("Home"); // Update this to your actual screen name
                 }}
               >
                 <Text style={styles.joinCommunityButtonText}>
@@ -249,10 +330,11 @@ const CreatePostScreen = () => {
         <TouchableOpacity
           style={[
             styles.submitButton,
-            !postContent.trim() && styles.submitButtonDisabled,
+            (!postContent.trim() || !selectedCommunity) &&
+              styles.submitButtonDisabled,
           ]}
           onPress={handleSubmitPost}
-          disabled={!postContent.trim() || isSubmitting}
+          disabled={!postContent.trim() || !selectedCommunity || isSubmitting}
         >
           {isSubmitting ? (
             <ActivityIndicator size="small" color={COLORS.white} />
@@ -266,12 +348,37 @@ const CreatePostScreen = () => {
         {/* Community Selection */}
         <TouchableOpacity
           style={styles.communitySelector}
-          onPress={() => setShowCommunityModal(true)}
+          onPress={() => {
+            if (communities.length > 0) {
+              setShowCommunityModal(true);
+            } else if (!isLoadingCommunities) {
+              // If no communities and not loading, redirect to find communities
+              Alert.alert(
+                "No Communities",
+                "You need to join a community before posting",
+                [
+                  {
+                    text: "Find Communities",
+                    onPress: () => navigation.navigate("Home"), // Update this to your actual screen name
+                  },
+                  { text: "Cancel", style: "cancel" },
+                ]
+              );
+            }
+          }}
         >
-          {selectedCommunity ? (
+          {isLoadingCommunities ? (
             <View style={styles.selectedCommunityContainer}>
+              <ActivityIndicator size="small" color={COLORS.primary} />
+              <Text style={[styles.selectCommunityText, { marginLeft: 8 }]}>
+                Loading communities...
+              </Text>
+            </View>
+          ) : selectedCommunity ? (
+            <View style={styles.selectedCommunityContainer}>
+              {/* Fixed Image source prop */}
               <Image
-                source={{ uri: selectedCommunity.image }}
+                source={{ uri: selectedCommunity.image || undefined }}
                 style={styles.selectedCommunityImage}
                 defaultSource={require("../assets/placeholder.png")}
               />
@@ -282,7 +389,11 @@ const CreatePostScreen = () => {
           ) : (
             <View style={styles.selectedCommunityContainer}>
               <Ionicons name="people" size={20} color={COLORS.primary} />
-              <Text style={styles.selectCommunityText}>Select Community</Text>
+              <Text style={styles.selectCommunityText}>
+                {communities.length > 0
+                  ? "Select Community"
+                  : "Join a community first"}
+              </Text>
             </View>
           )}
           <Ionicons
@@ -295,12 +406,17 @@ const CreatePostScreen = () => {
         {/* Post Content Input */}
         <TextInput
           style={styles.contentInput}
-          placeholder="Share something with your community..."
+          placeholder={
+            selectedCommunity
+              ? `Share something with ${selectedCommunity.name}...`
+              : "Join a community to start posting..."
+          }
           placeholderTextColor={COLORS.textSecondary}
           multiline
           value={postContent}
           onChangeText={setPostContent}
-          autoFocus
+          autoFocus={selectedCommunity !== null}
+          editable={selectedCommunity !== null}
         />
 
         {/* Selected Image Preview */}
@@ -322,18 +438,55 @@ const CreatePostScreen = () => {
 
       {/* Bottom Action Bar */}
       <View style={styles.actionBar}>
-        <TouchableOpacity style={styles.actionButton} onPress={pickImage}>
-          <Ionicons name="image" size={24} color={COLORS.primary} />
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={pickImage}
+          disabled={!selectedCommunity}
+        >
+          <Ionicons
+            name="image"
+            size={24}
+            color={selectedCommunity ? COLORS.primary : COLORS.textSecondary}
+          />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton} onPress={takePicture}>
-          <Ionicons name="camera" size={24} color={COLORS.primary} />
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={takePicture}
+          disabled={!selectedCommunity}
+        >
+          <Ionicons
+            name="camera"
+            size={24}
+            color={selectedCommunity ? COLORS.primary : COLORS.textSecondary}
+          />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton}>
-          <Ionicons name="attach" size={24} color={COLORS.primary} />
+        <TouchableOpacity
+          style={styles.actionButton}
+          disabled={!selectedCommunity}
+        >
+          <Ionicons
+            name="attach"
+            size={24}
+            color={selectedCommunity ? COLORS.primary : COLORS.textSecondary}
+          />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton}>
-          <Ionicons name="flag" size={24} color={COLORS.primary} />
-          <Text style={styles.goalText}>Link Goal</Text>
+        <TouchableOpacity
+          style={styles.actionButton}
+          disabled={!selectedCommunity}
+        >
+          <Ionicons
+            name="flag"
+            size={24}
+            color={selectedCommunity ? COLORS.primary : COLORS.textSecondary}
+          />
+          <Text
+            style={[
+              styles.goalText,
+              !selectedCommunity && { color: COLORS.textSecondary },
+            ]}
+          >
+            Link Goal
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -502,6 +655,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: COLORS.text,
     flex: 1,
+  },
+  selectedCommunityName: {
+    color: COLORS.primary,
+    fontWeight: "500",
+  },
+  loadingContainer: {
+    padding: 30,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loadingText: {
+    marginTop: 10,
+    color: COLORS.textSecondary,
   },
   emptyCommunityMessage: {
     alignItems: "center",

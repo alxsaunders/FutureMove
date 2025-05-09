@@ -9,8 +9,10 @@ import {
   FlatList,
   ActivityIndicator,
   SafeAreaView,
+  RefreshControl,
 } from "react-native";
 import { useRoute, useNavigation } from "@react-navigation/native";
+import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "../common/constants/colors";
 import { useAuth } from "../contexts/AuthContext";
@@ -33,6 +35,7 @@ const CommunityDetailScreen = () => {
   const [posts, setPosts] = useState<Post[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isJoining, setIsJoining] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Fetch community details
   const fetchCommunityDetails = useCallback(async () => {
@@ -40,7 +43,12 @@ const CommunityDetailScreen = () => {
 
     setIsLoading(true);
     try {
+      console.log("Fetching community details for ID:", communityId);
       const communityData = await getCommunityById(communityId);
+      console.log(
+        "Community data received:",
+        JSON.stringify(communityData, null, 2)
+      );
 
       if (communityData) {
         // Transform API Community type to component Community type
@@ -52,15 +60,20 @@ const CommunityDetailScreen = () => {
           posts: 0, // Default since API doesn't provide this
           image: communityData.imageUrl || "https://via.placeholder.com/150",
           description: communityData.description || "",
-          isJoined: !!communityData.isJoined,
+          isJoined: !!communityData.isJoined, // Ensure boolean conversion
         };
 
+        console.log(
+          "Setting community with isJoined:",
+          transformedCommunity.isJoined
+        );
         setCommunity(transformedCommunity);
 
         // Fetch posts
         const postsData = await fetchCommunityPosts(communityId);
         setPosts(postsData);
       } else {
+        console.warn("No community data returned from API");
         setCommunity(null);
       }
     } catch (error) {
@@ -71,9 +84,30 @@ const CommunityDetailScreen = () => {
     }
   }, [communityId]);
 
-  // Load data on initial render
-  useEffect(() => {
-    fetchCommunityDetails();
+  // Load data on initial render and when focused
+  useFocusEffect(
+    useCallback(() => {
+      fetchCommunityDetails();
+
+      // Set up a refresh interval when screen is active
+      const refreshTimer = setInterval(() => {
+        fetchCommunityDetails();
+      }, 30000); // Refresh every 30 seconds
+
+      return () => {
+        clearInterval(refreshTimer);
+      };
+    }, [fetchCommunityDetails])
+  );
+
+  // Add a refresh function to reload data
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await fetchCommunityDetails();
+    } finally {
+      setIsRefreshing(false);
+    }
   }, [fetchCommunityDetails]);
 
   // Handle joining/leaving community
@@ -82,28 +116,72 @@ const CommunityDetailScreen = () => {
 
     setIsJoining(true);
     try {
-      let success;
+      console.log(
+        `Attempting to ${
+          community.isJoined ? "leave" : "join"
+        } community ${communityId}`
+      );
+
+      // Update UI optimistically for immediate feedback
+      setCommunity({
+        ...community,
+        isJoined: !community.isJoined,
+        members: community.isJoined
+          ? Math.max(0, community.members - 1)
+          : community.members + 1,
+      });
 
       // Use correct ID parameter
+      let success;
       if (community.isJoined) {
         success = await leaveCommunity(communityId);
       } else {
         success = await joinCommunity(communityId);
       }
 
-      if (success) {
-        // Update local state
+      console.log(
+        `Community ${community.isJoined ? "join" : "leave"} operation result:`,
+        success
+      );
+
+      if (!success) {
+        // If API call failed, revert the UI changes
+        console.warn("Failed to toggle community membership, reverting UI");
         setCommunity({
           ...community,
-          isJoined: !community.isJoined,
+          isJoined: community.isJoined,
           members: community.isJoined
-            ? Math.max(0, community.members - 1)
+            ? community.members - 1
             : community.members + 1,
         });
+      } else {
+        console.log(
+          `Successfully ${
+            community.isJoined ? "joined" : "left"
+          } community: ${communityId}`
+        );
+
+        // Refresh community data after successful join/leave
+        await fetchCommunityDetails();
+
+        // Refresh posts after joining (optional)
+        if (!community.isJoined) {
+          console.log("Refreshing posts after joining community");
+          const postsData = await fetchCommunityPosts(communityId);
+          setPosts(postsData);
+        }
       }
     } catch (error) {
-      // Improved error handling
       console.error("Error toggling membership:", error);
+
+      // Revert UI changes on error
+      setCommunity({
+        ...community,
+        isJoined: community.isJoined,
+        members: community.isJoined
+          ? community.members - 1
+          : community.members + 1,
+      });
     } finally {
       setIsJoining(false);
     }
@@ -184,6 +262,14 @@ const CommunityDetailScreen = () => {
             }}
           />
         )}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            colors={[COLORS.primary]}
+            tintColor={COLORS.primary}
+          />
+        }
         ListHeaderComponent={() => (
           <View style={styles.communityInfo}>
             <View style={styles.communityHeader}>
@@ -277,16 +363,19 @@ const CommunityDetailScreen = () => {
                   communityId: community.id,
                 });
               }}
+              disabled={!community.isJoined}
             >
-              <Text style={styles.createPostText}>Create Post</Text>
+              <Text style={styles.createPostText}>
+                {community.isJoined ? "Create Post" : "Join to Post"}
+              </Text>
             </TouchableOpacity>
           </View>
         )}
         contentContainerStyle={styles.contentContainer}
       />
 
-      {/* Floating Action Button for creating posts */}
-      {posts.length > 0 && (
+      {/* Floating Action Button for creating posts - only shown if member */}
+      {posts.length > 0 && community.isJoined && (
         <TouchableOpacity
           style={styles.fab}
           onPress={() => {

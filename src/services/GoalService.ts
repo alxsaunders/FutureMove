@@ -880,7 +880,8 @@ export const getUserFutureCoins = async (): Promise<number> => {
     const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
     
     try {
-      const res = await fetch(`${apiUrl}/users/${userId}/futurecoins`, {
+      // Use the correct endpoint matching the server itemshop routes
+      const res = await fetch(`${apiUrl}/items/coins/${userId}`, {
         headers: {
           'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
         },

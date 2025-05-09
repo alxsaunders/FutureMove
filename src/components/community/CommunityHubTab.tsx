@@ -41,6 +41,9 @@ const CommunityHubTab = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [showJoinedOnly, setShowJoinedOnly] = useState(false);
+  const [loadingCommunityIds, setLoadingCommunityIds] = useState<Set<string>>(
+    new Set()
+  );
   const navigation = useNavigation();
 
   // Available categories with fixed widths
@@ -240,6 +243,15 @@ const CommunityHubTab = () => {
   useFocusEffect(
     useCallback(() => {
       fetchCommunityData();
+
+      // Set up a refresh interval when screen is active
+      const refreshTimer = setInterval(() => {
+        fetchCommunityData();
+      }, 60000); // Refresh every minute
+
+      return () => {
+        clearInterval(refreshTimer);
+      };
     }, [fetchCommunityData])
   );
 
@@ -255,6 +267,7 @@ const CommunityHubTab = () => {
   ) => {
     // Check Firebase auth directly
     const firebaseUser = auth.currentUser;
+    const idStr = String(id);
 
     if (!firebaseUser) {
       console.log("Cannot join/leave: No Firebase user");
@@ -268,14 +281,50 @@ const CommunityHubTab = () => {
       return;
     }
 
-    const idStr = String(id);
     console.log(
       `Attempting to ${isCurrentlyJoined ? "leave" : "join"} community:`,
       idStr
     );
     console.log("Using Firebase user ID:", firebaseUser.uid);
 
+    // Set loading state for this community
+    setLoadingCommunityIds((prev) => {
+      const updated = new Set(prev);
+      updated.add(idStr);
+      return updated;
+    });
+
     try {
+      // First, update UI optimistically for better user experience
+      setCommunities((prevCommunities) =>
+        prevCommunities.map((community) =>
+          String(community.id) === idStr
+            ? {
+                ...community,
+                isJoined: !isCurrentlyJoined,
+                members: isCurrentlyJoined
+                  ? Math.max(0, community.members - 1)
+                  : community.members + 1,
+              }
+            : community
+        )
+      );
+
+      setFilteredCommunities((prevFiltered) =>
+        prevFiltered.map((community) =>
+          String(community.id) === idStr
+            ? {
+                ...community,
+                isJoined: !isCurrentlyJoined,
+                members: isCurrentlyJoined
+                  ? Math.max(0, community.members - 1)
+                  : community.members + 1,
+              }
+            : community
+        )
+      );
+
+      // Then make the actual API call
       let success;
       if (isCurrentlyJoined) {
         console.log("Calling leaveCommunity API...");
@@ -287,29 +336,83 @@ const CommunityHubTab = () => {
 
       console.log("API call result:", success);
 
-      if (success) {
-        // Create a properly typed helper function to update a community
-        const updateCommunity = (community: Community) => {
-          // Compare as strings to avoid type mismatches
-          return String(community.id) === idStr
-            ? { ...community, isJoined: !isCurrentlyJoined }
-            : community;
-        };
-
-        // Update both state variables directly
+      // If the API call failed, revert the UI changes
+      if (!success) {
+        console.warn("API call failed, reverting UI");
         setCommunities((prevCommunities) =>
-          prevCommunities.map(updateCommunity)
+          prevCommunities.map((community) =>
+            String(community.id) === idStr
+              ? {
+                  ...community,
+                  isJoined: isCurrentlyJoined,
+                  members: isCurrentlyJoined
+                    ? community.members + 1
+                    : Math.max(0, community.members - 1),
+                }
+              : community
+          )
         );
 
         setFilteredCommunities((prevFiltered) =>
-          prevFiltered.map(updateCommunity)
+          prevFiltered.map((community) =>
+            String(community.id) === idStr
+              ? {
+                  ...community,
+                  isJoined: isCurrentlyJoined,
+                  members: isCurrentlyJoined
+                    ? community.members + 1
+                    : Math.max(0, community.members - 1),
+                }
+              : community
+          )
         );
 
-        // Force a re-render
-        setSearchQuery(searchQuery);
+        if (__DEV__) {
+          Alert.alert(
+            "Error",
+            `Failed to ${
+              isCurrentlyJoined ? "leave" : "join"
+            } community. Please try again.`
+          );
+        }
+      } else {
+        console.log(
+          `Successfully ${
+            isCurrentlyJoined ? "left" : "joined"
+          } community ${idStr}`
+        );
       }
     } catch (error) {
       console.error("Error toggling community membership:", error);
+
+      // Revert UI changes on error
+      setCommunities((prevCommunities) =>
+        prevCommunities.map((community) =>
+          String(community.id) === idStr
+            ? {
+                ...community,
+                isJoined: isCurrentlyJoined,
+                members: isCurrentlyJoined
+                  ? community.members + 1
+                  : Math.max(0, community.members - 1),
+              }
+            : community
+        )
+      );
+
+      setFilteredCommunities((prevFiltered) =>
+        prevFiltered.map((community) =>
+          String(community.id) === idStr
+            ? {
+                ...community,
+                isJoined: isCurrentlyJoined,
+                members: isCurrentlyJoined
+                  ? community.members + 1
+                  : Math.max(0, community.members - 1),
+              }
+            : community
+        )
+      );
 
       if (__DEV__) {
         Alert.alert(
@@ -319,6 +422,13 @@ const CommunityHubTab = () => {
           } community. Please try again.`
         );
       }
+    } finally {
+      // Remove loading state for this community
+      setLoadingCommunityIds((prev) => {
+        const updated = new Set(prev);
+        updated.delete(idStr);
+        return updated;
+      });
     }
   };
 
@@ -357,70 +467,86 @@ const CommunityHubTab = () => {
   );
 
   // Render community item
-  const renderCommunityItem = ({ item }: { item: Community }) => (
-    <View style={styles.communityCard}>
-      <View style={styles.communityHeader}>
-        <Image
-          source={{ uri: item.image }}
-          style={styles.communityImage}
-          defaultSource={require("../../assets/placeholder.png")}
-        />
-        <View style={styles.communityInfo}>
-          <Text style={styles.communityName}>{item.name}</Text>
-          <View style={styles.communityStats}>
-            <View style={styles.stat}>
-              <Ionicons name="people" size={14} color={COLORS.textSecondary} />
-              <Text style={styles.statText}>{item.members}</Text>
-            </View>
-            <View style={styles.stat}>
-              <Ionicons
-                name="chatbubbles"
-                size={14}
-                color={COLORS.textSecondary}
-              />
-              <Text style={styles.statText}>{item.posts}</Text>
-            </View>
-            <View
-              style={[
-                styles.categoryBadge,
-                { backgroundColor: getCategoryColor(item.category) },
-              ]}
-            >
-              <Text style={styles.categoryBadgeText}>{item.category}</Text>
+  const renderCommunityItem = ({ item }: { item: Community }) => {
+    const isLoading = loadingCommunityIds.has(String(item.id));
+
+    return (
+      <View style={styles.communityCard}>
+        <View style={styles.communityHeader}>
+          <Image
+            source={{ uri: item.image }}
+            style={styles.communityImage}
+            defaultSource={require("../../assets/placeholder.png")}
+          />
+          <View style={styles.communityInfo}>
+            <Text style={styles.communityName}>{item.name}</Text>
+            <View style={styles.communityStats}>
+              <View style={styles.stat}>
+                <Ionicons
+                  name="people"
+                  size={14}
+                  color={COLORS.textSecondary}
+                />
+                <Text style={styles.statText}>{item.members}</Text>
+              </View>
+              <View style={styles.stat}>
+                <Ionicons
+                  name="chatbubbles"
+                  size={14}
+                  color={COLORS.textSecondary}
+                />
+                <Text style={styles.statText}>{item.posts}</Text>
+              </View>
+              <View
+                style={[
+                  styles.categoryBadge,
+                  { backgroundColor: getCategoryColor(item.category) },
+                ]}
+              >
+                <Text style={styles.categoryBadgeText}>{item.category}</Text>
+              </View>
             </View>
           </View>
         </View>
-      </View>
 
-      <Text style={styles.communityDescription}>{item.description}</Text>
+        <Text style={styles.communityDescription}>{item.description}</Text>
 
-      <View style={styles.actionRow}>
-        <TouchableOpacity
-          style={[
-            styles.joinButton,
-            item.isJoined ? styles.leaveButton : styles.joinButton,
-          ]}
-          onPress={() => toggleJoinCommunity(item.id, item.isJoined)}
-        >
-          <Text
+        <View style={styles.actionRow}>
+          <TouchableOpacity
             style={[
-              styles.joinButtonText,
-              item.isJoined ? styles.leaveButtonText : styles.joinButtonText,
+              styles.joinButton,
+              item.isJoined ? styles.leaveButton : null,
             ]}
+            onPress={() => toggleJoinCommunity(item.id, item.isJoined)}
+            disabled={isLoading}
           >
-            {item.isJoined ? "Leave" : "Join"}
-          </Text>
-        </TouchableOpacity>
+            {isLoading ? (
+              <ActivityIndicator
+                size="small"
+                color={item.isJoined ? COLORS.primary : COLORS.white}
+              />
+            ) : (
+              <Text
+                style={[
+                  styles.joinButtonText,
+                  item.isJoined ? styles.leaveButtonText : null,
+                ]}
+              >
+                {item.isJoined ? "Leave" : "Join"}
+              </Text>
+            )}
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.viewButton}
-          onPress={() => navigateToCommunityDetail(item.id)}
-        >
-          <Text style={styles.viewButtonText}>View</Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.viewButton}
+            onPress={() => navigateToCommunityDetail(item.id)}
+          >
+            <Text style={styles.viewButtonText}>View</Text>
+          </TouchableOpacity>
+        </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   // Helper function to get category color
   const getCategoryColor = (category: string) => {
