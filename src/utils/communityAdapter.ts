@@ -12,12 +12,17 @@ export const adaptCommunity = (apiCommunity: any): Community => {
     name: apiCommunity.name,
     description: apiCommunity.description || "",
     category: apiCommunity.category || "",
-    image: apiCommunity.image_url || apiCommunity.image || "",
-    members: apiCommunity.members_count || apiCommunity.members || 0,
+    image: apiCommunity.image_url || apiCommunity.image || null,
+    members: apiCommunity.members_count || apiCommunity.member_count || apiCommunity.members || 0,
     posts: apiCommunity.posts_count || apiCommunity.posts || 0,
     
-    // Add any other required properties from your Community interface
-    // If you need to map createdBy or created_by, make sure to use the correct property name
-    // that exists in your Community interface
+    // Add the missing isJoined property with proper fallbacks
+    isJoined: apiCommunity.is_joined === true || 
+              apiCommunity.is_joined === 1 || 
+              apiCommunity.is_joined === "1" || 
+              apiCommunity.isJoined === true ||
+              apiCommunity.isJoined === 1 || 
+              apiCommunity.isJoined === "1" || 
+              false
   };
 };

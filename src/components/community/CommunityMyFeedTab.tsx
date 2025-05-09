@@ -23,6 +23,12 @@ import { fetchJoinedCommunities } from "../../services/CommunityService";
 // Import the adapter function from CreatePostScreen or create a utility file for it
 import { adaptCommunity } from "../../screens/CreatePostScreen";
 
+// Import Firebase auth
+import { auth } from "../../config/firebase";
+
+// Fixed user ID for development/testing
+const FALLBACK_USER_ID = "KbtY3t4Tatd0r5tCjnjlmJyoNT5R2";
+
 const CommunityMyFeedTab = () => {
   const { currentUser } = useAuth();
   const [posts, setPosts] = useState<Post[]>([]);
@@ -30,6 +36,8 @@ const CommunityMyFeedTab = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [hasJoinedCommunities, setHasJoinedCommunities] = useState(true);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
   const navigation = useNavigation();
 
   // Check if user has joined any communities
@@ -54,12 +62,34 @@ const CommunityMyFeedTab = () => {
     }
   }, []);
 
+  // Authentication check effect
+  useEffect(() => {
+    // This ensures we've at least checked for authentication once and resolves the userId
+    let resolvedUserId = null;
+
+    // First try to get from context
+    if (currentUser && currentUser.id) {
+      resolvedUserId = currentUser.id;
+      console.log(`User found from AuthContext: ${resolvedUserId}`);
+    }
+    // Then try to get directly from Firebase
+    else if (auth.currentUser) {
+      resolvedUserId = auth.currentUser.uid;
+      console.log(`User found from Firebase: ${resolvedUserId}`);
+    }
+    // As a last resort, use the fallback ID
+    
+
+    setUserId(resolvedUserId);
+    setAuthChecked(true);
+  }, [currentUser]);
+
   // Fetch posts from joined communities
   const fetchPosts = useCallback(async () => {
     setIsLoading(true);
     try {
-      if (!currentUser) {
-        console.log("No current user, skipping post fetch");
+      if (!userId) {
+        console.log("No user ID resolved, skipping post fetch");
         setPosts([]);
         setIsLoading(false);
         return;
@@ -75,9 +105,9 @@ const CommunityMyFeedTab = () => {
         return;
       }
 
-      // Use fetchFeedPosts with the current user ID
-      console.log(`Fetching feed posts for user ${currentUser.id}`);
-      const feedPosts = await fetchFeedPosts(currentUser.id);
+      // Use fetchFeedPosts with the resolved user ID
+      console.log(`Fetching feed posts for user ${userId}`);
+      const feedPosts = await fetchFeedPosts(userId);
       console.log(`Fetched ${feedPosts.length} feed posts`);
 
       if (feedPosts.length === 0) {
@@ -116,7 +146,7 @@ const CommunityMyFeedTab = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [currentUser, checkJoinedCommunities]);
+  }, [userId, checkJoinedCommunities, authChecked, navigation]);
 
   // Handle refresh
   const handleRefresh = useCallback(async () => {
@@ -140,20 +170,24 @@ const CommunityMyFeedTab = () => {
     );
   };
 
-  // Load data when screen is focused
+  // Load data when screen is focused and auth is ready
   useFocusEffect(
     useCallback(() => {
-      fetchPosts();
+      if (authChecked) {
+        fetchPosts();
+      }
 
       // Set up a refresh interval when screen is active
       const refreshTimer = setInterval(() => {
-        fetchPosts();
+        if (authChecked && userId) {
+          fetchPosts();
+        }
       }, 30000); // Refresh every 30 seconds
 
       return () => {
         clearInterval(refreshTimer);
       };
-    }, [fetchPosts])
+    }, [fetchPosts, authChecked, userId])
   );
 
   // Create post navigation with community selector
@@ -169,6 +203,25 @@ const CommunityMyFeedTab = () => {
       navigation.navigate("CreatePost");
     }
   };
+
+  // Login View for unauthenticated users
+  const LoginRequiredView = () => (
+    <View style={styles.emptyContainer}>
+      <Ionicons name="person-outline" size={60} color={COLORS.textSecondary} />
+      <Text style={styles.emptyTitle}>Login Required</Text>
+      <Text style={styles.emptyText}>
+        You need to be logged in to view and interact with communities.
+      </Text>
+      <TouchableOpacity
+        style={styles.emptyButton}
+        onPress={() => {
+          navigation.navigate("Login");
+        }}
+      >
+        <Text style={styles.emptyButtonText}>Log In</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
   // Empty feed view when user has joined communities but there are no posts
   const EmptyFeedView = () => (
@@ -218,6 +271,13 @@ const CommunityMyFeedTab = () => {
           <ActivityIndicator size="large" color={COLORS.primary} />
           <Text style={styles.loaderText}>Loading your feed...</Text>
         </View>
+      ) : !authChecked ? (
+        <View style={styles.loaderContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.loaderText}>Checking authentication...</Text>
+        </View>
+      ) : !userId ? (
+        <LoginRequiredView />
       ) : !hasJoinedCommunities ? (
         <NoCommunitiesView />
       ) : posts.length > 0 ? (
@@ -252,7 +312,7 @@ const CommunityMyFeedTab = () => {
       )}
 
       {/* Floating action button for creating a new post */}
-      {hasJoinedCommunities && (
+      {userId && hasJoinedCommunities && (
         <TouchableOpacity
           style={styles.createButton}
           onPress={navigateToCreatePost}

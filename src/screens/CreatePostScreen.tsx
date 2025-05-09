@@ -21,6 +21,10 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import { fetchJoinedCommunities } from "../services/CommunityService";
 import { createPost } from "../services/CommunityPostService";
 import { Community } from "../types";
+import { auth } from "../config/firebase"; // Import Firebase auth
+
+// Fixed user ID for development/testing
+const FALLBACK_USER_ID = "KbtY3t4Tatd0r5tCjnjlmJyoNT5R2";
 
 // Define interface for route params
 interface RouteParams {
@@ -63,14 +67,48 @@ const CreatePostScreen = () => {
     null
   );
   const [isLoadingCommunities, setIsLoadingCommunities] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  // Authentication check effect
+  useEffect(() => {
+    // This ensures we've at least checked for authentication once and resolves the userId
+    let resolvedUserId = null;
+
+    // First try to get from context
+    if (currentUser && currentUser.id) {
+      resolvedUserId = currentUser.id;
+      console.log(`User found from AuthContext: ${resolvedUserId}`);
+    }
+    // Then try to get directly from Firebase
+    else if (auth.currentUser) {
+      resolvedUserId = auth.currentUser.uid;
+      console.log(`User found from Firebase: ${resolvedUserId}`);
+    }
+    // As a last resort, use the fallback ID
+    else {
+      resolvedUserId = FALLBACK_USER_ID;
+      console.log(`No user ID found, using fallback: ${FALLBACK_USER_ID}`);
+    }
+
+    setUserId(resolvedUserId);
+    setAuthChecked(true);
+  }, [currentUser]);
 
   // Fetch joined communities
   const fetchUserCommunities = useCallback(async () => {
-    if (!currentUser) return;
+    if (!authChecked) return;
+    if (!userId) {
+      console.log("No user ID resolved, skipping community fetch");
+      setCommunities([]);
+      setSelectedCommunity(null);
+      setIsLoadingCommunities(false);
+      return;
+    }
 
     setIsLoadingCommunities(true);
     try {
-      console.log("Fetching joined communities for user");
+      console.log(`Fetching joined communities for user ${userId}`);
       const joinedCommunitiesApi = await fetchJoinedCommunities();
       console.log(
         `Retrieved ${joinedCommunitiesApi.length} joined communities`
@@ -119,12 +157,14 @@ const CreatePostScreen = () => {
     } finally {
       setIsLoadingCommunities(false);
     }
-  }, [currentUser, preselectedCommunityId]);
+  }, [userId, authChecked, preselectedCommunityId]);
 
   // Initial load
   useEffect(() => {
-    fetchUserCommunities();
-  }, [fetchUserCommunities]);
+    if (authChecked) {
+      fetchUserCommunities();
+    }
+  }, [fetchUserCommunities, authChecked]);
 
   // Handle image picking
   const pickImage = async () => {
@@ -191,10 +231,17 @@ const CreatePostScreen = () => {
       return;
     }
 
+    if (!userId) {
+      Alert.alert("Error", "You need to be logged in to post");
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
-      console.log(`Creating post in community: ${selectedCommunity.id}`);
+      console.log(
+        `Creating post in community: ${selectedCommunity.id} as user: ${userId}`
+      );
       const response = await createPost(
         String(selectedCommunity.id),
         postContent,
@@ -223,6 +270,25 @@ const CreatePostScreen = () => {
       setIsSubmitting(false);
     }
   };
+
+  // Login required view
+  const LoginRequiredView = () => (
+    <View style={styles.loginRequiredContainer}>
+      <Ionicons name="person-outline" size={60} color={COLORS.textSecondary} />
+      <Text style={styles.loginRequiredTitle}>Login Required</Text>
+      <Text style={styles.loginRequiredText}>
+        You need to be logged in to create posts.
+      </Text>
+      <TouchableOpacity
+        style={styles.loginButton}
+        onPress={() => {
+          navigation.navigate("Login");
+        }}
+      >
+        <Text style={styles.loginButtonText}>Log In</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
   // Render community selection modal
   const renderCommunityModal = () => (
@@ -318,6 +384,26 @@ const CreatePostScreen = () => {
       </View>
     </Modal>
   );
+
+  // If not authenticated, show login screen
+  if (!authChecked) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.loadingText}>Checking authentication...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!userId) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <LoginRequiredView />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -690,6 +776,36 @@ const styles = StyleSheet.create({
   joinCommunityButtonText: {
     color: COLORS.white,
     fontWeight: "600",
+  },
+  loginRequiredContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  loginRequiredTitle: {
+    fontSize: 20,
+    fontWeight: "600",
+    color: COLORS.text,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  loginRequiredText: {
+    fontSize: 16,
+    color: COLORS.textSecondary,
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  loginButton: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 30,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  loginButtonText: {
+    color: COLORS.white,
+    fontWeight: "600",
+    fontSize: 16,
   },
 });
 

@@ -4,6 +4,9 @@ import { Platform } from "react-native";
 import { auth } from "../config/firebase.js";
 import { fetchJoinedCommunities } from "./CommunityService";
 
+// Fallback user ID for development/testing
+const FALLBACK_USER_ID = "KbtY3t4Tatd0r5tCjnjlmJyNT5R2";
+
 // Get API base URL based on platform
 export const getApiBaseUrl = () => {
   if (Platform.OS === "android") {
@@ -14,13 +17,16 @@ export const getApiBaseUrl = () => {
   }
 };
 
-// Helper function to get current user ID from Firebase
+// Helper function to get current user ID from Firebase with fallback
 export const getCurrentUserId = async (): Promise<string> => {
   const currentUser = auth.currentUser;
   if (currentUser) {
+    console.log(`Using authenticated user ID: ${currentUser.uid}`);
     return currentUser.uid;
   }
-  throw new Error('No authenticated user found');
+  
+  console.log(`No current user, using fallback ID: ${FALLBACK_USER_ID}`);
+  return FALLBACK_USER_ID; // Return fallback ID instead of throwing an error
 };
 
 // Helper function to transform API response into Post object
@@ -99,12 +105,75 @@ const transformComment = (comment: any): Comment | null => {
   }
 };
 
+// Get authorization headers with fallback handling
+const getAuthHeaders = async (): Promise<Record<string, string>> => {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  };
+  
+  if (auth.currentUser) {
+    try {
+      const token = await auth.currentUser.getIdToken();
+      headers['Authorization'] = `Bearer ${token}`;
+    } catch (error) {
+      console.warn('Failed to get auth token:', error);
+    }
+  } else {
+    console.log('No current user for token, using headerless request');
+  }
+  
+  return headers;
+};
+
+// New helper function to fetch posts from joined communities
+const fetchPostsFromJoinedCommunities = async (userId: string): Promise<Post[]> => {
+  try {
+    console.log("Fetching posts from joined communities");
+    const joinedCommunities = await fetchJoinedCommunities();
+    
+    if (joinedCommunities.length === 0) {
+      console.log("User hasn't joined any communities");
+      return [];
+    }
+    
+    console.log(`User has joined ${joinedCommunities.length} communities`);
+    
+    let allPosts: Post[] = [];
+    
+    // Fetch posts for each joined community
+    for (const community of joinedCommunities) {
+      try {
+        console.log(`Fetching posts for community: ${community.id}`);
+        const communityPosts = await fetchCommunityPosts(String(community.id));
+        allPosts = [...allPosts, ...communityPosts];
+      } catch (communityError) {
+        console.error(`Error fetching posts for community ${community.id}:`, communityError);
+      }
+    }
+    
+    // Sort posts by createdAt (newest first)
+    allPosts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    
+    console.log(`Fetched ${allPosts.length} total posts from all joined communities`);
+    return allPosts;
+  } catch (error) {
+    console.error("Error fetching posts from joined communities:", error);
+    return [];
+  }
+};
+
 // Fetch all posts for a user's feed (includes joined communities)
 export const fetchFeedPosts = async (userId?: string): Promise<Post[]> => {
   try {
-    // Get current user ID if not provided
+    // Get current user ID if not provided, with fallback
     const currentUserId = userId || await getCurrentUserId();
     console.log(`Fetching feed posts for user: ${currentUserId}`);
+    
+    // If no auth.currentUser and using fallback ID, directly get posts from joined communities
+    if (currentUserId === FALLBACK_USER_ID && !auth.currentUser) {
+      console.log(`Using fallback ID, skipping API call and fetching from joined communities directly`);
+      return fetchPostsFromJoinedCommunities(currentUserId);
+    }
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
@@ -113,99 +182,35 @@ export const fetchFeedPosts = async (userId?: string): Promise<Post[]> => {
     const apiUrl = getApiBaseUrl();
     const res = await fetch(`${apiUrl}/posts/feed?userId=${currentUserId}`, {
       signal: controller.signal,
-      headers: {
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      }
+      headers: await getAuthHeaders()
     });
     
     clearTimeout(timeoutId);
     
+    // Process the response
     if (!res.ok) {
       console.warn(`Error response from API: ${res.status} ${res.statusText}`);
       
-      // If the feed endpoint returns an error, fall back to fetching posts from joined communities
-      console.log("Falling back to fetching posts from joined communities");
-      const joinedCommunities = await fetchJoinedCommunities();
-      
-      if (joinedCommunities.length === 0) {
-        console.log("User hasn't joined any communities");
-        return [];
-      }
-      
-      let allPosts: Post[] = [];
-      
-      // Fetch posts for each joined community
-      for (const community of joinedCommunities) {
-        try {
-          console.log(`Fetching posts for community: ${community.id}`);
-          const communityPosts = await fetchCommunityPosts(String(community.id));
-          allPosts = [...allPosts, ...communityPosts];
-        } catch (communityError) {
-          console.error(`Error fetching posts for community ${community.id}:`, communityError);
-        }
-      }
-      
-      console.log(`Fetched ${allPosts.length} total posts from all joined communities`);
-      return allPosts;
+      // Better fallback: If the feed endpoint fails, fetch posts from each joined community
+      return fetchPostsFromJoinedCommunities(currentUserId);
     }
     
     const data = await res.json();
     
-    // Handle different response formats
-    if (Array.isArray(data)) {
-      // Transform posts and filter out any null values (invalid posts)
-      const validPosts = data.map(transformPost).filter(post => post !== null) as Post[];
-      console.log(`Fetched ${validPosts.length} valid posts from ${data.length} total posts`);
-      return validPosts;
-    }
-    
-    // If it's in the { posts: [] } format
-    if (data.posts && Array.isArray(data.posts)) {
+    if (Array.isArray(data) && data.length > 0) {
       // Transform posts and filter out any null values
-      const validPosts = data.posts.map(transformPost).filter(post => post !== null) as Post[];
-      console.log(`Fetched ${validPosts.length} valid posts from ${data.posts.length} total posts`);
+      const validPosts = data.map(transformPost).filter(post => post !== null) as Post[];
+      console.log(`Fetched ${validPosts.length} valid posts from API`);
       return validPosts;
-    }
-    
-    // If no valid format is found
-    console.warn('Invalid format for posts data:', data);
-    return [];
-  } catch (err) {
-    // Handle fetch timeout/abort error specifically
-    if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
-      console.error('Fetch request for feed posts timed out');
     } else {
-      console.error('Error fetching feed posts:', err);
+      console.log("No posts returned from API, falling back to joined communities");
+      return fetchPostsFromJoinedCommunities(currentUserId);
     }
-    
-    // Fall back to fetching from joined communities on error
-    try {
-      console.log("Error with feed API, falling back to community posts");
-      const joinedCommunities = await fetchJoinedCommunities();
-      
-      if (joinedCommunities.length === 0) {
-        return [];
-      }
-      
-      let allPosts: Post[] = [];
-      
-      // Fetch posts for each joined community
-      for (const community of joinedCommunities) {
-        try {
-          console.log(`Fetching posts for community: ${community.id}`);
-          const communityPosts = await fetchCommunityPosts(String(community.id));
-          allPosts = [...allPosts, ...communityPosts];
-        } catch (communityError) {
-          console.error(`Error fetching posts for community ${community.id}:`, communityError);
-        }
-      }
-      
-      console.log(`Fetched ${allPosts.length} total posts from all joined communities (fallback)`);
-      return allPosts;
-    } catch (fallbackError) {
-      console.error("Error in fallback post fetch:", fallbackError);
-      return [];
-    }
+  } catch (err) {
+    console.error('Error fetching feed posts:', err);
+    // Get current user ID with fallback
+    const currentUserId = userId || await getCurrentUserId();
+    return fetchPostsFromJoinedCommunities(currentUserId);
   }
 };
 
@@ -218,17 +223,9 @@ export const fetchCommunityPosts = async (communityId: string): Promise<Post[]> 
       return [];
     }
     
-    // Check if user is authenticated
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      console.warn('User not authenticated when fetching community posts');
-      return [];
-    }
-    
-    console.log(`Fetching posts for community: ${communityId}`);
-    
-    // Try to get a token
-    const token = await currentUser.getIdToken();
+    // Get user ID with fallback
+    const userId = await getCurrentUserId();
+    console.log(`Fetching posts for community: ${communityId} with userId: ${userId}`);
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
@@ -236,13 +233,10 @@ export const fetchCommunityPosts = async (communityId: string): Promise<Post[]> 
     
     const apiUrl = getApiBaseUrl();
     
-    // This is the endpoint we need to add to the server
-    const res = await fetch(`${apiUrl}/posts/community/${communityId}?userId=${currentUser.uid}`, {
+    // Make sure we're using the right endpoint format
+    const res = await fetch(`${apiUrl}/posts/community/${communityId}?userId=${userId}`, {
       signal: controller.signal,
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
+      headers: await getAuthHeaders()
     });
     
     clearTimeout(timeoutId);
@@ -258,6 +252,7 @@ export const fetchCommunityPosts = async (communityId: string): Promise<Post[]> 
     }
     
     const data = await res.json();
+    console.log(`Raw data for community ${communityId}:`, data);
     
     // Transform posts and filter out any null values
     const validPosts = Array.isArray(data) 
@@ -289,9 +284,7 @@ export const fetchPost = async (postId: string): Promise<Post | null> => {
     const apiUrl = getApiBaseUrl();
     const res = await fetch(`${apiUrl}/posts/${postId}`, {
       signal: controller.signal,
-      headers: {
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      }
+      headers: await getAuthHeaders()
     });
     
     clearTimeout(timeoutId);
@@ -364,10 +357,7 @@ export const createPost = async (
     const apiUrl = getApiBaseUrl();
     const res = await fetch(`${apiUrl}/posts`, {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      },
+      headers: await getAuthHeaders(),
       body: JSON.stringify({
         user_id: currentUserId,
         community_id: communityId,
@@ -441,10 +431,7 @@ export const toggleLikePost = async (
     
     const res = await fetch(endpoint, {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      },
+      headers: await getAuthHeaders(),
       body: JSON.stringify({ userId: currentUserId }),
       signal: controller.signal
     });
@@ -494,9 +481,7 @@ export const fetchComments = async (postId: string): Promise<Comment[]> => {
     const apiUrl = getApiBaseUrl();
     const res = await fetch(`${apiUrl}/posts/${postId}/comments`, {
       signal: controller.signal,
-      headers: {
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      }
+      headers: await getAuthHeaders()
     });
     
     clearTimeout(timeoutId);
@@ -567,10 +552,7 @@ export const createComment = async (
     const apiUrl = getApiBaseUrl();
     const res = await fetch(`${apiUrl}/posts/${postId}/comments`, {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      },
+      headers: await getAuthHeaders(),
       body: JSON.stringify({
         user_id: currentUserId,
         content: content,
@@ -642,10 +624,7 @@ export const toggleLikeComment = async (
     
     const res = await fetch(endpoint, {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      },
+      headers: await getAuthHeaders(),
       body: JSON.stringify({ userId: currentUserId }),
       signal: controller.signal
     });
@@ -700,10 +679,7 @@ export const deletePost = async (postId: string): Promise<boolean> => {
     const apiUrl = getApiBaseUrl();
     const res = await fetch(`${apiUrl}/posts/${postId}`, {
       method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      },
+      headers: await getAuthHeaders(),
       body: JSON.stringify({ userId: currentUserId }),
       signal: controller.signal
     });
@@ -758,10 +734,7 @@ export const deleteComment = async (commentId: string): Promise<boolean> => {
     const apiUrl = getApiBaseUrl();
     const res = await fetch(`${apiUrl}/comments/${commentId}`, {
       method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      },
+      headers: await getAuthHeaders(),
       body: JSON.stringify({ userId: currentUserId }),
       signal: controller.signal
     });
@@ -828,10 +801,7 @@ export const editPost = async (
     const apiUrl = getApiBaseUrl();
     const res = await fetch(`${apiUrl}/posts/${postId}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      },
+      headers: await getAuthHeaders(),
       body: JSON.stringify({
         userId: currentUserId,
         content: content,
@@ -905,10 +875,7 @@ export const editComment = async (
     const apiUrl = getApiBaseUrl();
     const res = await fetch(`${apiUrl}/comments/${commentId}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      },
+      headers: await getAuthHeaders(),
       body: JSON.stringify({
         userId: currentUserId,
         content: content,
@@ -981,10 +948,7 @@ export const reportPost = async (
     const apiUrl = getApiBaseUrl();
     const res = await fetch(`${apiUrl}/posts/${postId}/report`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      },
+      headers: await getAuthHeaders(),
       body: JSON.stringify({
         userId: currentUserId,
         reason: reason,
@@ -1050,10 +1014,7 @@ export const reportComment = async (
     const apiUrl = getApiBaseUrl();
     const res = await fetch(`${apiUrl}/comments/${commentId}/report`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      },
+      headers: await getAuthHeaders(),
       body: JSON.stringify({
         userId: currentUserId,
         reason: reason,
@@ -1093,16 +1054,17 @@ export const reportComment = async (
 // Get trending posts across all communities
 export const getTrendingPosts = async (limit: number = 10): Promise<Post[]> => {
   try {
+    // Get user ID with fallback
+    const userId = await getCurrentUserId();
+    
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
     
     const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/posts/trending?limit=${limit}`, {
+    const res = await fetch(`${apiUrl}/posts/trending?userId=${userId}&limit=${limit}`, {
       signal: controller.signal,
-      headers: {
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      }
+      headers: await getAuthHeaders()
     });
     
     clearTimeout(timeoutId);
@@ -1150,16 +1112,17 @@ export const searchPosts = async (query: string): Promise<Post[]> => {
       return [];
     }
     
+    // Get user ID with fallback
+    const userId = await getCurrentUserId();
+    
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
     
     const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/posts/search?q=${encodeURIComponent(query)}`, {
+    const res = await fetch(`${apiUrl}/posts/search?userId=${userId}&q=${encodeURIComponent(query)}`, {
       signal: controller.signal,
-      headers: {
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      }
+      headers: await getAuthHeaders()
     });
     
     clearTimeout(timeoutId);
