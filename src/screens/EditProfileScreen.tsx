@@ -22,53 +22,60 @@ import { updateUserProfile, ExtendedUserProfile } from "../services/ProfileServi
 const EditProfileScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { profileData, onUpdateProfile } = route.params as { 
+  const { profileData, onUpdateProfile } = route.params as {
     profileData: ExtendedUserProfile,
     onUpdateProfile: () => Promise<void>
   };
   const { currentUser } = useAuth();
-  
+
   // We only allow editing certain fields in the profile
   const [name, setName] = useState(profileData?.name || "");
   const [username, setUsername] = useState(profileData?.username || "");
   const [bio, setBio] = useState(profileData?.bio || "");
   const [location, setLocation] = useState(profileData?.location || "");
   const [website, setWebsite] = useState(profileData?.website || "");
-  
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    // Log that we're editing Firebase data only
+    console.log("[EDIT_PROFILE] Editing Firebase profile data only, not MySQL data");
+  }, []);
 
   const handleSave = async () => {
     if (!currentUser) {
       Alert.alert("Error", "You must be logged in to edit your profile");
       return;
     }
-    
+
     // Validate fields
     const newErrors: Record<string, string> = {};
-    
+
     if (!name.trim()) {
       newErrors.name = "Name is required";
     }
-    
+
     if (!username.trim()) {
       newErrors.username = "Username is required";
     } else if (username.length < 3) {
       newErrors.username = "Username must be at least 3 characters";
     }
-    
+
     if (website.trim() && !isValidUrl(website)) {
       newErrors.website = "Please enter a valid URL (e.g., https://example.com)";
     }
-    
+
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       return;
     }
-    
+
     setIsSubmitting(true);
     try {
-      // Update profile data in Firestore
+      console.log("[EDIT_PROFILE] Saving profile changes to Firebase only");
+
+      // Update profile data in Firebase only
       await updateUserProfile(currentUser.id, {
         name,
         username,
@@ -76,20 +83,31 @@ const EditProfileScreen = () => {
         location,
         website,
       });
-      
+
+      console.log("[EDIT_PROFILE] Profile updated successfully in Firebase");
+
       // Call the callback function to refresh profile data on the previous screen
       if (onUpdateProfile) {
+        console.log("[EDIT_PROFILE] Triggering profile refresh on ProfileScreen");
         onUpdateProfile();
       }
-      
-      // Note: In a real app, you would also update the basic user profile in MySQL
-      // For now, we're just storing extended profile data in Firestore
-      
-      Alert.alert("Success", "Profile updated successfully!");
+
+      // Explicitly state we're not updating MySQL
+      console.log("[EDIT_PROFILE] No MySQL update performed - using Firebase only");
+
+      Alert.alert(
+        "Profile Updated",
+        "Your profile has been updated successfully in Firebase!",
+        [{ text: "OK" }]
+      );
+
       navigation.goBack();
     } catch (error) {
-      console.error("Error updating profile:", error);
-      Alert.alert("Error", "Failed to update profile. Please try again.");
+      console.error("[EDIT_PROFILE] Error updating profile in Firebase:", error);
+      Alert.alert(
+        "Firebase Update Error",
+        "Failed to update your profile in Firebase. Please try again."
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -112,14 +130,14 @@ const EditProfileScreen = () => {
       keyboardVerticalOffset={100}
     >
       <SafeAreaView style={styles.safeArea}>
-        {/* Header */}
+        {/* Header with Firebase indicator */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()}>
             <Ionicons name="close" size={24} color={COLORS.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Edit Profile</Text>
-          <TouchableOpacity 
-            style={styles.saveButton} 
+          <Text style={styles.headerTitle}>Edit Profile (Firebase)</Text>
+          <TouchableOpacity
+            style={styles.saveButton}
             onPress={handleSave}
             disabled={isSubmitting}
           >
@@ -130,12 +148,18 @@ const EditProfileScreen = () => {
             )}
           </TouchableOpacity>
         </View>
-        
-        <ScrollView 
+
+        <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.contentContainer}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Firebase indicator */}
+          <View style={styles.firebaseIndicator}>
+            <Ionicons name="server" size={16} color={COLORS.primary} />
+            <Text style={styles.firebaseText}>Editing Firebase Data Only</Text>
+          </View>
+
           {/* Name */}
           <View style={styles.inputContainer}>
             <Text style={styles.inputLabel}>Name</Text>
@@ -151,7 +175,7 @@ const EditProfileScreen = () => {
               <Text style={styles.errorText}>{errors.name}</Text>
             )}
           </View>
-          
+
           {/* Username */}
           <View style={styles.inputContainer}>
             <Text style={styles.inputLabel}>Username</Text>
@@ -167,7 +191,7 @@ const EditProfileScreen = () => {
               <Text style={styles.errorText}>{errors.username}</Text>
             )}
           </View>
-          
+
           {/* Bio */}
           <View style={styles.inputContainer}>
             <Text style={styles.inputLabel}>Bio</Text>
@@ -185,7 +209,7 @@ const EditProfileScreen = () => {
               <Text style={styles.errorText}>{errors.bio}</Text>
             )}
           </View>
-          
+
           {/* Location */}
           <View style={styles.inputContainer}>
             <Text style={styles.inputLabel}>Location</Text>
@@ -200,7 +224,7 @@ const EditProfileScreen = () => {
               <Text style={styles.errorText}>{errors.location}</Text>
             )}
           </View>
-          
+
           {/* Website */}
           <View style={styles.inputContainer}>
             <Text style={styles.inputLabel}>Website</Text>
@@ -218,9 +242,9 @@ const EditProfileScreen = () => {
               <Text style={styles.errorText}>{errors.website}</Text>
             )}
           </View>
-          
+
           <Text style={styles.noteText}>
-            Note: Some profile information may require verification or may be synced with your account settings.
+            Note: Profile information is stored in Firebase only. Changes will not affect any MySQL database data.
           </Text>
         </ScrollView>
       </SafeAreaView>
@@ -266,6 +290,21 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     padding: 16,
+  },
+  firebaseIndicator: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  firebaseText: {
+    marginLeft: 8,
+    fontSize: 14,
+    fontWeight: "600",
+    color: COLORS.primary,
   },
   inputContainer: {
     marginBottom: 20,

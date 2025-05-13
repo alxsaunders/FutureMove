@@ -1,3 +1,4 @@
+// BottomTabNavigator.tsx
 import React from "react";
 import { Image, StyleSheet, Text, View, TouchableOpacity } from "react-native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
@@ -12,7 +13,7 @@ import ItemShopStackNavigator from "./ItemShopStackNavigator";
 
 // Import Stack Navigators
 import GoalsStackNavigator from "./GoalsStackNavigator";
-import CommunityStackNavigator from "./CommmunityStackNavigator"
+import CommunityStackNavigator from "./CommmunityStackNavigator"; // Fixed typo in import
 
 // Create bottom tab navigator with proper typing
 const Tab = createBottomTabNavigator<BottomTabParamList>();
@@ -112,7 +113,6 @@ const BottomTabNavigator = () => {
     >
       <Tab.Screen name="Home" component={HomeScreenWrapper} />
       <Tab.Screen name="Goals" component={GoalsStackNavigator} />
-      {/* Use CommunityStackNavigator instead of CommunityScreen directly */}
       <Tab.Screen name="Community" component={CommunityStackNavigator} />
       <Tab.Screen
         name="ItemShop"
@@ -122,7 +122,14 @@ const BottomTabNavigator = () => {
           forceRefresh: Date.now(),
         }}
       />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+        initialParams={{
+          userId: currentUser?.id,
+          forceRefresh: Date.now(),
+        }}
+      />
     </Tab.Navigator>
   );
 };

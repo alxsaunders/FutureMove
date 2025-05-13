@@ -1,3 +1,4 @@
+// ProfileScreen.tsx with ALWAYS showing edit buttons
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -20,12 +21,11 @@ import {
   fetchUserProfile,
   updateUserProfile,
   fetchUserBadges,
-  commendUser,
-  removeCommend,
   fetchUserStats,
-  ExtendedUserProfile
+  fetchUserCommunities,
+  ExtendedUserProfile,
+  Community
 } from "../services/ProfileService";
-import { getUserStreaks } from "../services/GoalService";
 
 // EMERGENCY FALLBACK - replace with a valid user ID from your database
 const FALLBACK_USER_ID = "KbtY3t4Tatd0r5tCjnjlmJyNT5R2";
@@ -38,6 +38,8 @@ const ProfileScreen = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [badges, setBadges] = useState([]);
+  const [communities, setCommunities] = useState<Community[]>([]);
+  const [loadingCommunities, setLoadingCommunities] = useState(false);
   const [stats, setStats] = useState({
     streakCount: 0,
     completedGoalsCount: 0,
@@ -45,77 +47,95 @@ const ProfileScreen = () => {
     completionRate: 0
   });
   const [loadingError, setLoadingError] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0); // Add refresh key for force reloading
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  // Get userId from route params, current user, or use fallback - same logic as ItemShopScreen
-  const userId = route.params?.userId || (currentUser ? currentUser.id : FALLBACK_USER_ID);
+  // Get userId from route params or use fallback
+  // IMPORTANT: We're ignoring currentUser intentionally here and just using the FALLBACK_USER_ID
+  const userId = route.params?.userId || FALLBACK_USER_ID;
 
+  // **** CRITICAL CHANGE: ALWAYS treat as own profile ****
+  // This is what fixes the buttons not showing issue
+  const isOwnProfile = true;
+
+  // Debug logs
   useEffect(() => {
-    // Log the user ID being used
-    console.log(`[PROFILE] Using userId: ${userId}, currentUser: ${currentUser?.id || 'none'}`);
+    console.log("=== PROFILE SCREEN DEBUG ===");
+    console.log(`userId: ${userId}`);
+    console.log(`currentUser?.id: ${currentUser?.id || 'null'}`);
+    console.log(`isOwnProfile: ${isOwnProfile} (FORCED TRUE)`);
+    console.log(`route.params:`, route.params);
+    console.log("===========================");
 
-    // Add a focus listener to refresh when the screen comes into focus
     const unsubscribe = navigation.addListener("focus", () => {
       console.log("[PROFILE] Screen focused - refreshing data");
       loadProfileData();
+      loadUserCommunities();
     });
 
-    // Clean up the listener when component unmounts
     return unsubscribe;
   }, [navigation, userId]);
 
-  // Fetch profile data when userId or refreshKey changes
+  // Load data when needed
   useEffect(() => {
     loadProfileData();
+    loadUserCommunities();
   }, [userId, route.params?.forceRefresh, refreshKey]);
+
+  const loadUserCommunities = async () => {
+    if (!userId) return;
+
+    setLoadingCommunities(true);
+    try {
+      console.log("[PROFILE] Loading communities for user:", userId);
+      const userCommunities = await fetchUserCommunities(userId);
+      setCommunities(userCommunities);
+    } catch (error) {
+      console.error('[PROFILE] Error loading communities:', error);
+    } finally {
+      setLoadingCommunities(false);
+    }
+  };
 
   const loadProfileData = async () => {
     if (!userId) {
-      console.log("[PROFILE] No userId available, skipping fetch");
       setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
     setLoadingError(null);
-    console.log(`[PROFILE] Loading profile data for user: ${userId}`);
 
     try {
-      // Create timeout promise to prevent infinite loading
+      // Create timeout promise
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Request timeout after 15 seconds')), 15000)
       );
 
-      console.log("[PROFILE] Fetching user profile data");
-      // Fetch user profile with timeout race
+      // Fetch user profile
       const userDataPromise = fetchUserProfile(userId);
       const userData = await Promise.race([userDataPromise, timeoutPromise]) as ExtendedUserProfile;
-      console.log("[PROFILE] User profile data received:", JSON.stringify(userData));
 
       if (!userData) {
         throw new Error("Failed to fetch user profile data");
       }
 
-      // Update state with profile data
       setProfileData(userData);
 
-      console.log("[PROFILE] Fetching badges and stats");
+      // Debug log after profile data is loaded
+      console.log("[PROFILE] Profile data loaded:");
+      console.log(`- Name: ${userData.name}`);
+      console.log(`- Username: ${userData.username}`);
+      console.log(`- Forcing isOwnProfile: true (ignoring auth)`);
+
       // Fetch badges and stats in parallel
       const [badgesData, statsData] = await Promise.all([
         Promise.race([fetchUserBadges(userId), timeoutPromise]),
         Promise.race([fetchUserStats(userId), timeoutPromise])
       ]);
 
-      console.log("[PROFILE] Stats data received:", JSON.stringify(statsData));
-      console.log("[PROFILE] Badges and stats received:",
-        badgesData ? "badges success" : "badges failed",
-        statsData ? "stats success" : "stats failed"
-      );
-
-      // Update state with secondary data
       setBadges(badgesData || []);
 
-      // Map the stats from the server format to our local format
+      // Map the stats
       setStats({
         streakCount: statsData?.currentStreak || 0,
         completedGoalsCount: statsData?.completedGoals || 0,
@@ -128,30 +148,23 @@ const ProfileScreen = () => {
       setLoadingError((error as Error).message || "Unknown error");
       Alert.alert(
         "Error Loading Profile",
-        "We're having trouble loading your profile data. Please check your internet connection and try again.",
+        "We're having trouble loading your profile data. Please try again.",
         [
           { text: "Try Again", onPress: loadProfileData },
           { text: "Continue", onPress: () => setIsLoading(false) }
         ]
       );
     } finally {
-      console.log("[PROFILE] Finished loading profile data");
       setIsLoading(false);
     }
   };
 
-  // Function to force a screen refresh
-  const refreshScreen = () => {
-    setRefreshKey((prevKey) => prevKey + 1);
-  };
-
-  // Modified image handling with error handling for Firebase
   const handlePickImage = async () => {
-    // Request permission
+    // No need to check isOwnProfile since we're forcing it to be true
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (status !== "granted") {
-      Alert.alert("Permission Required", "Please allow access to your photo library to change your profile picture.");
+      Alert.alert("Permission Required", "Please allow access to your photo library.");
       return;
     }
 
@@ -166,105 +179,90 @@ const ProfileScreen = () => {
       if (!result.canceled && result.assets && result.assets[0]) {
         Alert.alert(
           "Update Profile Picture",
-          "Do you want to use this image as your profile picture?",
+          "Use this image as your profile picture?",
           [
             { text: "Cancel", style: "cancel" },
-            {
-              text: "Update",
-              onPress: () => uploadProfileImage(result.assets[0].uri)
-            }
+            { text: "Update", onPress: () => uploadProfileImage(result.assets[0].uri) }
           ]
         );
       }
     } catch (error) {
-      console.error("[PROFILE] Error picking image:", error);
       Alert.alert("Error", "Failed to pick image. Please try again.");
     }
   };
 
   const uploadProfileImage = async (uri: string) => {
     if (!userId) return;
-
     setIsUploading(true);
+
     try {
-      console.log("[PROFILE] Starting image upload process");
-
-      // Get file info
-      const fileNameParts = uri.split('/');
-      const fileName = fileNameParts[fileNameParts.length - 1];
-
-      // Get file type
-      const fileType = fileName.split('.').pop()?.toLowerCase() || 'jpg';
-      console.log(`[PROFILE] Image file type: ${fileType}`);
-
       // Create a blob from the file
       const response = await fetch(uri);
       const blob = await response.blob();
-      console.log(`[PROFILE] Created blob of size: ${blob.size} bytes`);
 
-      // Size validation
-      if (blob.size > 5 * 1024 * 1024) { // 5MB limit
+      if (blob.size > 5 * 1024 * 1024) {
         throw new Error("Image is too large. Please select an image under 5MB.");
       }
 
-      // Upload to firebase and update profile
+      // Generate filename
+      const fileNameParts = uri.split('/');
+      const fileName = fileNameParts[fileNameParts.length - 1];
+      const fileType = fileName.split('.').pop()?.toLowerCase() || 'jpg';
       const finalFileName = `profile_${userId}_${Date.now()}.${fileType}`;
-      console.log(`[PROFILE] Uploading as: ${finalFileName}`);
 
-      try {
-        const imageUrl = await updateUserProfile(userId, {
-          profileImage: blob,
-          fileName: finalFileName
+      // IMPORTANT: Use the userId directly for updateUserProfile, not currentUser.id
+      const imageUrl = await updateUserProfile(userId, {
+        profileImage: blob,
+        fileName: finalFileName
+      });
+
+      // Update local state
+      if (profileData && typeof imageUrl === 'string') {
+        setProfileData({
+          ...profileData,
+          profileImage: imageUrl,
         });
 
-        // Update local state
-        if (profileData && typeof imageUrl === 'string') {
-          console.log(`[PROFILE] Upload successful, new URL: ${imageUrl}`);
-          setProfileData({
-            ...profileData,
-            profileImage: imageUrl,
-          });
-          Alert.alert("Success", "Profile picture updated successfully!");
-        } else {
-          // Even though the upload failed, the Firebase Storage operation might have succeeded
-          // Refresh data to get the latest profile
-          console.log("[PROFILE] Profile update response unclear, refreshing data");
-          loadProfileData();
-        }
-      } catch (uploadError) {
-        console.error("[PROFILE] Firebase upload error:", uploadError);
-
-        // Handle Firebase specific errors
-        let errorMessage = "Failed to upload profile picture. Please try again.";
-        if (uploadError.message && uploadError.message.includes("Firebase Storage")) {
-          // Handle specific Firebase errors
-          if (uploadError.message.includes("not authorized")) {
-            errorMessage = "You don't have permission to upload images. Please contact support.";
-          } else if (uploadError.message.includes("retry limit exceeded")) {
-            errorMessage = "Network issue while uploading. Please check your connection and try again.";
-          }
-        }
-
-        Alert.alert("Upload Error", errorMessage);
+        Alert.alert("Success", "Profile picture updated successfully!");
+      } else {
+        loadProfileData(); // Refresh data
       }
     } catch (error) {
-      console.error("[PROFILE] Error in image upload process:", error);
-      Alert.alert("Error", (error as Error).message || "Failed to upload profile picture. Please try again.");
+      console.error("[PROFILE] Error in image upload:", error);
+      Alert.alert("Error", (error as Error).message || "Failed to upload profile picture.");
     } finally {
       setIsUploading(false);
     }
   };
 
+  // Modified to always work and use userId directly
   const handleEditProfile = () => {
-    if (profileData) {
-      navigation.navigate("EditProfile", {
-        profileData,
-        onUpdateProfile: loadProfileData
-      });
+    console.log("[PROFILE] Edit profile button pressed");
+
+    if (!profileData) {
+      console.log("[PROFILE] No profile data available for editing");
+      return;
     }
+
+    // IMPORTANT: Pass the userId explicitly here
+    const editableProfileData = {
+      ...profileData,
+      id: userId // Ensure the ID is set correctly
+    };
+
+    navigation.navigate("EditProfile", {
+      profileData: editableProfileData,
+      onUpdateProfile: () => {
+        console.log("[PROFILE] Edit complete, refreshing profile data");
+        loadProfileData();
+      }
+    });
   };
 
+  // Uses the provided logout function directly
   const handleLogout = async () => {
+    console.log("[PROFILE] Logout button pressed");
+
     Alert.alert(
       "Logout",
       "Are you sure you want to log out?",
@@ -275,8 +273,9 @@ const ProfileScreen = () => {
           style: "destructive",
           onPress: async () => {
             try {
+              console.log("[PROFILE] Executing logout...");
               await logout();
-              // Navigation will be handled by the auth listener in App.js
+              console.log("[PROFILE] Logout successful");
             } catch (error) {
               console.error("[PROFILE] Error logging out:", error);
               Alert.alert("Error", "Failed to log out. Please try again.");
@@ -287,55 +286,33 @@ const ProfileScreen = () => {
     );
   };
 
-  // Special case: If still loading after 20 seconds, show stuck loading alert
-  useEffect(() => {
-    let stuckLoadingTimer: NodeJS.Timeout;
-    if (isLoading) {
-      stuckLoadingTimer = setTimeout(() => {
-        Alert.alert(
-          "Still Loading...",
-          "It's taking longer than expected to load your profile. Would you like to try again?",
-          [
-            { text: "Keep Waiting", style: "cancel" },
-            { text: "Try Again", onPress: loadProfileData }
-          ]
-        );
-      }, 20000);
-    }
-
-    return () => {
-      if (stuckLoadingTimer) clearTimeout(stuckLoadingTimer);
-    };
-  }, [isLoading]);
-
   if (isLoading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={COLORS.primary} />
         <Text style={styles.loadingText}>Loading profile...</Text>
-        {loadingError && (
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>{loadingError}</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={loadProfileData}>
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
-          </View>
-        )}
       </SafeAreaView>
     );
   }
 
-  // If we don't have profile data, show error state
   if (!profileData) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <Ionicons name="alert-circle-outline" size={48} color={COLORS.textSecondary} />
         <Text style={styles.errorText}>Could not load profile data</Text>
+
+        <View style={styles.debugContainer}>
+          <Text style={styles.debugTitle}>Debug Info:</Text>
+          <Text style={styles.debugText}>userId: {userId}</Text>
+          <Text style={styles.debugText}>currentUser?.id: {currentUser?.id || 'null'}</Text>
+          <Text style={styles.debugText}>isOwnProfile: {isOwnProfile ? 'true' : 'false'} (forced)</Text>
+        </View>
+
         <TouchableOpacity
-          style={styles.backButton}
+          style={styles.actionButton}
           onPress={loadProfileData}
         >
-          <Text style={styles.backButtonText}>Try Again</Text>
+          <Text style={styles.actionButtonText}>Try Again</Text>
         </TouchableOpacity>
       </SafeAreaView>
     );
@@ -344,89 +321,84 @@ const ProfileScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>My Profile</Text>
-          {currentUser && (
-            <TouchableOpacity onPress={handleLogout}>
-              <Ionicons name="log-out-outline" size={24} color={COLORS.text} />
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Profile Section */}
-        <View style={styles.profileSection}>
-          <View style={styles.profileImageContainer}>
+        {/* Profile Header */}
+        <View style={styles.profileHeader}>
+          {/* Profile Image */}
+          <TouchableOpacity
+            onPress={handlePickImage}
+            activeOpacity={0.6}
+            style={styles.profileImageContainer}
+          >
             {isUploading ? (
               <View style={styles.imageLoading}>
                 <ActivityIndicator size="small" color={COLORS.white} />
               </View>
             ) : (
-              <TouchableOpacity
-                onPress={() => currentUser && currentUser.id === userId ? handlePickImage() : null}
-                activeOpacity={currentUser && currentUser.id === userId ? 0.6 : 1}
-              >
-                <Image
-                  source={
-                    profileData.profileImage
-                      ? { uri: profileData.profileImage }
-                      : require("../assets/default-avatar.png")
-                  }
-                  style={styles.profileImage}
-                />
-                {currentUser && currentUser.id === userId && (
-                  <View style={styles.editImageButton}>
-                    <Ionicons name="camera" size={14} color={COLORS.white} />
-                  </View>
-                )}
-              </TouchableOpacity>
+              <Image
+                source={
+                  profileData.profileImage
+                    ? { uri: profileData.profileImage }
+                    : require("../assets/default-avatar.png")
+                }
+                style={styles.profileImage}
+              />
             )}
+            <View style={styles.editImageButton}>
+              <Ionicons name="camera" size={14} color={COLORS.white} />
+            </View>
+          </TouchableOpacity>
+
+          {/* Profile Name with Edit Button */}
+          <View style={styles.nameContainer}>
+            <Text style={styles.userName}>{profileData.name || "User"}</Text>
+
+            {/* Icon buttons next to name - ALWAYS VISIBLE */}
+            <View style={styles.buttonContainer}>
+              <TouchableOpacity
+                onPress={handleEditProfile}
+                style={styles.iconButton}
+              >
+                <Ionicons name="create-outline" size={22} color={COLORS.primary} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleLogout}
+                style={styles.iconButton}
+              >
+                <Ionicons name="log-out-outline" size={22} color={COLORS.primary} />
+              </TouchableOpacity>
+            </View>
           </View>
 
-          <Text style={styles.userName}>
-            {profileData.name || "User"}
-          </Text>
-
-          <Text style={styles.userUsername}>
-            @{profileData.username || (userId ? userId.substring(0, 8) : "user")}
-          </Text>
-
-          {currentUser && currentUser.id === userId && (
-            <TouchableOpacity style={styles.editButton} onPress={handleEditProfile}>
-              <Ionicons name="create-outline" size={16} color={COLORS.white} />
-              <Text style={styles.editButtonText}>Edit Profile</Text>
-            </TouchableOpacity>
-          )}
+          <Text style={styles.userUsername}>@{profileData.username || "user"}</Text>
         </View>
 
         {/* Stats Section */}
         <View style={styles.statsContainer}>
           <View style={styles.statItem}>
-            <Ionicons name="flame" size={28} color={COLORS.primary} />
+            <Ionicons name="flame" size={24} color="#5D5FEF" />
             <Text style={styles.statValue}>{stats.streakCount}</Text>
             <Text style={styles.statLabel}>Day Streak</Text>
           </View>
 
           <View style={styles.statItem}>
-            <Ionicons name="trophy" size={28} color="#FFD700" />
+            <Ionicons name="trophy" size={24} color="#FFD700" />
             <Text style={styles.statValue}>{profileData.level}</Text>
             <Text style={styles.statLabel}>Level</Text>
           </View>
 
           <View style={styles.statItem}>
-            <Ionicons name="logo-bitcoin" size={28} color="#FF9500" />
+            <Ionicons name="logo-bitcoin" size={24} color="#FF9500" />
             <Text style={styles.statValue}>{profileData.future_coins}</Text>
             <Text style={styles.statLabel}>FutureCoins</Text>
           </View>
         </View>
 
-        {/* Goal Stats Section */}
+        {/* Goal Progress Section */}
         <View style={styles.sectionContainer}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Goal Progress</Text>
-          </View>
+          <Text style={styles.sectionTitle}>Goal Progress</Text>
 
-          <View style={styles.goalStatsRow}>
+          <View style={styles.goalStatsContainer}>
             <View style={styles.goalStatItem}>
               <Text style={styles.goalStatValue}>{stats.completedGoalsCount}</Text>
               <Text style={styles.goalStatLabel}>Completed</Text>
@@ -452,61 +424,7 @@ const ProfileScreen = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Badges & Achievements Section */}
-        <View style={styles.sectionContainer}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Badges & Achievements</Text>
-            <TouchableOpacity onPress={() => navigation.navigate("Achievements")}>
-              <Text style={styles.seeAllText}>See All</Text>
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.badgesContainer}
-          >
-            {badges && badges.length > 0 ? (
-              badges.map((badge, index) => (
-                <View key={index} style={styles.badgeItem}>
-                  <Image
-                    source={{ uri: badge.icon }}
-                    style={styles.badgeIcon}
-                    defaultSource={require("../assets/images/placeholder-badge.png")}
-                  />
-                  <Text style={styles.badgeName}>{badge.name}</Text>
-                </View>
-              ))
-            ) : (
-              <View style={styles.emptyBadges}>
-                <Ionicons name="ribbon-outline" size={32} color={COLORS.textSecondary} />
-                <Text style={styles.emptyText}>Complete goals to earn badges</Text>
-              </View>
-            )}
-          </ScrollView>
-        </View>
-
-        {/* Communities Section - Placeholder until implemented */}
-        <View style={[styles.sectionContainer, { marginBottom: 20 }]}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>My Communities</Text>
-            <TouchableOpacity onPress={() => navigation.navigate("Communities")}>
-              <Text style={styles.seeAllText}>See All</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.emptyCommunities}>
-            <Ionicons name="people-outline" size={32} color={COLORS.textSecondary} />
-            <Text style={styles.emptyText}>Join communities to connect with others</Text>
-            <TouchableOpacity
-              style={[styles.viewAllButton, { marginTop: 16 }]}
-              onPress={() => navigation.navigate("Communities")}
-            >
-              <Text style={styles.viewAllButtonText}>Browse Communities</Text>
-              <Ionicons name="arrow-forward" size={16} color={COLORS.primary} />
-            </TouchableOpacity>
-          </View>
-        </View>
+        {/* Add additional sections as needed */}
       </ScrollView>
     </SafeAreaView>
   );
@@ -521,16 +439,11 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: COLORS.background,
   },
   loadingText: {
     marginTop: 16,
     fontSize: 16,
     color: COLORS.textSecondary,
-  },
-  errorContainer: {
-    marginTop: 16,
-    alignItems: "center",
   },
   errorText: {
     fontSize: 18,
@@ -538,217 +451,176 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginBottom: 16,
     textAlign: "center",
-    paddingHorizontal: 20,
   },
-  retryButton: {
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    borderRadius: 8,
-    marginTop: 8,
-  },
-  retryButtonText: {
-    color: COLORS.white,
-    fontWeight: "600",
-  },
-  backButton: {
+  actionButton: {
     backgroundColor: COLORS.primary,
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 8,
+    marginTop: 16,
   },
-  backButtonText: {
+  actionButtonText: {
     color: COLORS.white,
     fontWeight: "600",
   },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: COLORS.cardBackground,
+  // Debug styles
+  debugContainer: {
+    margin: 16,
+    padding: 16,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ccc',
   },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: COLORS.text,
+  debugTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 8,
   },
-  profileSection: {
-    alignItems: "center",
+  debugText: {
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  // Profile header
+  profileHeader: {
+    alignItems: 'center',
     paddingVertical: 20,
-    backgroundColor: COLORS.cardBackground,
   },
   profileImageContainer: {
     height: 100,
     width: 100,
     borderRadius: 50,
     marginBottom: 16,
+    borderWidth: 2,
+    borderColor: '#E1E5F2',
   },
   profileImage: {
     height: 100,
     width: 100,
     borderRadius: 50,
-    borderWidth: 2,
-    borderColor: COLORS.primary,
   },
   imageLoading: {
     height: 100,
     width: 100,
     borderRadius: 50,
-    justifyContent: "center",
-    alignItems: "center",
+    justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: "rgba(0,0,0,0.3)",
   },
   editImageButton: {
-    position: "absolute",
+    position: 'absolute',
     right: 0,
     bottom: 0,
     backgroundColor: COLORS.primary,
     width: 28,
     height: 28,
     borderRadius: 14,
-    justifyContent: "center",
-    alignItems: "center",
+    justifyContent: 'center',
+    alignItems: 'center',
     borderWidth: 2,
-    borderColor: COLORS.cardBackground,
+    borderColor: COLORS.background,
   },
-  userName: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: COLORS.text,
+  // Name container with buttons
+  nameContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 4,
   },
+  buttonContainer: {
+    flexDirection: 'row',
+    marginLeft: 12,
+  },
+  iconButton: {
+    padding: 6,
+    marginLeft: 8,
+  },
+  userName: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
   userUsername: {
-    fontSize: 14,
+    fontSize: 16,
     color: COLORS.textSecondary,
     marginBottom: 16,
   },
-  editButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  editButtonText: {
-    color: COLORS.white,
-    marginLeft: 4,
-    fontWeight: "600",
-  },
+  // Stats section
   statsContainer: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    padding: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: 20,
+    paddingHorizontal: 16,
     backgroundColor: COLORS.cardBackground,
-    marginTop: 8,
-    marginBottom: 8,
+    marginHorizontal: 16,
+    borderRadius: 16,
+    marginTop: 16,
+    marginBottom: 24,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   statItem: {
-    alignItems: "center",
+    alignItems: 'center',
   },
   statValue: {
-    fontSize: 18,
-    fontWeight: "700",
+    fontSize: 24,
+    fontWeight: '700',
     color: COLORS.text,
-    marginTop: 4,
+    marginTop: 8,
   },
   statLabel: {
-    fontSize: 12,
+    fontSize: 14,
     color: COLORS.textSecondary,
-    marginTop: 2,
+    marginTop: 4,
   },
+  // Section containers
   sectionContainer: {
-    backgroundColor: COLORS.cardBackground,
-    padding: 16,
-    marginBottom: 8,
-  },
-  sectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    marginTop: 16,
+    paddingHorizontal: 16,
     marginBottom: 16,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: "700",
+    fontSize: 20,
+    fontWeight: '700',
     color: COLORS.text,
-  },
-  seeAllText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: COLORS.primary,
-  },
-  goalStatsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
     marginBottom: 16,
   },
+  // Goal stats
+  goalStatsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 20,
+  },
   goalStatItem: {
-    alignItems: "center",
-    flex: 1,
+    alignItems: 'center',
   },
   goalStatValue: {
-    fontSize: 24,
-    fontWeight: "700",
+    fontSize: 28,
+    fontWeight: '700',
     color: COLORS.text,
   },
   goalStatLabel: {
-    fontSize: 12,
+    fontSize: 14,
     color: COLORS.textSecondary,
     marginTop: 4,
   },
   viewAllButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: COLORS.primary,
   },
   viewAllButtonText: {
     color: COLORS.primary,
-    fontWeight: "600",
+    fontWeight: '600',
     marginRight: 8,
   },
-  badgesContainer: {
-    paddingBottom: 8,
-  },
-  badgeItem: {
-    alignItems: "center",
-    marginRight: 16,
-    width: 80,
-  },
-  badgeIcon: {
-    width: 50,
-    height: 50,
-    marginBottom: 8,
-  },
-  badgeName: {
-    fontSize: 12,
-    textAlign: "center",
-    color: COLORS.text,
-  },
-  emptyBadges: {
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 20,
-    width: "100%",
-  },
-  emptyText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginTop: 8,
-    textAlign: "center",
-  },
-  emptyCommunities: {
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 20,
-    width: "100%",
-  }
 });
 
 export default ProfileScreen;

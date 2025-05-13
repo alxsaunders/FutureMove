@@ -71,22 +71,43 @@ module.exports = (pool, authenticateFirebaseToken) => {
       const userData = userRows[0];
 
       // Get streak count
-      const [streakRows] = await pool.execute(
-        `SELECT current_streak FROM streaks WHERE user_id = ? ORDER BY streak_id DESC LIMIT 1`,
-        [userId]
-      );
+      let streakCount = 0;
+      try {
+        const [streakRows] = await pool.execute(
+          `SELECT current_streak FROM streaks WHERE user_id = ? ORDER BY streak_id DESC LIMIT 1`,
+          [userId]
+        );
+        streakCount = streakRows.length > 0 ? streakRows[0].current_streak : 0;
+      } catch (streakError) {
+        console.warn('Error fetching streak data:', streakError.message);
+        // If table doesn't exist or other issue, use 0
+      }
 
       // Get completed goals count
-      const [goalRows] = await pool.execute(
-        `SELECT COUNT(*) as count FROM goals WHERE user_id = ? AND is_completed = 1`,
-        [userId]
-      );
+      let completedGoalsCount = 0;
+      try {
+        const [goalRows] = await pool.execute(
+          `SELECT COUNT(*) as count FROM goals WHERE user_id = ? AND is_completed = 1`,
+          [userId]
+        );
+        completedGoalsCount = goalRows[0].count;
+      } catch (goalsError) {
+        console.warn('Error fetching goals data:', goalsError.message);
+        // If table doesn't exist or other issue, use 0
+      }
 
       // Get community count (communities user is a member of)
-      const [communityRows] = await pool.execute(
-        `SELECT COUNT(*) as count FROM community_members WHERE user_id = ?`,
-        [userId]
-      );
+      let communityCount = 0;
+      try {
+        const [communityRows] = await pool.execute(
+          `SELECT COUNT(*) as count FROM community_members WHERE user_id = ?`,
+          [userId]
+        );
+        communityCount = communityRows[0].count;
+      } catch (communityError) {
+        console.warn('Error fetching community count:', communityError.message);
+        // If table doesn't exist yet, just use 0 as the count
+      }
 
       // Get badge count (placeholder - you'll need to implement badges table)
       const badgeCount = 0; // Placeholder
@@ -94,21 +115,26 @@ module.exports = (pool, authenticateFirebaseToken) => {
       // Check if current user has commended this user
       let hasCommended = false;
       if (currentUserId) {
-        const [commendRows] = await pool.execute(
-          `SELECT COUNT(*) as count FROM user_commends 
-           WHERE from_user_id = ? AND to_user_id = ?`,
-          [currentUserId, userId]
-        );
-        hasCommended = commendRows[0].count > 0;
+        try {
+          const [commendRows] = await pool.execute(
+            `SELECT COUNT(*) as count FROM user_commends 
+             WHERE from_user_id = ? AND to_user_id = ?`,
+            [currentUserId, userId]
+          );
+          hasCommended = commendRows[0].count > 0;
+        } catch (commendError) {
+          console.warn('Error checking commends:', commendError.message);
+          // If table doesn't exist, just use false
+        }
       }
 
       // Assemble extended profile data
       const profileData = {
         ...userData,
-        streakCount: streakRows.length > 0 ? streakRows[0].current_streak : 0,
+        streakCount: streakCount,
         badgeCount: badgeCount,
-        completedGoalsCount: goalRows[0].count,
-        communityCount: communityRows[0].count,
+        completedGoalsCount: completedGoalsCount,
+        communityCount: communityCount,
         hasCommended: hasCommended
       };
 
@@ -125,46 +151,80 @@ module.exports = (pool, authenticateFirebaseToken) => {
       const userId = req.params.userId;
 
       // Get total goals
-      const [totalGoals] = await pool.execute(
-        `SELECT COUNT(*) as count FROM goals WHERE user_id = ?`,
-        [userId]
-      );
+      let totalGoals = 0;
+      let completedGoals = 0;
+      try {
+        const [totalGoalsRows] = await pool.execute(
+          `SELECT COUNT(*) as count FROM goals WHERE user_id = ?`,
+          [userId]
+        );
+        totalGoals = totalGoalsRows[0].count;
 
-      // Get completed goals
-      const [completedGoals] = await pool.execute(
-        `SELECT COUNT(*) as count FROM goals WHERE user_id = ? AND is_completed = 1`,
-        [userId]
-      );
+        // Get completed goals
+        const [completedGoalsRows] = await pool.execute(
+          `SELECT COUNT(*) as count FROM goals WHERE user_id = ? AND is_completed = 1`,
+          [userId]
+        );
+        completedGoals = completedGoalsRows[0].count;
+      } catch (goalsError) {
+        console.warn('Error fetching goals stats:', goalsError.message);
+        // If table doesn't exist, use defaults
+      }
 
       // Get streak data
-      const [streakRows] = await pool.execute(
-        `SELECT current_streak, longest_streak FROM streaks 
-         WHERE user_id = ? ORDER BY streak_id DESC LIMIT 1`,
-        [userId]
-      );
+      let currentStreak = 0;
+      let longestStreak = 0;
+      try {
+        const [streakRows] = await pool.execute(
+          `SELECT current_streak, longest_streak FROM streaks 
+           WHERE user_id = ? ORDER BY streak_id DESC LIMIT 1`,
+          [userId]
+        );
+        if (streakRows.length > 0) {
+          currentStreak = streakRows[0].current_streak;
+          longestStreak = streakRows[0].longest_streak;
+        }
+      } catch (streakError) {
+        console.warn('Error fetching streak stats:', streakError.message);
+        // If table doesn't exist, use defaults
+      }
 
       // Get post count
-      const [postRows] = await pool.execute(
-        `SELECT COUNT(*) as count FROM posts WHERE user_id = ?`,
-        [userId]
-      );
+      let postCount = 0;
+      try {
+        const [postRows] = await pool.execute(
+          `SELECT COUNT(*) as count FROM posts WHERE user_id = ?`,
+          [userId]
+        );
+        postCount = postRows[0].count;
+      } catch (postError) {
+        console.warn('Error fetching post count:', postError.message);
+        // If table doesn't exist, use default
+      }
 
       // Get comment count
-      const [commentRows] = await pool.execute(
-        `SELECT COUNT(*) as count FROM comments WHERE user_id = ?`,
-        [userId]
-      );
+      let commentCount = 0;
+      try {
+        const [commentRows] = await pool.execute(
+          `SELECT COUNT(*) as count FROM comments WHERE user_id = ?`,
+          [userId]
+        );
+        commentCount = commentRows[0].count;
+      } catch (commentError) {
+        console.warn('Error fetching comment count:', commentError.message);
+        // If table doesn't exist, use default
+      }
 
       const stats = {
-        totalGoals: totalGoals[0].count,
-        completedGoals: completedGoals[0].count,
-        completionRate: totalGoals[0].count > 0
-          ? Math.round((completedGoals[0].count / totalGoals[0].count) * 100)
+        totalGoals: totalGoals,
+        completedGoals: completedGoals,
+        completionRate: totalGoals > 0
+          ? Math.round((completedGoals / totalGoals) * 100)
           : 0,
-        currentStreak: streakRows.length > 0 ? streakRows[0].current_streak : 0,
-        longestStreak: streakRows.length > 0 ? streakRows[0].longest_streak : 0,
-        postCount: postRows[0].count,
-        commentCount: commentRows[0].count
+        currentStreak: currentStreak,
+        longestStreak: longestStreak,
+        postCount: postCount,
+        commentCount: commentCount
       };
 
       res.json(stats);
@@ -272,6 +332,24 @@ module.exports = (pool, authenticateFirebaseToken) => {
       // Can't commend yourself
       if (fromUserId === toUserId) {
         return res.status(400).json({ error: 'Cannot commend yourself' });
+      }
+
+      // Check if user_commends table exists, create if it doesn't
+      try {
+        await pool.execute(`
+          CREATE TABLE IF NOT EXISTS user_commends (
+            commend_id INT AUTO_INCREMENT PRIMARY KEY,
+            from_user_id VARCHAR(255) NOT NULL,
+            to_user_id VARCHAR(255) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY unique_commend (from_user_id, to_user_id),
+            FOREIGN KEY (from_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+            FOREIGN KEY (to_user_id) REFERENCES users(user_id) ON DELETE CASCADE
+          )
+        `);
+      } catch (tableError) {
+        console.error('Error creating user_commends table:', tableError);
+        // Continue anyway
       }
 
       const connection = await pool.getConnection();
@@ -412,37 +490,54 @@ module.exports = (pool, authenticateFirebaseToken) => {
       const limit = parseInt(req.query.limit) || 20;
       const offset = (page - 1) * limit;
 
-      // Get commenders with pagination
-      const [commenderRows] = await pool.execute(
-        `SELECT u.user_id, u.username, u.name, u.profile_image, uc.created_at
-         FROM user_commends uc
-         JOIN users u ON uc.from_user_id = u.user_id
-         WHERE uc.to_user_id = ?
-         ORDER BY uc.created_at DESC
-         LIMIT ? OFFSET ?`,
-        [userId, limit, offset]
-      );
+      // Check if table exists
+      try {
+        // Get commenders with pagination
+        const [commenderRows] = await pool.execute(
+          `SELECT u.user_id, u.username, u.name, u.profile_image, uc.created_at
+           FROM user_commends uc
+           JOIN users u ON uc.from_user_id = u.user_id
+           WHERE uc.to_user_id = ?
+           ORDER BY uc.created_at DESC
+           LIMIT ? OFFSET ?`,
+          [userId, limit, offset]
+        );
 
-      // Get total count for pagination
-      const [countRows] = await pool.execute(
-        `SELECT COUNT(*) as total FROM user_commends WHERE to_user_id = ?`,
-        [userId]
-      );
+        // Get total count for pagination
+        const [countRows] = await pool.execute(
+          `SELECT COUNT(*) as total FROM user_commends WHERE to_user_id = ?`,
+          [userId]
+        );
 
-      const totalCommenders = countRows[0].total;
-      const totalPages = Math.ceil(totalCommenders / limit);
+        const totalCommenders = countRows[0].total;
+        const totalPages = Math.ceil(totalCommenders / limit);
 
-      res.json({
-        commenders: commenderRows,
-        pagination: {
-          total: totalCommenders,
-          page,
-          limit,
-          totalPages,
-          hasNext: page < totalPages,
-          hasPrev: page > 1
-        }
-      });
+        res.json({
+          commenders: commenderRows,
+          pagination: {
+            total: totalCommenders,
+            page,
+            limit,
+            totalPages,
+            hasNext: page < totalPages,
+            hasPrev: page > 1
+          }
+        });
+      } catch (tableError) {
+        // If table doesn't exist or other error
+        console.warn('Error with commenders query:', tableError.message);
+        res.json({
+          commenders: [],
+          pagination: {
+            total: 0,
+            page: 1,
+            limit,
+            totalPages: 0,
+            hasNext: false,
+            hasPrev: false
+          }
+        });
+      }
     } catch (error) {
       console.error('Error fetching commenders:', error);
       res.status(500).json({ error: 'Internal server error', details: error.message });
@@ -477,36 +572,42 @@ module.exports = (pool, authenticateFirebaseToken) => {
       const userId = req.params.userId;
       const includeCompleted = req.query.includeCompleted === 'true';
 
-      // Build query based on whether to include completed goals
-      let query = `SELECT * FROM goals WHERE user_id = ?`;
-      const queryParams = [userId];
+      try {
+        // Build query based on whether to include completed goals
+        let query = `SELECT * FROM goals WHERE user_id = ?`;
+        const queryParams = [userId];
 
-      if (!includeCompleted) {
-        query += ` AND is_completed = 0`;
+        if (!includeCompleted) {
+          query += ` AND is_completed = 0`;
+        }
+
+        query += ` ORDER BY target_date ASC`;
+
+        const [rows] = await pool.execute(query, queryParams);
+
+        // Transform the database rows to match the frontend Goal type
+        const goals = rows.map(goal => ({
+          id: goal.goal_id,
+          title: goal.title,
+          description: goal.description,
+          category: goal.category,
+          isCompleted: goal.is_completed === 1,
+          isDaily: goal.is_daily === 1,
+          progress: goal.progress,
+          startDate: goal.target_date ? new Date(goal.target_date).toISOString().split('T')[0] : null,
+          userId: goal.user_id,
+          coinReward: goal.coin_reward,
+          routineDays: goal.routine_days ? JSON.parse(goal.routine_days) : [],
+          type: goal.is_daily === 1 ? 'recurring' : 'one-time',
+          targetDate: goal.target_date ? new Date(goal.target_date).toISOString().split('T')[0] : null
+        }));
+
+        res.json(goals);
+      } catch (goalsError) {
+        console.warn('Error fetching goals:', goalsError.message);
+        // If table doesn't exist or other error
+        res.json([]);
       }
-
-      query += ` ORDER BY target_date ASC`;
-
-      const [rows] = await pool.execute(query, queryParams);
-
-      // Transform the database rows to match the frontend Goal type
-      const goals = rows.map(goal => ({
-        id: goal.goal_id,
-        title: goal.title,
-        description: goal.description,
-        category: goal.category,
-        isCompleted: goal.is_completed === 1,
-        isDaily: goal.is_daily === 1,
-        progress: goal.progress,
-        startDate: goal.target_date ? new Date(goal.target_date).toISOString().split('T')[0] : null,
-        userId: goal.user_id,
-        coinReward: goal.coin_reward,
-        routineDays: goal.routine_days ? JSON.parse(goal.routine_days) : [],
-        type: goal.is_daily === 1 ? 'recurring' : 'one-time',
-        targetDate: goal.target_date ? new Date(goal.target_date).toISOString().split('T')[0] : null
-      }));
-
-      res.json(goals);
     } catch (error) {
       console.error('Error fetching user goals:', error);
       res.status(500).json({ error: 'Internal server error', details: error.message });

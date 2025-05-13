@@ -93,9 +93,10 @@ const CommunityHubTab = () => {
 
   // Function to navigate to CommunityDetail
   const navigateToCommunityDetail = (communityId: string | number) => {
-    // Use same approach for consistent navigation
-    navigation.getParent()?.navigate("CommunityDetail", {
-      communityId: String(communityId),
+    // Change this to correctly navigate to a nested screen
+    navigation.navigate('Community', {
+      screen: 'CommunityDetail',
+      params: { communityId: String(communityId) }
     });
   };
 

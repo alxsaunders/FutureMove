@@ -53,6 +53,19 @@ export interface ExtendedUserProfile extends User {
   website?: string;
 }
 
+// Define Community interface
+export interface Community {
+  community_id: number | string;
+  name: string;
+  description?: string;
+  category?: string;
+  image_url?: string;
+  members_count?: number;
+  posts_count?: number;
+  is_joined?: boolean;
+  created_by?: string;
+}
+
 /**
  * Fetch a user's profile data
  * @param userId - The ID of the user to fetch
@@ -459,6 +472,180 @@ export const fetchUserGoals = async (userId: string, includeCompleted: boolean =
       logDebug(`Response data:`, error.response.data);
     }
     console.error('Error fetching user goals:', error);
+    throw error;
+  }
+};
+
+/**
+ * Fetch communities the user has joined
+ * @param userId - The ID of the user to get communities for
+ * @returns Promise resolving to array of communities
+ */
+export const fetchUserCommunities = async (userId: string): Promise<Community[]> => {
+  try {
+    logDebug(`Fetching joined communities for user: ${userId}`);
+    const apiUrl = getApiBaseUrl();
+    
+    // Get current user ID for authentication if needed
+    let currentUserId;
+    try {
+      currentUserId = await getCurrentUserId();
+      logDebug(`Using currentUserId for context: ${currentUserId}`);
+    } catch (error) {
+      logDebug(`Using provided userId as fallback context: ${userId}`);
+      currentUserId = userId; // Fallback to provided userId
+    }
+    
+    // Log the full request URL for debugging
+    const requestUrl = `${apiUrl}/communities/user/${userId}/joined`;
+    logDebug(`Making request to: ${requestUrl}`);
+    
+    const response = await axios.get(requestUrl, {
+      timeout: 8000 // 8 second timeout
+    });
+    
+    // Log response for debugging
+    logDebug(`Communities API response status: ${response.status}`);
+    logDebug(`Communities received: ${response.data ? (response.data.length || 0) : 0}`);
+    
+    // If the API returns data in a nested structure, extract the communities array
+    let communities = response.data;
+    if (response.data && Array.isArray(response.data)) {
+      // Data is already an array
+      communities = response.data;
+    } else if (response.data && response.data.communities && Array.isArray(response.data.communities)) {
+      // Data is in a communities property
+      communities = response.data.communities;
+    }
+    
+    // Ensure we return an array
+    if (!Array.isArray(communities)) {
+      logDebug('Invalid communities data structure, returning empty array');
+      return [];
+    }
+    
+    // Map the communities to our interface if needed
+    const mappedCommunities: Community[] = communities.map(community => ({
+      community_id: community.community_id,
+      name: community.name,
+      description: community.description,
+      category: community.category,
+      image_url: community.image_url,
+      members_count: community.members_count,
+      posts_count: community.posts_count,
+      is_joined: community.is_joined === 1 || community.is_joined === true,
+      created_by: community.created_by
+    }));
+    
+    logDebug(`Mapped ${mappedCommunities.length} communities for user ${userId}`);
+    return mappedCommunities;
+  } catch (error) {
+    logDebug(`Error fetching user communities: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    console.error('Error fetching user communities:', error);
+    
+    // Return empty array instead of throwing to make the UI more resilient
+    return [];
+  }
+};
+
+/**
+ * Create a new community
+ * @param communityData - Data for the community to create
+ * @returns Promise resolving to the created community
+ */
+export const createCommunity = async (communityData: {
+  name: string;
+  description?: string;
+  category: string;
+  image_url?: string;
+}): Promise<Community> => {
+  try {
+    logDebug(`Creating community with name: ${communityData.name}`);
+    const apiUrl = getApiBaseUrl();
+    
+    // Get current user ID for community creator
+    const currentUserId = await getCurrentUserId();
+    
+    const response = await axios.post(`${apiUrl}/communities`, {
+      ...communityData,
+      created_by: currentUserId
+    }, {
+      timeout: 10000 // 10 second timeout
+    });
+    
+    logDebug(`Community creation response:`, response.data);
+    return response.data;
+  } catch (error) {
+    logDebug(`Error creating community: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    console.error('Error creating community:', error);
+    throw error;
+  }
+};
+
+/**
+ * Join a community
+ * @param communityId - ID of the community to join
+ * @returns Promise resolving to success status
+ */
+export const joinCommunity = async (communityId: number | string): Promise<boolean> => {
+  try {
+    logDebug(`Joining community: ${communityId}`);
+    const apiUrl = getApiBaseUrl();
+    const currentUserId = await getCurrentUserId();
+    
+    const response = await axios.post(`${apiUrl}/communities/${communityId}/join`, {
+      userId: currentUserId
+    }, {
+      timeout: 8000
+    });
+    
+    logDebug(`Community join response:`, response.data);
+    return response.data.success === true;
+  } catch (error) {
+    logDebug(`Error joining community: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    console.error('Error joining community:', error);
+    throw error;
+  }
+};
+
+/**
+ * Leave a community
+ * @param communityId - ID of the community to leave
+ * @returns Promise resolving to success status
+ */
+export const leaveCommunity = async (communityId: number | string): Promise<boolean> => {
+  try {
+    logDebug(`Leaving community: ${communityId}`);
+    const apiUrl = getApiBaseUrl();
+    const currentUserId = await getCurrentUserId();
+    
+    const response = await axios.post(`${apiUrl}/communities/${communityId}/leave`, {
+      userId: currentUserId
+    }, {
+      timeout: 8000
+    });
+    
+    logDebug(`Community leave response:`, response.data);
+    return response.data.success === true;
+  } catch (error) {
+    logDebug(`Error leaving community: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    console.error('Error leaving community:', error);
     throw error;
   }
 };

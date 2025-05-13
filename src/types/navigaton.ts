@@ -5,7 +5,7 @@ import { NavigatorScreenParams } from "@react-navigation/native";
 // Root Stack Parameters
 export type RootStackParamList = {
   Splash: undefined;
-  Home: { 
+  Home: {
     username?: string;
     userLevel?: number;
     userExp?: number;
@@ -14,7 +14,7 @@ export type RootStackParamList = {
   };
   SignUp: undefined;
   Main: undefined;
-  GoalDetail: { goalId: number }; 
+  GoalDetail: { goalId: number };
   Login: undefined;
   Goals: {
     viewGoalId?: number;
@@ -23,18 +23,20 @@ export type RootStackParamList = {
     filterType?: string;
   };
   Community: undefined;
-  
+  Communities: undefined; // Added Communities screen
+
   ItemShop: NavigatorScreenParams<ItemShopStackParamList> | { userId?: string; forceRefresh?: number };
-  Profile: undefined;
+  Profile: { userId?: string; forceRefresh?: number }; // Updated to include userId
 
   CommunityDetail: { communityId: number | string };
   CreatePost: { communityId?: number | string };
   PostDetail: { postId: number | string };
+  UserProfile: { userId: string }; // Added to view other user profiles
 };
 
 // Bottom Tab Parameters
 export type BottomTabParamList = {
-  Home: { 
+  Home: {
     username?: string;
     userLevel?: number;
     userExp?: number;
@@ -48,15 +50,16 @@ export type BottomTabParamList = {
     filterType?: string;
   };
   Community: undefined;
+  Communities: undefined; // Added Communities screen
   ItemShop: NavigatorScreenParams<ItemShopStackParamList> | { userId?: string; forceRefresh?: number };
-  Profile: undefined;
+  Profile: { userId?: string; forceRefresh?: number }; // Updated to include userId
 };
 
-// ItemShop Stack Parameters - Updated with userId and ItemDetail
+// ItemShop Stack Parameters
 export type ItemShopStackParamList = {
   ItemShopMain: { userId?: string; forceRefresh?: number };
-  ItemDetail: { 
-    itemId: number; 
+  ItemDetail: {
+    itemId: number;
     userId?: string;
     itemName?: string;
     itemDescription?: string;
@@ -66,20 +69,58 @@ export type ItemShopStackParamList = {
   };
 };
 
+// Community Stack Parameters - New addition
+export type CommunityStackParamList = {
+  CommunityMain: undefined;
+  Communities: undefined;
+  CommunityDetail: { communityId: number | string };
+  CreatePost: { communityId?: number | string };
+  PostDetail: { postId: number | string };
+};
+
+// Profile Stack Parameters - New addition
+export type ProfileStackParamList = {
+  ProfileMain: { userId?: string; forceRefresh?: number };
+  UserProfile: { userId: string };
+  UserGoals: { userId: string; includeCompleted?: boolean };
+  UserCommenders: { userId: string };
+  UserBadges: { userId: string };
+  EditProfile: { userId: string };
+};
+
 // Root Stack Navigation Props
 export type SplashScreenNavigationProp = StackNavigationProp<RootStackParamList, "Splash">;
 export type HomeScreenNavigationProp = StackNavigationProp<RootStackParamList, "Home">;
 export type GoalDetailScreenNavigationProp = StackNavigationProp<RootStackParamList, "GoalDetail">;
 export type LoginScreenNavigationProp = StackNavigationProp<RootStackParamList, "Login">;
-export type ItemShopScreenNavigationProp = StackNavigationProp<RootStackParamList, "ItemShop">; 
+export type ItemShopScreenNavigationProp = StackNavigationProp<RootStackParamList, "ItemShop">;
+export type ProfileScreenNavigationProp = StackNavigationProp<RootStackParamList, "Profile">;
+export type CommunitiesScreenNavigationProp = StackNavigationProp<RootStackParamList, "Communities">;
+export type UserProfileScreenNavigationProp = StackNavigationProp<RootStackParamList, "UserProfile">;
 
 // Root Stack Route Props
 export type HomeScreenRouteProp = RouteProp<RootStackParamList, "Home">;
 export type GoalDetailScreenRouteProp = RouteProp<RootStackParamList, "GoalDetail">;
 export type LoginScreenRouteProp = RouteProp<RootStackParamList, "Login">;
 export type ItemShopScreenRouteProp = RouteProp<RootStackParamList, "ItemShop">;
+export type ProfileScreenRouteProp = RouteProp<RootStackParamList, "Profile">;
+export type CommunitiesScreenRouteProp = RouteProp<RootStackParamList, "Communities">;
+export type UserProfileScreenRouteProp = RouteProp<RootStackParamList, "UserProfile">;
 
-// Add these to your navigation types file
+// Community related screen props
+export type CommunityScreenNavigationProp = StackNavigationProp<RootStackParamList, "Community">;
+export type CommunityScreenRouteProp = RouteProp<RootStackParamList, "Community">;
+
+export type CommunityScreenProps = {
+  navigation: CommunityScreenNavigationProp;
+  route: CommunityScreenRouteProp;
+};
+
+export type CommunitiesScreenProps = {
+  navigation: CommunitiesScreenNavigationProp;
+  route: CommunitiesScreenRouteProp;
+};
+
 export type CommunityDetailScreenNavigationProp = StackNavigationProp<RootStackParamList, "CommunityDetail">;
 export type CommunityDetailScreenRouteProp = RouteProp<RootStackParamList, "CommunityDetail">;
 
@@ -96,7 +137,15 @@ export type CreatePostScreenProps = {
   route: CreatePostScreenRouteProp;
 };
 
-// ItemShop Stack Navigation Props - Updated with ItemDetail
+export type PostDetailScreenNavigationProp = StackNavigationProp<RootStackParamList, "PostDetail">;
+export type PostDetailScreenRouteProp = RouteProp<RootStackParamList, "PostDetail">;
+
+export type PostDetailScreenProps = {
+  navigation: PostDetailScreenNavigationProp;
+  route: PostDetailScreenRouteProp;
+};
+
+// ItemShop Stack Navigation Props
 export type ItemShopMainScreenNavigationProp = StackNavigationProp<ItemShopStackParamList, "ItemShopMain">;
 export type ItemShopMainScreenRouteProp = RouteProp<ItemShopStackParamList, "ItemShopMain">;
 
@@ -111,6 +160,17 @@ export type ItemShopMainScreenProps = {
 export type ItemDetailScreenProps = {
   navigation: ItemDetailScreenNavigationProp;
   route: ItemDetailScreenRouteProp;
+};
+
+// Profile related screen props
+export type ProfileScreenProps = {
+  navigation: ProfileScreenNavigationProp;
+  route: ProfileScreenRouteProp;
+};
+
+export type UserProfileScreenProps = {
+  navigation: UserProfileScreenNavigationProp;
+  route: UserProfileScreenRouteProp;
 };
 
 // Combined Screen Props
@@ -151,6 +211,6 @@ export type GoalsScreenProps = {
 // Declare global namespace for type augmentation
 declare global {
   namespace ReactNavigation {
-    interface RootParamList extends RootStackParamList {}
+    interface RootParamList extends RootStackParamList { }
   }
 }
