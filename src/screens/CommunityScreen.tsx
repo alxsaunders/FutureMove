@@ -1,8 +1,7 @@
 // src/screens/CommunityScreen.tsx
-import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import React, { useState } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { createMaterialTopTabNavigator } from "@react-navigation/material-top-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "../common/constants/colors";
 import { useAuth } from "../contexts/AuthContext";
@@ -10,11 +9,25 @@ import CommunityHubTab from "../components/community/CommunityHubTab";
 import CommunityMyFeedTab from "../components/community/CommunityMyFeedTab";
 import { useNavigation } from "@react-navigation/native";
 
-const Tab = createMaterialTopTabNavigator();
+// Get screen dimensions
+const { width } = Dimensions.get('window');
 
 const CommunityScreen = () => {
   const { currentUser } = useAuth();
   const navigation = useNavigation();
+  const [activeTab, setActiveTab] = useState('Hub'); // Default to Hub tab
+
+  // Function to render the active tab content
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'Hub':
+        return <CommunityHubTab />;
+      case 'My Feed':
+        return <CommunityMyFeedTab />;
+      default:
+        return <CommunityHubTab />;
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -29,22 +42,49 @@ const CommunityScreen = () => {
         </TouchableOpacity>
       </View>
 
-      <Tab.Navigator
-        screenOptions={{
-          tabBarActiveTintColor: COLORS.primary,
-          tabBarInactiveTintColor: COLORS.textSecondary,
-          tabBarIndicatorStyle: { backgroundColor: COLORS.primary },
-          tabBarLabelStyle: {
-            fontSize: 14,
-            fontWeight: "600",
-            textTransform: "none",
-          },
-          tabBarStyle: { backgroundColor: COLORS.background },
-        }}
-      >
-        <Tab.Screen name="My Feed" component={CommunityMyFeedTab} />
-        <Tab.Screen name="Hub" component={CommunityHubTab} />
-      </Tab.Navigator>
+      {/* Custom Tab Bar */}
+      <View style={styles.tabBar}>
+        <TouchableOpacity 
+          style={[
+            styles.tabButton, 
+            activeTab === 'Hub' && styles.activeTabButton
+          ]}
+          onPress={() => setActiveTab('Hub')}
+        >
+          <Text 
+            style={[
+              styles.tabButtonText, 
+              activeTab === 'Hub' && styles.activeTabButtonText
+            ]}
+          >
+            Hub
+          </Text>
+          {activeTab === 'Hub' && <View style={styles.tabIndicator} />}
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[
+            styles.tabButton, 
+            activeTab === 'My Feed' && styles.activeTabButton
+          ]}
+          onPress={() => setActiveTab('My Feed')}
+        >
+          <Text 
+            style={[
+              styles.tabButtonText, 
+              activeTab === 'My Feed' && styles.activeTabButtonText
+            ]}
+          >
+            My Feed
+          </Text>
+          {activeTab === 'My Feed' && <View style={styles.tabIndicator} />}
+        </TouchableOpacity>
+      </View>
+
+      {/* Tab Content */}
+      <View style={styles.contentContainer}>
+        {renderTabContent()}
+      </View>
 
       <TouchableOpacity
         style={styles.createButton}
@@ -100,6 +140,41 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.25,
     shadowRadius: 4,
+    zIndex: 100,
+  },
+  tabBar: {
+    flexDirection: 'row',
+    height: 48,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  tabButton: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  activeTabButton: {
+    // No additional styling needed - indicator is separate
+  },
+  tabButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  activeTabButtonText: {
+    color: COLORS.primary,
+  },
+  tabIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    width: '70%',
+    height: 3,
+    backgroundColor: COLORS.primary,
+    borderRadius: 1.5,
+  },
+  contentContainer: {
+    flex: 1,
   },
 });
 

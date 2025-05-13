@@ -56,7 +56,7 @@ const logDebug = (message: string, data?: any) => {
 export const getApiBaseUrl = (): string => {
   // Use your environment configuration here
   logDebug("Getting API base URL");
-  return 'http://10.0.2.2:3001/api'; // Default for Android emulator
+  return 'http://192.168.1.207:3001/api'; // Default for Android emulator
 };
 
 // Fetch all available shop items
