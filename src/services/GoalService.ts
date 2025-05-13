@@ -9,11 +9,11 @@ export const getApiBaseUrl = () => {
     return "http://10.0.2.2:3001/api";
   } else {
     // For iOS or development on Mac
-    return "http://192.168.1.207:3001/api";
+    return 'http://192.168.1.207:3001/api'; 
   }
 };
 
-// Helper function to get current user ID from Firebase
+// Helper function to get current user ID from Frirebase
 export const getCurrentUserId = async (): Promise<string> => {
   const currentUser = auth.currentUser;
   if (currentUser) {

@@ -266,7 +266,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
   router.put('/:userId', authenticateFirebaseToken, async (req, res) => {
     try {
       const userId = req.params.userId;
-      const { name, username } = req.body;
+      const { name, username, bio, location, website } = req.body;
 
       // Verify user is allowed to update this profile
       if (req.user && req.user.uid !== userId) {
@@ -286,6 +286,25 @@ module.exports = (pool, authenticateFirebaseToken) => {
         if (updateFields) updateFields += ', ';
         updateFields += 'username = ?';
         updateValues.push(username);
+      }
+
+      // Add the new fields
+      if (bio) {
+        if (updateFields) updateFields += ', ';
+        updateFields += 'bio = ?';
+        updateValues.push(bio);
+      }
+
+      if (location) {
+        if (updateFields) updateFields += ', ';
+        updateFields += 'location = ?';
+        updateValues.push(location);
+      }
+
+      if (website) {
+        if (updateFields) updateFields += ', ';
+        updateFields += 'website = ?';
+        updateValues.push(website);
       }
 
       // If nothing to update, return early

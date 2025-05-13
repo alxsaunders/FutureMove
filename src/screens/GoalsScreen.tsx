@@ -222,7 +222,7 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
 
       // Fetch user level and XP
       try {
-        const apiUrl = "http://192.168.1.207:3001/api";
+        const apiUrl = "http://172.20.10.13:3001/api";
         const response = await fetch(`${apiUrl}/users/${userId}`);
         if (response.ok) {
           const userData = await response.json();

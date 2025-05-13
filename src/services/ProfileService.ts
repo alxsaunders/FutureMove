@@ -23,7 +23,7 @@ const logDebug = (message: string, data?: any) => {
 export const getApiBaseUrl = () => {
   const baseUrl = Platform.OS === "android"
     ? "http://10.0.2.2:3001/api"
-    : "http://192.168.1.207:3001/api";
+    : 'http://192.168.1.207:3001/api';
 
   logDebug(`Using API base URL: ${baseUrl}`);
   return baseUrl;
@@ -118,7 +118,10 @@ export const fetchUserProfile = async (userId: string): Promise<ExtendedUserProf
       commends: profileData.commends || 0,
       communityCount: profileData.communityCount || 0,
       completedGoalsCount: profileData.completedGoalsCount || 0,
-      hasCommended: profileData.hasCommended || false
+      hasCommended: profileData.hasCommended || false,
+      bio: profileData.bio || '',
+      location: profileData.location || '',
+      website: profileData.website || ''
     };
 
     logDebug('Profile data transformed:', result);
@@ -247,6 +250,9 @@ export const updateUserProfile = async (
   updates: {
     name?: string;
     username?: string;
+    bio?: string;
+    location?: string;
+    website?: string;
     profileImage?: Blob;
     fileName?: string;
   }
@@ -256,7 +262,10 @@ export const updateUserProfile = async (
       hasImage: !!updates.profileImage,
       fileName: updates.fileName,
       name: updates.name,
-      username: updates.username
+      username: updates.username,
+      bio: updates.bio,
+      location: updates.location,
+      website: updates.website
     });
 
     const apiUrl = getApiBaseUrl();
@@ -284,10 +293,13 @@ export const updateUserProfile = async (
         }
 
         // If there are other fields to update, do that separately
-        if (updates.name || updates.username) {
+        if (updates.name || updates.username || updates.bio || updates.location || updates.website) {
           const updateData = {
             name: updates.name,
-            username: updates.username
+            username: updates.username,
+            bio: updates.bio,
+            location: updates.location,
+            website: updates.website
           };
 
           try {
@@ -308,11 +320,14 @@ export const updateUserProfile = async (
       }
     }
 
-    // If just updating name/username
-    if (updates.name || updates.username) {
+    // If just updating name/username/bio/location/website
+    if (updates.name || updates.username || updates.bio || updates.location || updates.website) {
       const updateData = {
         name: updates.name,
-        username: updates.username
+        username: updates.username,
+        bio: updates.bio,
+        location: updates.location,
+        website: updates.website
       };
 
       try {
@@ -485,7 +500,7 @@ export const fetchUserCommunities = async (userId: string): Promise<Community[]>
   try {
     logDebug(`Fetching joined communities for user: ${userId}`);
     const apiUrl = getApiBaseUrl();
-    
+
     // Get current user ID for authentication if needed
     let currentUserId;
     try {
@@ -495,19 +510,19 @@ export const fetchUserCommunities = async (userId: string): Promise<Community[]>
       logDebug(`Using provided userId as fallback context: ${userId}`);
       currentUserId = userId; // Fallback to provided userId
     }
-    
+
     // Log the full request URL for debugging
     const requestUrl = `${apiUrl}/communities/user/${userId}/joined`;
     logDebug(`Making request to: ${requestUrl}`);
-    
+
     const response = await axios.get(requestUrl, {
       timeout: 8000 // 8 second timeout
     });
-    
+
     // Log response for debugging
     logDebug(`Communities API response status: ${response.status}`);
     logDebug(`Communities received: ${response.data ? (response.data.length || 0) : 0}`);
-    
+
     // If the API returns data in a nested structure, extract the communities array
     let communities = response.data;
     if (response.data && Array.isArray(response.data)) {
@@ -517,13 +532,13 @@ export const fetchUserCommunities = async (userId: string): Promise<Community[]>
       // Data is in a communities property
       communities = response.data.communities;
     }
-    
+
     // Ensure we return an array
     if (!Array.isArray(communities)) {
       logDebug('Invalid communities data structure, returning empty array');
       return [];
     }
-    
+
     // Map the communities to our interface if needed
     const mappedCommunities: Community[] = communities.map(community => ({
       community_id: community.community_id,
@@ -536,7 +551,7 @@ export const fetchUserCommunities = async (userId: string): Promise<Community[]>
       is_joined: community.is_joined === 1 || community.is_joined === true,
       created_by: community.created_by
     }));
-    
+
     logDebug(`Mapped ${mappedCommunities.length} communities for user ${userId}`);
     return mappedCommunities;
   } catch (error) {
@@ -546,7 +561,7 @@ export const fetchUserCommunities = async (userId: string): Promise<Community[]>
       logDebug(`Response data:`, error.response.data);
     }
     console.error('Error fetching user communities:', error);
-    
+
     // Return empty array instead of throwing to make the UI more resilient
     return [];
   }
@@ -566,17 +581,17 @@ export const createCommunity = async (communityData: {
   try {
     logDebug(`Creating community with name: ${communityData.name}`);
     const apiUrl = getApiBaseUrl();
-    
+
     // Get current user ID for community creator
     const currentUserId = await getCurrentUserId();
-    
+
     const response = await axios.post(`${apiUrl}/communities`, {
       ...communityData,
       created_by: currentUserId
     }, {
       timeout: 10000 // 10 second timeout
     });
-    
+
     logDebug(`Community creation response:`, response.data);
     return response.data;
   } catch (error) {
@@ -600,13 +615,13 @@ export const joinCommunity = async (communityId: number | string): Promise<boole
     logDebug(`Joining community: ${communityId}`);
     const apiUrl = getApiBaseUrl();
     const currentUserId = await getCurrentUserId();
-    
+
     const response = await axios.post(`${apiUrl}/communities/${communityId}/join`, {
       userId: currentUserId
     }, {
       timeout: 8000
     });
-    
+
     logDebug(`Community join response:`, response.data);
     return response.data.success === true;
   } catch (error) {
@@ -630,13 +645,13 @@ export const leaveCommunity = async (communityId: number | string): Promise<bool
     logDebug(`Leaving community: ${communityId}`);
     const apiUrl = getApiBaseUrl();
     const currentUserId = await getCurrentUserId();
-    
+
     const response = await axios.post(`${apiUrl}/communities/${communityId}/leave`, {
       userId: currentUserId
     }, {
       timeout: 8000
     });
-    
+
     logDebug(`Community leave response:`, response.data);
     return response.data.success === true;
   } catch (error) {

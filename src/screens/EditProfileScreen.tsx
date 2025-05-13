@@ -18,15 +18,19 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import { COLORS } from "../common/constants/colors";
 import { useAuth } from "../contexts/AuthContext";
 import { updateUserProfile, ExtendedUserProfile } from "../services/ProfileService";
+import { auth } from "../config/firebase"; // Import Firebase auth directly
 
 const EditProfileScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { profileData, onUpdateProfile } = route.params as {
+  // Remove the onUpdateProfile from params as we'll handle navigation differently
+  const { profileData, userId } = route.params as {
     profileData: ExtendedUserProfile,
-    onUpdateProfile: () => Promise<void>
+    userId: string
   };
+
   const { currentUser } = useAuth();
+  const [firebaseUser, setFirebaseUser] = useState(auth.currentUser);
 
   // We only allow editing certain fields in the profile
   const [name, setName] = useState(profileData?.name || "");
@@ -39,12 +43,43 @@ const EditProfileScreen = () => {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    // Log that we're editing Firebase data only
-    console.log("[EDIT_PROFILE] Editing Firebase profile data only, not MySQL data");
-  }, []);
+    // Check if the user is authenticated on mount
+    const user = auth.currentUser;
+    setFirebaseUser(user);
+
+    if (!user) {
+      console.log("[EDIT_PROFILE] No Firebase user found");
+      Alert.alert(
+        "Authentication Required",
+        "You must be logged in to edit your profile",
+        [{ text: "OK", onPress: () => navigation.goBack() }]
+      );
+    } else {
+      console.log("[EDIT_PROFILE] Firebase user authenticated:", user.uid);
+      console.log("[EDIT_PROFILE] Editing profile data in both Firebase and MySQL");
+    }
+
+    // Set up an auth state change listener
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      setFirebaseUser(user);
+      if (!user) {
+        console.log("[EDIT_PROFILE] User signed out during edit");
+        Alert.alert(
+          "Session Expired",
+          "Your login session has expired. Please log in again.",
+          [{ text: "OK", onPress: () => navigation.goBack() }]
+        );
+      }
+    });
+
+    return () => unsubscribe();
+  }, [navigation]);
 
   const handleSave = async () => {
-    if (!currentUser) {
+    // First check Firebase auth directly
+    const user = auth.currentUser;
+
+    if (!user) {
       Alert.alert("Error", "You must be logged in to edit your profile");
       return;
     }
@@ -73,10 +108,11 @@ const EditProfileScreen = () => {
 
     setIsSubmitting(true);
     try {
-      console.log("[EDIT_PROFILE] Saving profile changes to Firebase only");
+      console.log("[EDIT_PROFILE] Saving profile changes to both Firebase and MySQL");
+      const userIdToUse = user.uid; // Use direct Firebase auth ID
 
-      // Update profile data in Firebase only
-      await updateUserProfile(currentUser.id, {
+      // Update profile data in both Firebase and MySQL
+      await updateUserProfile(userIdToUse, {
         name,
         username,
         bio,
@@ -84,29 +120,44 @@ const EditProfileScreen = () => {
         website,
       });
 
-      console.log("[EDIT_PROFILE] Profile updated successfully in Firebase");
+      console.log("[EDIT_PROFILE] Profile updated successfully in all systems");
 
-      // Call the callback function to refresh profile data on the previous screen
-      if (onUpdateProfile) {
-        console.log("[EDIT_PROFILE] Triggering profile refresh on ProfileScreen");
-        onUpdateProfile();
-      }
-
-      // Explicitly state we're not updating MySQL
-      console.log("[EDIT_PROFILE] No MySQL update performed - using Firebase only");
+      // Important: Set isSubmitting to false BEFORE showing the alert
+      // This ensures the button is visible if the user cancels the alert
+      setIsSubmitting(false);
 
       Alert.alert(
         "Profile Updated",
-        "Your profile has been updated successfully in Firebase!",
-        [{ text: "OK" }]
-      );
+        "Your profile has been updated successfully!",
+        [{
+          text: "OK",
+          onPress: () => {
+            // Use goBack instead of navigate to prevent navigation stack issues
+            navigation.goBack();
 
-      navigation.goBack();
+            // After a slight delay, pass refresh info to the previous screen via params
+            // This approach preserves state better than navigate()
+            setTimeout(() => {
+              if (navigation.canGoBack()) {
+                // If we can directly set params on the parent screen
+                try {
+                  navigation.getParent()?.setParams({
+                    profileUpdated: true,
+                    lastUpdated: Date.now()
+                  });
+                } catch (e) {
+                  console.log("[EDIT_PROFILE] Could not set parent params:", e);
+                }
+              }
+            }, 300);
+          }
+        }]
+      );
     } catch (error) {
-      console.error("[EDIT_PROFILE] Error updating profile in Firebase:", error);
+      console.error("[EDIT_PROFILE] Error updating profile:", error);
       Alert.alert(
-        "Firebase Update Error",
-        "Failed to update your profile in Firebase. Please try again."
+        "Update Error",
+        "Failed to update your profile. Please try again."
       );
     } finally {
       setIsSubmitting(false);
@@ -123,6 +174,30 @@ const EditProfileScreen = () => {
     }
   };
 
+  // If no Firebase user, don't render the form content
+  if (!firebaseUser) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <Ionicons name="close" size={24} color={COLORS.text} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Edit Profile</Text>
+          <View style={{ width: 70 }} />
+        </View>
+        <View style={styles.centeredContainer}>
+          <Text style={styles.errorMessage}>Authentication required to edit profile.</Text>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.backButtonText}>Back to Profile</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -130,12 +205,12 @@ const EditProfileScreen = () => {
       keyboardVerticalOffset={100}
     >
       <SafeAreaView style={styles.safeArea}>
-        {/* Header with Firebase indicator */}
+        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()}>
             <Ionicons name="close" size={24} color={COLORS.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Edit Profile (Firebase)</Text>
+          <Text style={styles.headerTitle}>Edit Profile</Text>
           <TouchableOpacity
             style={styles.saveButton}
             onPress={handleSave}
@@ -154,10 +229,10 @@ const EditProfileScreen = () => {
           contentContainerStyle={styles.contentContainer}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Firebase indicator */}
-          <View style={styles.firebaseIndicator}>
+          {/* Data indicator */}
+          <View style={styles.dataIndicator}>
             <Ionicons name="server" size={16} color={COLORS.primary} />
-            <Text style={styles.firebaseText}>Editing Firebase Data Only</Text>
+            <Text style={styles.dataText}>Updating All Profile Data</Text>
           </View>
 
           {/* Name */}
@@ -244,7 +319,7 @@ const EditProfileScreen = () => {
           </View>
 
           <Text style={styles.noteText}>
-            Note: Profile information is stored in Firebase only. Changes will not affect any MySQL database data.
+            Note: Profile information is stored in both Firebase and MySQL databases.
           </Text>
         </ScrollView>
       </SafeAreaView>
@@ -291,7 +366,7 @@ const styles = StyleSheet.create({
   contentContainer: {
     padding: 16,
   },
-  firebaseIndicator: {
+  dataIndicator: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -300,7 +375,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 16,
   },
-  firebaseText: {
+  dataText: {
     marginLeft: 8,
     fontSize: 14,
     fontWeight: "600",
@@ -348,6 +423,28 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     color: COLORS.textSecondary,
     textAlign: 'center',
+  },
+  centeredContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorMessage: {
+    fontSize: 16,
+    color: COLORS.text,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  backButton: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
+  backButtonText: {
+    color: COLORS.white,
+    fontWeight: '600',
   },
 });
 

@@ -1,7 +1,7 @@
 // src/services/RoutineService.ts
 import { Routine } from '../types';
 
-const API_URL = 'http://192.168.1.207:3001/api'; // Emulator localhost
+const API_URL = 'http://192.168.1.207:3001/api';  // Emulator localhost
 
 // Helper type for API response
 interface GoalResponse {

@@ -10,6 +10,7 @@ import HomeScreenWrapper from "../components/HomeScreenWrapper";
 import ProfileScreen from "../screens/ProfileScreen";
 
 import ItemShopStackNavigator from "./ItemShopStackNavigator";
+import ProfileStackNavigator from "./ProfileStackNavigator"; 
 
 // Import Stack Navigators
 import GoalsStackNavigator from "./GoalsStackNavigator";
@@ -124,11 +125,7 @@ const BottomTabNavigator = () => {
       />
       <Tab.Screen
         name="Profile"
-        component={ProfileScreen}
-        initialParams={{
-          userId: currentUser?.id,
-          forceRefresh: Date.now(),
-        }}
+        component={ProfileStackNavigator}
       />
     </Tab.Navigator>
   );
