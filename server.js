@@ -64,16 +64,19 @@ app.get('/api/test', (req, res) => {
 });
 
 // Import route modules
+// Import route modules
 const communityRoutes = require('./routes/community')(pool, authenticateFirebaseToken);
 const postsRoutes = require('./routes/posts')(pool, authenticateFirebaseToken);
 const commentsRoutes = require('./routes/comments')(pool, authenticateFirebaseToken);
 const itemShopRoutes = require('./routes/itemshop')(pool, authenticateFirebaseToken);
+const profileRoutes = require('./routes/profile')(pool, authenticateFirebaseToken); // Add this line
 
 // Use route modules
 app.use('/api/communities', communityRoutes);
 app.use('/api/posts', postsRoutes);
 app.use('/api/comments', commentsRoutes);
 app.use('/api/items', itemShopRoutes);  // Mount at /api/items instead of /api
+app.use('/api/profile', profileRoutes);  // Add this line // Mount at /api/items instead of /api
 
 // ==== USER ROUTES ====
 

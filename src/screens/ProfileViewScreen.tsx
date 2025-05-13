@@ -16,11 +16,12 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import { COLORS } from "../common/constants/colors";
 import { useAuth } from "../contexts/AuthContext";
 import { 
-  fetchUserProfile, 
-  followUser, 
-  unfollowUser, 
-  checkIfFollowing,
-  ExtendedUserProfile 
+  fetchUserProfile,
+  fetchUserBadges,
+  fetchUserStats,
+  commendUser,
+  removeCommend,
+  ExtendedUserProfile
 } from "../services/ProfileService";
 
 const ProfileViewScreen = () => {
@@ -29,9 +30,10 @@ const ProfileViewScreen = () => {
   const { userId } = route.params as { userId: string };
   const { currentUser } = useAuth();
   const [profileData, setProfileData] = useState<ExtendedUserProfile | null>(null);
+  const [badges, setBadges] = useState<any[]>([]);
+  const [stats, setStats] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isFollowing, setIsFollowing] = useState(false);
-  const [isToggling, setIsToggling] = useState(false);
+  const [isCommending, setIsCommending] = useState(false);
 
   useEffect(() => {
     loadProfileData();
@@ -42,14 +44,16 @@ const ProfileViewScreen = () => {
     
     setIsLoading(true);
     try {
-      const userData = await fetchUserProfile(userId);
-      setProfileData(userData);
+      // Load profile, badges and stats in parallel
+      const [profileResponse, badgesResponse, statsResponse] = await Promise.all([
+        fetchUserProfile(userId),
+        fetchUserBadges(userId),
+        fetchUserStats(userId)
+      ]);
       
-      // Check if current user is following this user
-      if (currentUser) {
-        const followStatus = await checkIfFollowing(currentUser.id, userId);
-        setIsFollowing(followStatus);
-      }
+      setProfileData(profileResponse);
+      setBadges(badgesResponse);
+      setStats(statsResponse);
     } catch (error) {
       console.error("Error loading profile data:", error);
       Alert.alert("Error", "Failed to load profile data. Please try again.");
@@ -58,12 +62,12 @@ const ProfileViewScreen = () => {
     }
   };
 
-  const handleToggleFollow = async () => {
+  const handleCommend = async () => {
     if (!currentUser) {
       // Prompt user to log in or sign up
       Alert.alert(
         "Authentication Required",
-        "You need to be logged in to follow users.",
+        "You need to be logged in to commend users.",
         [
           { text: "Cancel", style: "cancel" },
           {
@@ -75,22 +79,36 @@ const ProfileViewScreen = () => {
       return;
     }
     
-    setIsToggling(true);
+    if (!profileData) return;
+    
+    setIsCommending(true);
     try {
-      if (isFollowing) {
-        // Unfollow
-        await unfollowUser(currentUser.id, userId);
-        setIsFollowing(false);
+      if (profileData.hasCommended) {
+        // Remove commend
+        const result = await removeCommend(userId);
+        if (result.success) {
+          setProfileData({
+            ...profileData,
+            commends: result.commends,
+            hasCommended: false
+          });
+        }
       } else {
-        // Follow
-        await followUser(currentUser.id, userId);
-        setIsFollowing(true);
+        // Add commend
+        const result = await commendUser(userId);
+        if (result.success) {
+          setProfileData({
+            ...profileData,
+            commends: result.commends,
+            hasCommended: true
+          });
+        }
       }
     } catch (error) {
-      console.error("Error toggling follow status:", error);
-      Alert.alert("Error", "Failed to update follow status. Please try again.");
+      console.error("Error updating commend status:", error);
+      Alert.alert("Error", "Failed to update commend status. Please try again.");
     } finally {
-      setIsToggling(false);
+      setIsCommending(false);
     }
   };
 
@@ -151,46 +169,32 @@ const ProfileViewScreen = () => {
             @{profileData.username || userId.substring(0, 8) || "user"}
           </Text>
           
-          <View style={styles.userStats}>
-            <View style={styles.statColumn}>
-              <Text style={styles.statValue}>{profileData.numFollowers || 0}</Text>
-              <Text style={styles.statLabel}>Followers</Text>
-            </View>
-            
-            <View style={styles.statDivider} />
-            
-            <View style={styles.statColumn}>
-              <Text style={styles.statValue}>{profileData.numFollowing || 0}</Text>
-              <Text style={styles.statLabel}>Following</Text>
-            </View>
-          </View>
-          
-          {/* Don't show follow button for own profile */}
+          {/* Commend Button - only shown when viewing another user's profile */}
           {currentUser && currentUser.id !== userId && (
             <TouchableOpacity 
               style={[
-                styles.followButton, 
-                isFollowing ? styles.followingButton : null
+                styles.commendButton, 
+                profileData.hasCommended ? styles.commendedButton : null
               ]}
-              onPress={handleToggleFollow}
-              disabled={isToggling}
+              onPress={handleCommend}
+              disabled={isCommending}
             >
-              {isToggling ? (
-                <ActivityIndicator size="small" color={isFollowing ? COLORS.primary : COLORS.white} />
+              {isCommending ? (
+                <ActivityIndicator size="small" color={profileData.hasCommended ? COLORS.primary : COLORS.white} />
               ) : (
                 <>
                   <Ionicons 
-                    name={isFollowing ? "checkmark" : "add"} 
+                    name={profileData.hasCommended ? "thumbs-up" : "thumbs-up-outline"} 
                     size={16} 
-                    color={isFollowing ? COLORS.primary : COLORS.white} 
+                    color={profileData.hasCommended ? COLORS.primary : COLORS.white} 
                   />
                   <Text 
                     style={[
-                      styles.followButtonText,
-                      isFollowing ? styles.followingButtonText : null
+                      styles.commendButtonText,
+                      profileData.hasCommended ? styles.commendedButtonText : null
                     ]}
                   >
-                    {isFollowing ? "Following" : "Follow"}
+                    {profileData.hasCommended ? "Commended" : "Commend"}
                   </Text>
                 </>
               )}
@@ -198,44 +202,34 @@ const ProfileViewScreen = () => {
           )}
         </View>
         
-        {/* About Section */}
-        {profileData.bio && (
-          <View style={styles.sectionContainer}>
-            <Text style={styles.sectionTitle}>About</Text>
-            <Text style={styles.bioText}>{profileData.bio}</Text>
-          </View>
-        )}
-        
-        {/* User Stats Section */}
-        <View style={styles.sectionContainer}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Stats</Text>
+        {/* Stats Section */}
+        <View style={styles.statsContainer}>
+          <View style={styles.statItem}>
+            <Ionicons name="flame" size={28} color={COLORS.primary} />
+            <Text style={styles.statValue}>{profileData.streakCount || 0}</Text>
+            <Text style={styles.statLabel}>Streak</Text>
           </View>
           
-          <View style={styles.statsGrid}>
-            <View style={styles.statGridItem}>
-              <Ionicons name="trophy" size={28} color="#FFD700" />
-              <Text style={styles.statValue}>{profileData.level}</Text>
-              <Text style={styles.statLabel}>Level</Text>
-            </View>
-            
-            <View style={styles.statGridItem}>
-              <Ionicons name="star" size={28} color="#5E6CE7" />
-              <Text style={styles.statValue}>{profileData.xp_points || 0}</Text>
-              <Text style={styles.statLabel}>XP Points</Text>
-            </View>
-            
-            <View style={styles.statGridItem}>
-              <Ionicons name="calendar" size={28} color="#4CAF50" />
-              <Text style={styles.statValue}>
-                {Math.floor((new Date().getTime() - new Date(profileData.created_at).getTime()) / (1000 * 60 * 60 * 24))}
-              </Text>
-              <Text style={styles.statLabel}>Days Active</Text>
-            </View>
+          <View style={styles.statItem}>
+            <Ionicons name="trophy" size={28} color="#FFD700" />
+            <Text style={styles.statValue}>{profileData.level}</Text>
+            <Text style={styles.statLabel}>Level</Text>
+          </View>
+          
+          <View style={styles.statItem}>
+            <Ionicons name="thumbs-up" size={28} color="#FF9500" />
+            <Text style={styles.statValue}>{profileData.commends || 0}</Text>
+            <Text style={styles.statLabel}>Commends</Text>
+          </View>
+          
+          <View style={styles.statItem}>
+            <Ionicons name="ribbon" size={28} color="#5E6CE7" />
+            <Text style={styles.statValue}>{profileData.badgeCount || 0}</Text>
+            <Text style={styles.statLabel}>Badges</Text>
           </View>
         </View>
         
-        {/* Badges & Achievements Section */}
+        {/* Badges Section */}
         <View style={styles.sectionContainer}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Badges & Achievements</Text>
@@ -246,13 +240,13 @@ const ProfileViewScreen = () => {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.badgesContainer}
           >
-            {profileData.badges && profileData.badges.length > 0 ? (
-              profileData.badges.map((badge, index) => (
+            {badges.length > 0 ? (
+              badges.map((badge, index) => (
                 <View key={index} style={styles.badgeItem}>
                   <Image 
                     source={{ uri: badge.icon }} 
                     style={styles.badgeIcon}
-                    defaultSource={require("../assets/placeholder-badge.png")} 
+                    defaultSource={require("../assets/images/placeholder-badge.png")} 
                   />
                   <Text style={styles.badgeName}>{badge.name}</Text>
                 </View>
@@ -266,117 +260,80 @@ const ProfileViewScreen = () => {
           </ScrollView>
         </View>
         
-        {/* Posts Section */}
-        <View style={[styles.sectionContainer, { marginBottom: 20 }]}>
+        {/* Progress Stats Section */}
+        <View style={styles.sectionContainer}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Recent Posts</Text>
+            <Text style={styles.sectionTitle}>Progress Stats</Text>
           </View>
           
-          {profileData.recentPosts && profileData.recentPosts.length > 0 ? (
-            profileData.recentPosts.map((post, index) => (
-              <TouchableOpacity 
-                key={index} 
-                style={styles.postItem}
-                onPress={() => navigation.navigate("PostDetail", { postId: post.id })}
-              >
-                <View style={styles.postHeader}>
-                  <Text style={styles.postCommunity}>{post.communityName}</Text>
-                  <Text style={styles.postTime}>{formatTimeAgo(post.createdAt)}</Text>
-                </View>
-                
-                <Text style={styles.postContent} numberOfLines={2}>
-                  {post.content}
-                </Text>
-                
-                {post.image && (
-                  <Image 
-                    source={{ uri: post.image }} 
-                    style={styles.postImage}
-                    resizeMode="cover"
-                  />
-                )}
-                
-                <View style={styles.postActions}>
-                  <View style={styles.postAction}>
-                    <Ionicons name="heart-outline" size={16} color={COLORS.textSecondary} />
-                    <Text style={styles.actionText}>{post.likes}</Text>
-                  </View>
-                  
-                  <View style={styles.postAction}>
-                    <Ionicons name="chatbubble-outline" size={16} color={COLORS.textSecondary} />
-                    <Text style={styles.actionText}>{post.comments}</Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            ))
-          ) : (
-            <View style={styles.emptyPosts}>
-              <Ionicons name="document-text-outline" size={32} color={COLORS.textSecondary} />
-              <Text style={styles.emptyText}>No posts yet</Text>
+          <View style={styles.statsGrid}>
+            <View style={styles.statsCard}>
+              <View style={styles.statsCardHeader}>
+                <Ionicons name="checkmark-circle" size={24} color={COLORS.primary} />
+                <Text style={styles.statsCardTitle}>Goals Completed</Text>
+              </View>
+              <Text style={styles.statsCardValue}>{profileData.completedGoalsCount || 0}</Text>
             </View>
-          )}
+            
+            <View style={styles.statsCard}>
+              <View style={styles.statsCardHeader}>
+                <Ionicons name="people" size={24} color="#4CAF50" />
+                <Text style={styles.statsCardTitle}>Communities</Text>
+              </View>
+              <Text style={styles.statsCardValue}>{profileData.communityCount || 0}</Text>
+            </View>
+            
+            {stats && (
+              <>
+                <View style={styles.statsCard}>
+                  <View style={styles.statsCardHeader}>
+                    <Ionicons name="trending-up" size={24} color="#FF9800" />
+                    <Text style={styles.statsCardTitle}>Longest Streak</Text>
+                  </View>
+                  <Text style={styles.statsCardValue}>{stats.longest_streak || 0}</Text>
+                </View>
+                
+                <View style={styles.statsCard}>
+                  <View style={styles.statsCardHeader}>
+                    <Ionicons name="calendar" size={24} color="#9C27B0" />
+                    <Text style={styles.statsCardTitle}>Days Active</Text>
+                  </View>
+                  <Text style={styles.statsCardValue}>{stats.days_registered || 0}</Text>
+                </View>
+              </>
+            )}
+          </View>
         </View>
         
-        {/* Communities Section */}
-        <View style={[styles.sectionContainer, { marginBottom: 20 }]}>
+        {/* XP Progress Section */}
+        <View style={styles.sectionContainer}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Communities</Text>
+            <Text style={styles.sectionTitle}>Experience Progress</Text>
           </View>
           
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.communitiesContainer}
-          >
-            {profileData.communities && profileData.communities.length > 0 ? (
-              profileData.communities.map((community, index) => (
-                <TouchableOpacity 
-                  key={index} 
-                  style={styles.communityItem}
-                  onPress={() => navigation.navigate("CommunityDetail", { communityId: community.id })}
-                >
-                  <Image 
-                    source={{ uri: community.icon }} 
-                    style={styles.communityIcon}
-                    defaultSource={require("../assets/placeholder-community.png")} 
-                  />
-                  <Text style={styles.communityName}>{community.name}</Text>
-                </TouchableOpacity>
-              ))
-            ) : (
-              <View style={styles.emptyCommunities}>
-                <Ionicons name="people-outline" size={32} color={COLORS.textSecondary} />
-                <Text style={styles.emptyText}>No communities joined</Text>
-              </View>
-            )}
-          </ScrollView>
+          <View style={styles.xpContainer}>
+            <View style={styles.xpHeader}>
+              <Text style={styles.xpTitle}>Level {profileData.level}</Text>
+              <Text style={styles.xpCount}>{profileData.xp_points}/100 XP</Text>
+            </View>
+            
+            <View style={styles.xpBarContainer}>
+              <View 
+                style={[
+                  styles.xpBar, 
+                  { width: `${profileData.xp_points}%` }
+                ]} 
+              />
+            </View>
+            
+            <Text style={styles.xpNextLevel}>
+              {100 - profileData.xp_points} XP to Level {profileData.level + 1}
+            </Text>
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
   );
-};
-
-// Helper function to format timestamps
-const formatTimeAgo = (timestamp: string) => {
-  const now = new Date();
-  const date = new Date(timestamp);
-  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-  
-  if (seconds < 60) return `${seconds} seconds ago`;
-  
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} minutes ago`;
-  
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} hours ago`;
-  
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days} days ago`;
-  
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months} months ago`;
-  
-  return `${Math.floor(months / 12)} years ago`;
 };
 
 const styles = StyleSheet.create({
@@ -449,31 +406,7 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginBottom: 16,
   },
-  userStats: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  statColumn: {
-    alignItems: "center",
-    paddingHorizontal: 20,
-  },
-  statDivider: {
-    width: 1,
-    height: 24,
-    backgroundColor: COLORS.border,
-  },
-  statValue: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: COLORS.text,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginTop: 2,
-  },
-  followButton: {
+  commendButton: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: COLORS.primary,
@@ -481,18 +414,42 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 20,
   },
-  followingButton: {
+  commendedButton: {
     backgroundColor: COLORS.background,
     borderWidth: 1,
     borderColor: COLORS.primary,
   },
-  followButtonText: {
+  commendButtonText: {
     color: COLORS.white,
     marginLeft: 4,
     fontWeight: "600",
   },
-  followingButtonText: {
+  commendedButtonText: {
     color: COLORS.primary,
+  },
+  statsContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-around",
+    padding: 16,
+    backgroundColor: COLORS.cardBackground,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  statItem: {
+    alignItems: "center",
+    width: "22%",
+  },
+  statValue: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: COLORS.text,
+    marginTop: 4,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginTop: 2,
   },
   sectionContainer: {
     backgroundColor: COLORS.cardBackground,
@@ -509,22 +466,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "700",
     color: COLORS.text,
-    marginBottom: 12,
-  },
-  bioText: {
-    fontSize: 14,
-    lineHeight: 20,
-    color: COLORS.text,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-  },
-  statGridItem: {
-    alignItems: 'center',
-    width: '30%',
-    marginBottom: 16
   },
   badgesContainer: {
     paddingBottom: 8,
@@ -556,78 +497,68 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: "center",
   },
-  postItem: {
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+  statsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
   },
-  postHeader: {
+  statsCard: {
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 16,
+    width: "48%",
+  },
+  statsCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  statsCardTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: COLORS.text,
+    marginLeft: 8,
+  },
+  statsCardValue: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: COLORS.primary,
+  },
+  xpContainer: {
+    padding: 16,
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+  },
+  xpHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     marginBottom: 8,
   },
-  postCommunity: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: COLORS.primary,
-  },
-  postTime: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-  },
-  postContent: {
-    fontSize: 14,
+  xpTitle: {
+    fontSize: 16,
+    fontWeight: "700",
     color: COLORS.text,
-    marginBottom: 12,
   },
-  postImage: {
-    width: "100%",
-    height: 150,
-    borderRadius: 8,
-    marginBottom: 12,
-  },
-  postActions: {
-    flexDirection: "row",
-  },
-  postAction: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginRight: 16,
-  },
-  actionText: {
-    fontSize: 12,
+  xpCount: {
+    fontSize: 14,
     color: COLORS.textSecondary,
-    marginLeft: 4,
   },
-  emptyPosts: {
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 20,
-  },
-  communitiesContainer: {
-    paddingBottom: 8,
-  },
-  communityItem: {
-    alignItems: "center",
-    marginRight: 16,
-    width: 80,
-  },
-  communityIcon: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+  xpBarContainer: {
+    height: 8,
+    backgroundColor: '#E0E0E0',
+    borderRadius: 4,
     marginBottom: 8,
   },
-  communityName: {
-    fontSize: 12,
-    textAlign: "center",
-    color: COLORS.text,
+  xpBar: {
+    height: 8,
+    backgroundColor: COLORS.primary,
+    borderRadius: 4,
   },
-  emptyCommunities: {
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 20,
-    width: "100%",
+  xpNextLevel: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: "center",
   },
 });
 
