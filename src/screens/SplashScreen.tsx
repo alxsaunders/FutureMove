@@ -33,7 +33,12 @@ const SplashScreen = () => {
         password
       );
       const user = userCredential.user;
-      navigation.navigate("Home", { username: user.displayName || "User" });
+
+      // Navigate to Main (tab navigation) instead of Home
+      navigation.navigate("Main");
+
+      // Store the username in global state or context if needed
+      // For example using AsyncStorage or a state management library
     } catch (error: any) {
       console.error("SIGNIN ERROR:", error.message);
       Alert.alert("Login Failed", error.message);
