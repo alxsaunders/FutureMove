@@ -6,24 +6,23 @@ import {
 } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
+import ENV from '../../env';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyA7bbNanaC5dDV3wnaLrU8HT-bySmVMUVU",
-  authDomain: "futuremove-86603.firebaseapp.com",
-  projectId: "futuremove-86603",
-  storageBucket: "futuremove-86603.firebasestorage.app",
-  messagingSenderId: "765249859918",
-  appId: "1:765249859918:web:f80304cebf58204de06e1f",
-  measurementId: "G-09284YZSRN",
+  apiKey: ENV.FIREBASE_API_KEY,
+  authDomain: ENV.FIREBASE_AUTH_DOMAIN,
+  projectId: ENV.FIREBASE_PROJECT_ID,
+  storageBucket: ENV.FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: ENV.FIREBASE_MESSAGING_SENDER_ID,
+  appId: ENV.FIREBASE_APP_ID,
+  measurementId: ENV.FIREBASE_MEASUREMENT_ID
 };
 
 const app = initializeApp(firebaseConfig);
 
-
 const auth = initializeAuth(app, {
   persistence: getReactNativePersistence(ReactNativeAsyncStorage)
 });
-
 
 const db = getFirestore(app);
 
