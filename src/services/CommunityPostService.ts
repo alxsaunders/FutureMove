@@ -10,11 +10,25 @@ const FALLBACK_USER_ID = "KbtY3t4Tatd0r5tCjnjlmJyNT5R2";
 // Get API base URL based on platform
 export const getApiBaseUrl = () => {
   if (Platform.OS === "android") {
-    return "http://10.0.2.2:3001/api";
+    return 'http://10.0.2.2:3001/api';
   } else {
     // For iOS or development on Mac
-    return "http://192.168.1.207:3001/api";
+    return 'http://192.168.1.207:3001/api';
   }
+};
+
+// Helper function to validate and normalize ID (handle both string and number)
+const validateId = (id: string | number): string | null => {
+  if (id === null || id === undefined) {
+    return null;
+  }
+  
+  const stringId = String(id).trim();
+  if (stringId === '' || stringId === 'null' || stringId === 'undefined') {
+    return null;
+  }
+  
+  return stringId;
 };
 
 // Helper function to get current user ID from Firebase with fallback
@@ -46,10 +60,10 @@ const transformPost = (post: any): Post | null => {
   try {
     // Transform the post with sensible defaults
     const transformedPost: Post = {
-      id: post.post_id || post.id,
-      communityId: post.community_id || post.communityId,
+      id: String(post.post_id || post.id),
+      communityId: String(post.community_id || post.communityId || ''),
       communityName: post.community_name || post.communityName || 'Unknown Community',
-      userId: post.user_id || post.userId,
+      userId: String(post.user_id || post.userId || ''),
       userName: post.user_name || post.userName || 'Anonymous User',
       userAvatar: post.user_avatar || post.userAvatar || post.profile_image || post.profileImage || "https://via.placeholder.com/150",
       content: post.content || post.text || '',
@@ -86,9 +100,9 @@ const transformComment = (comment: any): Comment | null => {
   try {
     // Transform the comment with sensible defaults
     const transformedComment: Comment = {
-      id: comment.comment_id || comment.id,
-      postId: comment.post_id || comment.postId,
-      userId: comment.user_id || comment.userId,
+      id: String(comment.comment_id || comment.id),
+      postId: String(comment.post_id || comment.postId || ''),
+      userId: String(comment.user_id || comment.userId || ''),
       userName: comment.user_name || comment.userName || 'Anonymous User',
       userAvatar: comment.user_avatar || comment.userAvatar || comment.profile_image || comment.profileImage || "https://via.placeholder.com/150",
       content: comment.content || comment.text || '',
@@ -215,17 +229,17 @@ export const fetchFeedPosts = async (userId?: string): Promise<Post[]> => {
 };
 
 // Fetch posts for a specific community
-export const fetchCommunityPosts = async (communityId: string): Promise<Post[]> => {
+export const fetchCommunityPosts = async (communityId: string | number): Promise<Post[]> => {
   try {
-    // Validate community ID
-    if (typeof communityId !== 'string' || communityId.trim() === '') {
-      console.warn('Invalid community ID for post fetch');
+    const validCommunityId = validateId(communityId);
+    if (!validCommunityId) {
+      console.warn('Invalid community ID for post fetch:', communityId);
       return [];
     }
     
     // Get user ID with fallback
     const userId = await getCurrentUserId();
-    console.log(`Fetching posts for community: ${communityId} with userId: ${userId}`);
+    console.log(`Fetching posts for community: ${validCommunityId} with userId: ${userId}`);
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
@@ -234,7 +248,7 @@ export const fetchCommunityPosts = async (communityId: string): Promise<Post[]> 
     const apiUrl = getApiBaseUrl();
     
     // Make sure we're using the right endpoint format
-    const res = await fetch(`${apiUrl}/posts/community/${communityId}?userId=${userId}`, {
+    const res = await fetch(`${apiUrl}/posts/community/${validCommunityId}?userId=${userId}`, {
       signal: controller.signal,
       headers: await getAuthHeaders()
     });
@@ -245,21 +259,21 @@ export const fetchCommunityPosts = async (communityId: string): Promise<Post[]> 
       console.warn(`Error fetching posts: ${res.status} ${res.statusText}`);
       
       if (res.status === 404) {
-        console.warn(`Community ${communityId} might not exist`);
+        console.warn(`Community ${validCommunityId} might not exist`);
       }
       
       throw new Error(`Failed to fetch community posts: ${res.status}`);
     }
     
     const data = await res.json();
-    console.log(`Raw data for community ${communityId}:`, data);
+    console.log(`Raw data for community ${validCommunityId}:`, data);
     
     // Transform posts and filter out any null values
     const validPosts = Array.isArray(data) 
       ? data.map(transformPost).filter(post => post !== null) as Post[]
       : [];
       
-    console.log(`Successfully fetched ${validPosts.length} posts for community ${communityId}`);
+    console.log(`Successfully fetched ${validPosts.length} posts for community ${validCommunityId}`);
     return validPosts;
   } catch (err) {
     console.error(`Error fetching posts for community: ${communityId}`, err);
@@ -269,20 +283,25 @@ export const fetchCommunityPosts = async (communityId: string): Promise<Post[]> 
 };
 
 // Fetch a single post by ID
-export const fetchPost = async (postId: string): Promise<Post | null> => {
+export const fetchPost = async (postId: string | number): Promise<Post | null> => {
   try {
-    // Validate postId
-    if (!postId || postId.trim() === '') {
+    const validPostId = validateId(postId);
+    if (!validPostId) {
       console.warn(`Invalid post ID: ${postId}`);
       return null;
     }
+    
+    console.log(`Fetching post with ID: ${validPostId}`);
+    
+    // Get user ID for the request
+    const userId = await getCurrentUserId();
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
     
     const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/posts/${postId}`, {
+    const res = await fetch(`${apiUrl}/posts/${validPostId}?userId=${userId}`, {
       signal: controller.signal,
       headers: await getAuthHeaders()
     });
@@ -291,7 +310,7 @@ export const fetchPost = async (postId: string): Promise<Post | null> => {
     
     // Handle different response status codes
     if (res.status === 404) {
-      console.warn(`Post not found with ID: ${postId}`);
+      console.warn(`Post not found with ID: ${validPostId}`);
       return null;
     }
     
@@ -301,16 +320,19 @@ export const fetchPost = async (postId: string): Promise<Post | null> => {
     }
     
     const data = await res.json();
+    console.log(`Raw post data for ID ${validPostId}:`, data);
+    
     const postData = data.post || data;
     
     // Enhanced validation: try to transform the post
     const post = transformPost(postData);
     
     if (!post) {
-      console.warn(`Invalid post data returned for ID: ${postId}`);
+      console.warn(`Invalid post data returned for ID: ${validPostId}`);
       return null;
     }
     
+    console.log(`Successfully fetched post: ${validPostId}`);
     return post;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
@@ -326,16 +348,14 @@ export const fetchPost = async (postId: string): Promise<Post | null> => {
 
 // Create a new post
 export const createPost = async (
-  communityId: string,
+  communityId: string | number,
   content: string,
   imageUri?: string | null
 ): Promise<Post | null> => {
   try {
-    console.log(`Creating new post in community: ${communityId}`);
-    
-    // Validate inputs
-    if (!communityId || communityId.trim() === '') {
-      console.warn('Invalid community ID for post creation');
+    const validCommunityId = validateId(communityId);
+    if (!validCommunityId) {
+      console.warn('Invalid community ID for post creation:', communityId);
       return null;
     }
     
@@ -343,6 +363,8 @@ export const createPost = async (
       console.warn('Empty content for post creation');
       return null;
     }
+    
+    console.log(`Creating new post in community: ${validCommunityId}`);
     
     // Get current user ID
     const currentUserId = await getCurrentUserId();
@@ -360,7 +382,7 @@ export const createPost = async (
       headers: await getAuthHeaders(),
       body: JSON.stringify({
         user_id: currentUserId,
-        community_id: communityId,
+        community_id: validCommunityId,
         content: content,
         image_url: finalImageUrl || null,
       }),
@@ -405,25 +427,25 @@ export const createPost = async (
 
 // Toggle like on a post
 export const toggleLikePost = async (
-  postId: string,
+  postId: string | number,
   isCurrentlyLiked: boolean
 ): Promise<boolean> => {
   try {
-    console.log(`Toggling like for post: ${postId}, currently liked: ${isCurrentlyLiked}`);
-    
-    // Validate inputs
-    if (!postId || postId.trim() === '') {
-      console.warn('Invalid post ID for like toggle');
+    const validPostId = validateId(postId);
+    if (!validPostId) {
+      console.warn('Invalid post ID for like toggle:', postId);
       return false;
     }
+    
+    console.log(`Toggling like for post: ${validPostId}, currently liked: ${isCurrentlyLiked}`);
     
     // Get user ID
     const currentUserId = await getCurrentUserId();
     
     // Determine endpoint based on current like status
     const endpoint = isCurrentlyLiked
-      ? `${getApiBaseUrl()}/posts/${postId}/unlike`
-      : `${getApiBaseUrl()}/posts/${postId}/like`;
+      ? `${getApiBaseUrl()}/posts/${validPostId}/unlike`
+      : `${getApiBaseUrl()}/posts/${validPostId}/like`;
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
@@ -450,7 +472,7 @@ export const toggleLikePost = async (
       return false;
     }
     
-    console.log(`Successfully toggled like for post: ${postId}`);
+    console.log(`Successfully toggled like for post: ${validPostId}`);
     return true;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
@@ -466,20 +488,25 @@ export const toggleLikePost = async (
 };
 
 // Fetch comments for a post
-export const fetchComments = async (postId: string): Promise<Comment[]> => {
+export const fetchComments = async (postId: string | number): Promise<Comment[]> => {
   try {
-    // Validate postId
-    if (!postId || postId.trim() === '') {
+    const validPostId = validateId(postId);
+    if (!validPostId) {
       console.warn(`Invalid post ID for comment fetch: ${postId}`);
       return [];
     }
+    
+    console.log(`Fetching comments for post: ${validPostId}`);
+    
+    // Get user ID for the request
+    const userId = await getCurrentUserId();
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
     
     const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/posts/${postId}/comments`, {
+    const res = await fetch(`${apiUrl}/posts/${validPostId}/comments?userId=${userId}`, {
       signal: controller.signal,
       headers: await getAuthHeaders()
     });
@@ -492,11 +519,13 @@ export const fetchComments = async (postId: string): Promise<Comment[]> => {
     }
     
     const data = await res.json();
+    console.log(`Raw comments data for post ${validPostId}:`, data);
     
     // Handle different response formats
     if (Array.isArray(data)) {
       // Transform comments and filter out any null values
       const validComments = data.map(transformComment).filter(comment => comment !== null) as Comment[];
+      console.log(`Successfully fetched ${validComments.length} comments for post ${validPostId}`);
       return validComments;
     }
     
@@ -504,6 +533,7 @@ export const fetchComments = async (postId: string): Promise<Comment[]> => {
     if (data.comments && Array.isArray(data.comments)) {
       // Transform comments and filter out any null values
       const validComments = data.comments.map(transformComment).filter(comment => comment !== null) as Comment[];
+      console.log(`Successfully fetched ${validComments.length} comments for post ${validPostId}`);
       return validComments;
     }
     
@@ -525,15 +555,13 @@ export const fetchComments = async (postId: string): Promise<Comment[]> => {
 
 // Create a comment on a post
 export const createComment = async (
-  postId: string,
+  postId: string | number,
   content: string
 ): Promise<Comment | null> => {
   try {
-    console.log(`Creating new comment on post: ${postId}`);
-    
-    // Validate inputs
-    if (!postId || postId.trim() === '') {
-      console.warn('Invalid post ID for comment creation');
+    const validPostId = validateId(postId);
+    if (!validPostId) {
+      console.warn('Invalid post ID for comment creation:', postId);
       return null;
     }
     
@@ -541,6 +569,8 @@ export const createComment = async (
       console.warn('Empty content for comment creation');
       return null;
     }
+    
+    console.log(`Creating new comment on post: ${validPostId}`);
     
     // Get user ID
     const currentUserId = await getCurrentUserId();
@@ -550,7 +580,7 @@ export const createComment = async (
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
     
     const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/posts/${postId}/comments`, {
+    const res = await fetch(`${apiUrl}/posts/${validPostId}/comments`, {
       method: 'POST',
       headers: await getAuthHeaders(),
       body: JSON.stringify({
@@ -598,25 +628,25 @@ export const createComment = async (
 
 // Toggle like on a comment
 export const toggleLikeComment = async (
-  commentId: string,
+  commentId: string | number,
   isCurrentlyLiked: boolean
 ): Promise<boolean> => {
   try {
-    console.log(`Toggling like for comment: ${commentId}, currently liked: ${isCurrentlyLiked}`);
-    
-    // Validate inputs
-    if (!commentId || commentId.trim() === '') {
-      console.warn('Invalid comment ID for like toggle');
+    const validCommentId = validateId(commentId);
+    if (!validCommentId) {
+      console.warn('Invalid comment ID for like toggle:', commentId);
       return false;
     }
+    
+    console.log(`Toggling like for comment: ${validCommentId}, currently liked: ${isCurrentlyLiked}`);
     
     // Get user ID
     const currentUserId = await getCurrentUserId();
     
     // Determine endpoint based on current like status
     const endpoint = isCurrentlyLiked
-      ? `${getApiBaseUrl()}/comments/${commentId}/unlike`
-      : `${getApiBaseUrl()}/comments/${commentId}/like`;
+      ? `${getApiBaseUrl()}/comments/${validCommentId}/unlike`
+      : `${getApiBaseUrl()}/comments/${validCommentId}/like`;
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
@@ -643,7 +673,7 @@ export const toggleLikeComment = async (
       return false;
     }
     
-    console.log(`Successfully toggled like for comment: ${commentId}`);
+    console.log(`Successfully toggled like for comment: ${validCommentId}`);
     return true;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
@@ -659,15 +689,15 @@ export const toggleLikeComment = async (
 };
 
 // Delete a post (owner or admin only)
-export const deletePost = async (postId: string): Promise<boolean> => {
+export const deletePost = async (postId: string | number): Promise<boolean> => {
   try {
-    console.log(`Deleting post: ${postId}`);
-    
-    // Validate inputs
-    if (!postId || postId.trim() === '') {
-      console.warn('Invalid post ID for deletion');
+    const validPostId = validateId(postId);
+    if (!validPostId) {
+      console.warn('Invalid post ID for deletion:', postId);
       return false;
     }
+    
+    console.log(`Deleting post: ${validPostId}`);
     
     // Get user ID
     const currentUserId = await getCurrentUserId();
@@ -677,7 +707,7 @@ export const deletePost = async (postId: string): Promise<boolean> => {
     const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
     
     const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/posts/${postId}`, {
+    const res = await fetch(`${apiUrl}/posts/${validPostId}`, {
       method: 'DELETE',
       headers: await getAuthHeaders(),
       body: JSON.stringify({ userId: currentUserId }),
@@ -698,7 +728,7 @@ export const deletePost = async (postId: string): Promise<boolean> => {
       return false;
     }
     
-    console.log(`Post deleted successfully: ${postId}`);
+    console.log(`Post deleted successfully: ${validPostId}`);
     return true;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
@@ -714,15 +744,15 @@ export const deletePost = async (postId: string): Promise<boolean> => {
 };
 
 // Delete a comment (owner or admin only)
-export const deleteComment = async (commentId: string): Promise<boolean> => {
+export const deleteComment = async (commentId: string | number): Promise<boolean> => {
   try {
-    console.log(`Deleting comment: ${commentId}`);
-    
-    // Validate inputs
-    if (!commentId || commentId.trim() === '') {
-      console.warn('Invalid comment ID for deletion');
+    const validCommentId = validateId(commentId);
+    if (!validCommentId) {
+      console.warn('Invalid comment ID for deletion:', commentId);
       return false;
     }
+    
+    console.log(`Deleting comment: ${validCommentId}`);
     
     // Get user ID
     const currentUserId = await getCurrentUserId();
@@ -732,7 +762,7 @@ export const deleteComment = async (commentId: string): Promise<boolean> => {
     const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
     
     const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/comments/${commentId}`, {
+    const res = await fetch(`${apiUrl}/comments/${validCommentId}`, {
       method: 'DELETE',
       headers: await getAuthHeaders(),
       body: JSON.stringify({ userId: currentUserId }),
@@ -753,7 +783,7 @@ export const deleteComment = async (commentId: string): Promise<boolean> => {
       return false;
     }
     
-    console.log(`Comment deleted successfully: ${commentId}`);
+    console.log(`Comment deleted successfully: ${validCommentId}`);
     return true;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
@@ -770,16 +800,14 @@ export const deleteComment = async (commentId: string): Promise<boolean> => {
 
 // Edit a post (owner only)
 export const editPost = async (
-  postId: string, 
+  postId: string | number, 
   content: string,
   imageUri?: string | null
 ): Promise<Post | null> => {
   try {
-    console.log(`Editing post: ${postId}`);
-    
-    // Validate inputs
-    if (!postId || postId.trim() === '') {
-      console.warn('Invalid post ID for edit');
+    const validPostId = validateId(postId);
+    if (!validPostId) {
+      console.warn('Invalid post ID for edit:', postId);
       return null;
     }
     
@@ -787,6 +815,8 @@ export const editPost = async (
       console.warn('Empty content for post edit');
       return null;
     }
+    
+    console.log(`Editing post: ${validPostId}`);
     
     // Get user ID
     const currentUserId = await getCurrentUserId();
@@ -799,7 +829,7 @@ export const editPost = async (
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
     
     const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/posts/${postId}`, {
+    const res = await fetch(`${apiUrl}/posts/${validPostId}`, {
       method: 'PUT',
       headers: await getAuthHeaders(),
       body: JSON.stringify({
@@ -848,15 +878,13 @@ export const editPost = async (
 
 // Edit a comment (owner only)
 export const editComment = async (
-  commentId: string, 
+  commentId: string | number, 
   content: string
 ): Promise<Comment | null> => {
   try {
-    console.log(`Editing comment: ${commentId}`);
-    
-    // Validate inputs
-    if (!commentId || commentId.trim() === '') {
-      console.warn('Invalid comment ID for edit');
+    const validCommentId = validateId(commentId);
+    if (!validCommentId) {
+      console.warn('Invalid comment ID for edit:', commentId);
       return null;
     }
     
@@ -864,6 +892,8 @@ export const editComment = async (
       console.warn('Empty content for comment edit');
       return null;
     }
+    
+    console.log(`Editing comment: ${validCommentId}`);
     
     // Get user ID
     const currentUserId = await getCurrentUserId();
@@ -873,7 +903,7 @@ export const editComment = async (
     const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
     
     const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/comments/${commentId}`, {
+    const res = await fetch(`${apiUrl}/comments/${validCommentId}`, {
       method: 'PUT',
       headers: await getAuthHeaders(),
       body: JSON.stringify({
@@ -921,15 +951,13 @@ export const editComment = async (
 
 // Report a post for inappropriate content
 export const reportPost = async (
-  postId: string,
+  postId: string | number,
   reason: string
 ): Promise<boolean> => {
   try {
-    console.log(`Reporting post: ${postId} with reason: ${reason}`);
-    
-    // Validate inputs
-    if (!postId || postId.trim() === '') {
-      console.warn('Invalid post ID for reporting');
+    const validPostId = validateId(postId);
+    if (!validPostId) {
+      console.warn('Invalid post ID for reporting:', postId);
       return false;
     }
     
@@ -937,6 +965,8 @@ export const reportPost = async (
       console.warn('Empty reason for reporting post');
       return false;
     }
+    
+    console.log(`Reporting post: ${validPostId} with reason: ${reason}`);
     
     // Get user ID
     const currentUserId = await getCurrentUserId();
@@ -946,7 +976,7 @@ export const reportPost = async (
     const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
     
     const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/posts/${postId}/report`, {
+    const res = await fetch(`${apiUrl}/posts/${validPostId}/report`, {
       method: 'POST',
       headers: await getAuthHeaders(),
       body: JSON.stringify({
@@ -970,7 +1000,7 @@ export const reportPost = async (
       return false;
     }
     
-    console.log(`Post reported successfully: ${postId}`);
+    console.log(`Post reported successfully: ${validPostId}`);
     return true;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
@@ -987,15 +1017,13 @@ export const reportPost = async (
 
 // Report a comment for inappropriate content
 export const reportComment = async (
-  commentId: string,
+  commentId: string | number,
   reason: string
 ): Promise<boolean> => {
   try {
-    console.log(`Reporting comment: ${commentId} with reason: ${reason}`);
-    
-    // Validate inputs
-    if (!commentId || commentId.trim() === '') {
-      console.warn('Invalid comment ID for reporting');
+    const validCommentId = validateId(commentId);
+    if (!validCommentId) {
+      console.warn('Invalid comment ID for reporting:', commentId);
       return false;
     }
     
@@ -1003,6 +1031,8 @@ export const reportComment = async (
       console.warn('Empty reason for reporting comment');
       return false;
     }
+    
+    console.log(`Reporting comment: ${validCommentId} with reason: ${reason}`);
     
     // Get user ID
     const currentUserId = await getCurrentUserId();
@@ -1012,7 +1042,7 @@ export const reportComment = async (
     const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
     
     const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/comments/${commentId}/report`, {
+    const res = await fetch(`${apiUrl}/comments/${validCommentId}/report`, {
       method: 'POST',
       headers: await getAuthHeaders(),
       body: JSON.stringify({
@@ -1036,7 +1066,7 @@ export const reportComment = async (
       return false;
     }
     
-    console.log(`Comment reported successfully: ${commentId}`);
+    console.log(`Comment reported successfully: ${validCommentId}`);
     return true;
   } catch (err) {
     // Handle fetch timeout/abort error specifically

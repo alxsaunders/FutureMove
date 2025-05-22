@@ -11,7 +11,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyA7bbNanaC5dDV3wnaLrU8HT-bySmVMUVU",
   authDomain: "futuremove-86603.firebaseapp.com",
   projectId: "futuremove-86603",
-  storageBucket: "futuremove-86603.appspot.com",
+  storageBucket: "futuremove-86603.firebasestorage.app",
   messagingSenderId: "765249859918",
   appId: "1:765249859918:web:f80304cebf58204de06e1f",
   measurementId: "G-09284YZSRN",

@@ -78,7 +78,6 @@ const CommunityMyFeedTab = () => {
       console.log(`User found from Firebase: ${resolvedUserId}`);
     }
     // As a last resort, use the fallback ID
-    
 
     setUserId(resolvedUserId);
     setAuthChecked(true);
@@ -204,6 +203,16 @@ const CommunityMyFeedTab = () => {
     }
   };
 
+  // Navigate to post detail with proper string conversion
+  const navigateToPostDetail = useCallback(
+    (postId: string | number) => {
+      const stringPostId = String(postId);
+      console.log(`Navigating to PostDetail with postId: ${stringPostId}`);
+      navigation.navigate("PostDetail", { postId: stringPostId });
+    },
+    [navigation]
+  );
+
   // Login View for unauthenticated users
   const LoginRequiredView = () => (
     <View style={styles.emptyContainer}>
@@ -287,12 +296,8 @@ const CommunityMyFeedTab = () => {
             <CommunityPostItem
               post={item}
               onLikePress={() => toggleLikePost(item.id)}
-              onCommentPress={() => {
-                navigation.navigate("PostDetail", { postId: item.id });
-              }}
-              onPostPress={() => {
-                navigation.navigate("PostDetail", { postId: item.id });
-              }}
+              onCommentPress={() => navigateToPostDetail(item.id)}
+              onPostPress={() => navigateToPostDetail(item.id)}
             />
           )}
           keyExtractor={(item) => item.id}

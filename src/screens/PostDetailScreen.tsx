@@ -12,6 +12,7 @@ import {
   Platform,
   ActivityIndicator,
   Keyboard,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,134 +20,164 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import { COLORS } from "../common/constants/colors";
 import { useAuth } from "../contexts/AuthContext";
 import { Post, Comment } from "../types";
-
-// Mock data for a single post
-const MOCK_POST: Post = {
-  id: "1",
-  communityId: "2",
-  communityName: "Tech Learners",
-  userId: "user1",
-  userName: "Alex Johnson",
-  userAvatar: "https://randomuser.me/api/portraits/men/32.jpg",
-  content:
-    "Just completed my first React Native app! It's a simple todo list but I'm really proud of it. Anyone have suggestions for what I should build next?",
-  image: "https://via.placeholder.com/400x300/5E6CE7/FFFFFF?text=My+First+App",
-  createdAt: "2025-05-01T10:30:00Z",
-  likes: 24,
-  comments: 8,
-  isLiked: false,
-};
-
-// Mock data for comments
-const MOCK_COMMENTS: Comment[] = [
-  {
-    id: "c1",
-    postId: "1",
-    userId: "user2",
-    userName: "Sarah Miller",
-    userAvatar: "https://randomuser.me/api/portraits/women/44.jpg",
-    content:
-      "Congratulations! That's a great first project. I'd recommend trying a weather app next - it's a good way to practice API integration.",
-    createdAt: "2025-05-01T11:15:00Z",
-    likes: 5,
-    isLiked: true,
-  },
-  {
-    id: "c2",
-    postId: "1",
-    userId: "user3",
-    userName: "David Chen",
-    userAvatar: "https://randomuser.me/api/portraits/men/62.jpg",
-    content:
-      "Nice work! Maybe try building a simple game next? Something like Tic-Tac-Toe could help you understand state management better.",
-    createdAt: "2025-05-01T12:45:00Z",
-    likes: 3,
-    isLiked: false,
-  },
-  {
-    id: "c3",
-    postId: "1",
-    userId: "user4",
-    userName: "Priya Sharma",
-    userAvatar: "https://randomuser.me/api/portraits/women/28.jpg",
-    content:
-      "Great job on your first app! I'd suggest a note-taking app with local storage - it'll teach you about persisting data between sessions.",
-    createdAt: "2025-05-01T14:20:00Z",
-    likes: 2,
-    isLiked: false,
-  },
-  {
-    id: "c4",
-    postId: "1",
-    userId: "user5",
-    userName: "Marcus Wright",
-    userAvatar: "https://randomuser.me/api/portraits/men/22.jpg",
-    content:
-      "Congrats! How about a habit tracker? It would be perfect for this community and you could add some nice charts for visualization.",
-    createdAt: "2025-05-01T15:10:00Z",
-    likes: 7,
-    isLiked: true,
-  },
-];
+import {
+  fetchPost,
+  fetchComments,
+  createComment,
+  toggleLikePost,
+  toggleLikeComment,
+  fetchCommunityPosts,
+} from "../services/CommunityPostService";
+import { fetchJoinedCommunities } from "../services/CommunityService";
 
 const PostDetailScreen = () => {
   const { currentUser } = useAuth();
   const navigation = useNavigation();
   const route = useRoute();
-  const { postId } = route.params as { postId: string };
+  const { postId: rawPostId } = route.params as { postId: string | number };
+
+  // Ensure postId is always a string
+  const postId = String(rawPostId);
   const [post, setPost] = useState<Post | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const commentInputRef = useRef<TextInput>(null);
 
   // Fetch post and comments
   useEffect(() => {
-    const fetchPostData = async () => {
-      setIsLoading(true);
-      try {
-        // In a real app, these would be API calls
-        // Simulating API calls with timeouts
-        await new Promise((resolve) => setTimeout(resolve, 800));
-
-        // For now, using mock data
-        setPost(MOCK_POST);
-        setComments(MOCK_COMMENTS);
-      } catch (error) {
-        console.error("Error fetching post details:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     fetchPostData();
   }, [postId]);
 
+  const fetchPostData = async () => {
+    setIsLoading(true);
+    try {
+      console.log(`Fetching post data for postId: ${postId}`);
+
+      // Fetch post and comments in parallel
+      const [postData, commentsData] = await Promise.all([
+        fetchPost(postId),
+        fetchComments(postId),
+      ]);
+
+      if (postData) {
+        setPost(postData);
+        console.log(`Successfully fetched post: ${postData.id}`);
+      } else {
+        console.warn(`Post not found for ID: ${postId}`);
+        Alert.alert(
+          "Post Not Found",
+          "This post may have been deleted or doesn't exist.",
+          [
+            {
+              text: "Go Back",
+              onPress: () => navigation.goBack(),
+            },
+          ]
+        );
+      }
+
+      setComments(commentsData);
+      console.log(`Successfully fetched ${commentsData.length} comments`);
+    } catch (error) {
+      console.error("Error fetching post details:", error);
+      Alert.alert("Error", "Failed to load post details. Please try again.", [
+        {
+          text: "Retry",
+          onPress: fetchPostData,
+        },
+        {
+          text: "Go Back",
+          onPress: () => navigation.goBack(),
+        },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Refresh data
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await fetchPostData();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   // Toggle like on post
-  const toggleLikePost = () => {
+  const handleToggleLikePost = async () => {
     if (!post) return;
+
+    // Optimistic update
+    const wasLiked = post.isLiked;
+    const newLikesCount = wasLiked ? post.likes - 1 : post.likes + 1;
 
     setPost({
       ...post,
-      isLiked: !post.isLiked,
-      likes: post.isLiked ? post.likes - 1 : post.likes + 1,
+      isLiked: !wasLiked,
+      likes: newLikesCount,
     });
+
+    try {
+      const success = await toggleLikePost(post.id, wasLiked);
+
+      if (!success) {
+        // Revert optimistic update on failure
+        setPost({
+          ...post,
+          isLiked: wasLiked,
+          likes: post.likes,
+        });
+        Alert.alert("Error", "Failed to update like. Please try again.");
+      }
+    } catch (error) {
+      // Revert optimistic update on error
+      setPost({
+        ...post,
+        isLiked: wasLiked,
+        likes: post.likes,
+      });
+      console.error("Error toggling post like:", error);
+    }
   };
 
   // Toggle like on comment
-  const toggleLikeComment = (commentId: string) => {
-    setComments((prevComments) =>
-      prevComments.map((comment) =>
-        comment.id === commentId
-          ? {
-              ...comment,
-              isLiked: !comment.isLiked,
-              likes: comment.isLiked ? comment.likes - 1 : comment.likes + 1,
-            }
-          : comment
-      )
-    );
+  const handleToggleLikeComment = async (commentId: string) => {
+    const commentIndex = comments.findIndex((c) => c.id === commentId);
+    if (commentIndex === -1) return;
+
+    const comment = comments[commentIndex];
+    const wasLiked = comment.isLiked;
+    const newLikesCount = wasLiked ? comment.likes - 1 : comment.likes + 1;
+
+    // Optimistic update
+    const updatedComments = [...comments];
+    updatedComments[commentIndex] = {
+      ...comment,
+      isLiked: !wasLiked,
+      likes: newLikesCount,
+    };
+    setComments(updatedComments);
+
+    try {
+      const success = await toggleLikeComment(commentId, wasLiked);
+
+      if (!success) {
+        // Revert optimistic update on failure
+        updatedComments[commentIndex] = comment;
+        setComments(updatedComments);
+        Alert.alert("Error", "Failed to update like. Please try again.");
+      }
+    } catch (error) {
+      // Revert optimistic update on error
+      updatedComments[commentIndex] = comment;
+      setComments(updatedComments);
+      console.error("Error toggling comment like:", error);
+    }
   };
 
   // Submit new comment
@@ -156,37 +187,35 @@ const PostDetailScreen = () => {
     setIsSubmitting(true);
 
     try {
-      // In a real app, this would be an API call to create a comment
-      // Simulate API request with timeout
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      const comment = await createComment(post.id, newComment.trim());
 
-      // Create new comment
-      const newCommentObj: Comment = {
-        id: `c${comments.length + 1}`,
-        postId: post.id,
-        userId: currentUser.id,
-        userName: currentUser.username || "Anonymous User",
-        userAvatar: "https://via.placeholder.com/150",
-        content: newComment.trim(),
-        createdAt: new Date().toISOString(),
-        likes: 0,
-        isLiked: false,
-      };
+      if (comment) {
+        // Add new comment to the list
+        setComments((prevComments) => [...prevComments, comment]);
 
-      // Add to comment list and update post comment count
-      setComments([...comments, newCommentObj]);
-      setPost({
-        ...post,
-        comments: post.comments + 1,
-      });
+        // Update post comment count
+        setPost((prevPost) =>
+          prevPost
+            ? {
+                ...prevPost,
+                comments: prevPost.comments + 1,
+              }
+            : null
+        );
 
-      // Clear input
-      setNewComment("");
+        // Clear input
+        setNewComment("");
+
+        // Show success feedback
+        console.log("Comment posted successfully");
+      } else {
+        Alert.alert("Error", "Failed to post comment. Please try again.");
+      }
     } catch (error) {
       console.error("Error posting comment:", error);
+      Alert.alert("Error", "Failed to post comment. Please try again.");
     } finally {
       setIsSubmitting(false);
-      // Dismiss keyboard
       Keyboard.dismiss();
     }
   };
@@ -231,7 +260,7 @@ const PostDetailScreen = () => {
         <View style={styles.commentActions}>
           <TouchableOpacity
             style={styles.commentAction}
-            onPress={() => toggleLikeComment(item.id)}
+            onPress={() => handleToggleLikeComment(item.id)}
           >
             <Ionicons
               name={item.isLiked ? "heart" : "heart-outline"}
@@ -301,8 +330,12 @@ const PostDetailScreen = () => {
             <Ionicons name="arrow-back" size={24} color={COLORS.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{post.communityName}</Text>
-          <TouchableOpacity>
-            <Ionicons name="ellipsis-vertical" size={20} color={COLORS.text} />
+          <TouchableOpacity onPress={handleRefresh}>
+            <Ionicons
+              name="refresh"
+              size={20}
+              color={isRefreshing ? COLORS.primary : COLORS.text}
+            />
           </TouchableOpacity>
         </View>
 
@@ -310,6 +343,8 @@ const PostDetailScreen = () => {
           data={comments}
           renderItem={renderCommentItem}
           keyExtractor={(item) => item.id}
+          refreshing={isRefreshing}
+          onRefresh={handleRefresh}
           ListHeaderComponent={() => (
             <View style={styles.postContainer}>
               {/* Post Header */}
@@ -343,7 +378,7 @@ const PostDetailScreen = () => {
               <View style={styles.postActions}>
                 <TouchableOpacity
                   style={styles.actionButton}
-                  onPress={toggleLikePost}
+                  onPress={handleToggleLikePost}
                 >
                   <Ionicons
                     name={post.isLiked ? "heart" : "heart-outline"}
@@ -412,7 +447,8 @@ const PostDetailScreen = () => {
         <View style={styles.commentInputContainer}>
           <Image
             source={{
-              uri: "https://via.placeholder.com/150",
+              uri:
+                currentUser?.profileImage || "https://via.placeholder.com/150",
             }}
             style={styles.currentUserAvatar}
             defaultSource={require("../assets/default-avatar.png")}

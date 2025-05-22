@@ -1,6 +1,6 @@
 // src/services/UserService.ts
 
-const API_URL = 'http://192.168.1.207:3001/api'; // Emulator localhost
+const API_URL = "http://10.0.2.2:3001/api"; // Emulator localhost
 
 /**
  * Updates a user's coin balance

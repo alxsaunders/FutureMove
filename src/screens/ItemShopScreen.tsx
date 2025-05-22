@@ -25,7 +25,7 @@ const screenWidth = Dimensions.get("window").width;
 const API_URL =
   Platform.OS === "android"
     ? "http://10.0.2.2:3001/api"
-    : "http://192.168.1.207:3001/api";
+    : "http://10.0.2.2:3001/api";;
 
 // EMERGENCY FALLBACK - replace with a valid user ID from your database
 const FALLBACK_USER_ID = "KbtY3t4Tatd0r5tCjnjlmJyNT5R2";

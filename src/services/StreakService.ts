@@ -1,7 +1,7 @@
 // src/services/StreakService.ts
 import { Streak } from '../types';
 
-const API_URL = 'http://192.168.1.207:3001/api'; // Emulator localhost
+const API_URL = "http://10.0.2.2:3001/api"; // Emulator localhost
 
 /**
  * Fetches a user's streak data
