@@ -29,6 +29,7 @@ import {
   fetchCommunityPosts,
 } from "../services/CommunityPostService";
 import { fetchJoinedCommunities } from "../services/CommunityService";
+import UserProfileModal from "../components/UserProfileModal";
 
 const PostDetailScreen = () => {
   const { currentUser } = useAuth();
@@ -45,6 +46,10 @@ const PostDetailScreen = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const commentInputRef = useRef<TextInput>(null);
+
+  // Modal state
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<string>("");
 
   // Fetch post and comments
   useEffect(() => {
@@ -106,6 +111,13 @@ const PostDetailScreen = () => {
     } finally {
       setIsRefreshing(false);
     }
+  };
+
+  // Handle user profile click
+  const handleUserProfileClick = (userId: string) => {
+    if (!userId) return;
+    setSelectedUserId(userId);
+    setProfileModalVisible(true);
   };
 
   // Toggle like on post
@@ -182,7 +194,7 @@ const PostDetailScreen = () => {
 
   // Submit new comment
   const handleSubmitComment = async () => {
-    if (!newComment.trim() || !currentUser || !post) return;
+    // if (!newComment.trim() || !currentUser || !post) return;
 
     setIsSubmitting(true);
 
@@ -246,14 +258,24 @@ const PostDetailScreen = () => {
   // Render comment item
   const renderCommentItem = ({ item }: { item: Comment }) => (
     <View style={styles.commentItem}>
-      <Image
-        source={{ uri: item.userAvatar }}
-        style={styles.commentAvatar}
-        defaultSource={require("../assets/default-avatar.png")}
-      />
+      <TouchableOpacity
+        onPress={() => handleUserProfileClick(item.userId)}
+        activeOpacity={0.7}
+      >
+        <Image
+          source={{ uri: item.userAvatar }}
+          style={styles.commentAvatar}
+          defaultSource={require("../assets/default-avatar.png")}
+        />
+      </TouchableOpacity>
       <View style={styles.commentContent}>
         <View style={styles.commentHeader}>
-          <Text style={styles.commentUserName}>{item.userName}</Text>
+          <TouchableOpacity
+            onPress={() => handleUserProfileClick(item.userId)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.commentUserName}>{item.userName}</Text>
+          </TouchableOpacity>
           <Text style={styles.commentTime}>{formatDate(item.createdAt)}</Text>
         </View>
         <Text style={styles.commentText}>{item.content}</Text>
@@ -276,14 +298,14 @@ const PostDetailScreen = () => {
               {item.likes}
             </Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.commentAction}>
+          {/* <TouchableOpacity style={styles.commentAction}>
             <Ionicons
               name="chatbubble-outline"
               size={16}
               color={COLORS.textSecondary}
             />
             <Text style={styles.commentActionText}>Reply</Text>
-          </TouchableOpacity>
+          </TouchableOpacity> */}
         </View>
       </View>
     </View>
@@ -349,17 +371,23 @@ const PostDetailScreen = () => {
             <View style={styles.postContainer}>
               {/* Post Header */}
               <View style={styles.postHeader}>
-                <Image
-                  source={{ uri: post.userAvatar }}
-                  style={styles.avatar}
-                  defaultSource={require("../assets/default-avatar.png")}
-                />
-                <View style={styles.postHeaderInfo}>
-                  <Text style={styles.userName}>{post.userName}</Text>
-                  <Text style={styles.postTime}>
-                    {formatDate(post.createdAt)}
-                  </Text>
-                </View>
+                <TouchableOpacity
+                  onPress={() => handleUserProfileClick(post.userId)}
+                  activeOpacity={0.7}
+                  style={styles.postHeaderClickable}
+                >
+                  <Image
+                    source={{ uri: post.userAvatar }}
+                    style={styles.avatar}
+                    defaultSource={require("../assets/default-avatar.png")}
+                  />
+                  <View style={styles.postHeaderInfo}>
+                    <Text style={styles.userName}>{post.userName}</Text>
+                    <Text style={styles.postTime}>
+                      {formatDate(post.createdAt)}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
               </View>
 
               {/* Post Content */}
@@ -476,6 +504,13 @@ const PostDetailScreen = () => {
             )}
           </TouchableOpacity>
         </View>
+
+        {/* User Profile Modal */}
+        <UserProfileModal
+          visible={profileModalVisible}
+          onClose={() => setProfileModalVisible(false)}
+          userId={selectedUserId}
+        />
       </SafeAreaView>
     </KeyboardAvoidingView>
   );
@@ -541,9 +576,11 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   postHeader: {
+    marginBottom: 12,
+  },
+  postHeaderClickable: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 12,
   },
   avatar: {
     width: 40,
@@ -705,6 +742,44 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     backgroundColor: COLORS.border,
+  },
+  loginPromptContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    backgroundColor: COLORS.cardBackground,
+  },
+  loginPromptText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    flex: 1,
+  },
+  loginButton: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+    marginLeft: 12,
+  },
+  loginButtonText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  debugInfo: {
+    position: "absolute",
+    bottom: -30,
+    left: 0,
+    right: 0,
+    backgroundColor: "rgba(255, 0, 0, 0.1)",
+    padding: 4,
+  },
+  debugText: {
+    fontSize: 10,
+    color: "red",
   },
 });
 

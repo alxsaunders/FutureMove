@@ -24,7 +24,7 @@ export type RootStackParamList = {
   };
   Community: undefined;
   Communities: undefined; // Added Communities screen
-
+  Achievements: undefined; // ← ADDED: Achievements screen
   ItemShop: NavigatorScreenParams<ItemShopStackParamList> | { userId?: string; forceRefresh?: number };
   Profile: { userId?: string; forceRefresh?: number }; // Updated to include userId
 
@@ -97,6 +97,7 @@ export type ItemShopScreenNavigationProp = StackNavigationProp<RootStackParamLis
 export type ProfileScreenNavigationProp = StackNavigationProp<RootStackParamList, "Profile">;
 export type CommunitiesScreenNavigationProp = StackNavigationProp<RootStackParamList, "Communities">;
 export type UserProfileScreenNavigationProp = StackNavigationProp<RootStackParamList, "UserProfile">;
+export type AchievementsScreenNavigationProp = StackNavigationProp<RootStackParamList, "Achievements">; // ← ADDED: Achievements navigation prop
 
 // Root Stack Route Props
 export type HomeScreenRouteProp = RouteProp<RootStackParamList, "Home">;
@@ -106,6 +107,7 @@ export type ItemShopScreenRouteProp = RouteProp<RootStackParamList, "ItemShop">;
 export type ProfileScreenRouteProp = RouteProp<RootStackParamList, "Profile">;
 export type CommunitiesScreenRouteProp = RouteProp<RootStackParamList, "Communities">;
 export type UserProfileScreenRouteProp = RouteProp<RootStackParamList, "UserProfile">;
+export type AchievementsScreenRouteProp = RouteProp<RootStackParamList, "Achievements">; // ← ADDED: Achievements route prop
 
 // Community related screen props
 export type CommunityScreenNavigationProp = StackNavigationProp<RootStackParamList, "Community">;
@@ -171,6 +173,12 @@ export type ProfileScreenProps = {
 export type UserProfileScreenProps = {
   navigation: UserProfileScreenNavigationProp;
   route: UserProfileScreenRouteProp;
+};
+
+// ← ADDED: Achievements screen props
+export type AchievementsScreenProps = {
+  navigation: AchievementsScreenNavigationProp;
+  route: AchievementsScreenRouteProp;
 };
 
 // Combined Screen Props

@@ -91,8 +91,9 @@ const transformComment = (comment: any): Comment | null => {
     return null;
   }
 
-  // Check for essential fields
-  if (!comment.comment_id && !comment.id) {
+  // Check for essential fields - be more flexible with field names
+  const commentId = comment.comment_id || comment.id;
+  if (!commentId) {
     console.warn('Comment missing ID field:', comment);
     return null;
   }
@@ -100,10 +101,10 @@ const transformComment = (comment: any): Comment | null => {
   try {
     // Transform the comment with sensible defaults
     const transformedComment: Comment = {
-      id: String(comment.comment_id || comment.id),
+      id: String(commentId),
       postId: String(comment.post_id || comment.postId || ''),
       userId: String(comment.user_id || comment.userId || ''),
-      userName: comment.user_name || comment.userName || 'Anonymous User',
+      userName: comment.user_name || comment.userName || comment.username || 'Anonymous User',
       userAvatar: comment.user_avatar || comment.userAvatar || comment.profile_image || comment.profileImage || "https://via.placeholder.com/150",
       content: comment.content || comment.text || '',
       createdAt: comment.created_at || comment.createdAt || new Date().toISOString(),
@@ -112,6 +113,7 @@ const transformComment = (comment: any): Comment | null => {
       isLiked: comment.is_liked === 1 || comment.isLiked === true,
     };
 
+    console.log('Transformed comment:', transformedComment);
     return transformedComment;
   } catch (error) {
     console.error('Error transforming comment data:', error);
@@ -585,7 +587,7 @@ export const createComment = async (
       headers: await getAuthHeaders(),
       body: JSON.stringify({
         user_id: currentUserId,
-        content: content,
+        content: content.trim(),
       }),
       signal: controller.signal
     });
@@ -594,11 +596,23 @@ export const createComment = async (
     
     if (!res.ok) {
       console.warn(`Error creating comment: ${res.status} ${res.statusText}`);
+      
+      // Log the response text for debugging
+      try {
+        const errorText = await res.text();
+        console.error(`Comment creation error response: ${errorText}`);
+      } catch (e) {
+        console.error('Could not read error response');
+      }
+      
       throw new Error(`Failed to create comment: ${res.status} ${res.statusText}`);
     }
     
     try {
       const data = await res.json();
+      console.log('Comment creation response:', data);
+      
+      // The backend might return the comment directly or wrapped in a response object
       const commentData = data.comment || data;
       
       // Transform comment data
@@ -609,6 +623,7 @@ export const createComment = async (
         return null;
       }
       
+      console.log('Successfully created comment:', comment);
       return comment;
     } catch (parseError) {
       console.error('Error parsing comment creation response:', parseError);

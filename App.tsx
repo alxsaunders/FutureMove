@@ -62,6 +62,7 @@ import { AuthProvider, useAuth } from "./src/contexts/AuthContext";
 // Import screens
 import SplashScreen from "./src/screens/SplashScreen";
 import SignUpScreen from "./src/screens/SignUpScreen";
+import AchievementsScreen from "./src/screens/AchievementsScreen"; // ← ADDED: Achievement screen import
 import { RootStackParamList } from "./src/types/navigaton";
 
 // Import bottom tab navigator
@@ -84,6 +85,7 @@ const AppContent = () => {
         <Stack.Screen name="Splash" component={SplashScreen} />
         <Stack.Screen name="SignUp" component={SignUpScreen} />
         <Stack.Screen name="Main" component={BottomTabNavigator} />
+        <Stack.Screen name="Achievements" component={AchievementsScreen} /> 
       </Stack.Navigator>
     </NavigationContainer>
   );

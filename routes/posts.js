@@ -504,6 +504,8 @@ module.exports = (pool, authenticateFirebaseToken) => {
         return res.status(400).json({ error: 'User ID is required', success: false });
       }
       
+      console.log(`Fetching comments for post ${postId} for user ${userId}`);
+      
       // Check if post exists
       const [postRows] = await pool.execute(
         'SELECT post_id FROM posts WHERE post_id = ?',
@@ -514,10 +516,31 @@ module.exports = (pool, authenticateFirebaseToken) => {
         return res.status(404).json({ error: 'Post not found', success: false });
       }
       
-      // Get comments for the post
-      const [rows] = await pool.execute('CALL get_post_comments(?, ?)', [postId, userId]);
+      // Get comments for the post with proper joins
+      const [rows] = await pool.execute(
+        `SELECT 
+          c.comment_id,
+          c.post_id,
+          c.user_id,
+          c.content,
+          c.created_at,
+          c.updated_at,
+          u.username as user_name,
+          u.profile_image as user_avatar,
+          COUNT(DISTINCT cl.user_id) as likes_count,
+          MAX(CASE WHEN cl_user.user_id IS NOT NULL THEN 1 ELSE 0 END) as is_liked
+        FROM comments c
+        LEFT JOIN users u ON c.user_id = u.user_id
+        LEFT JOIN comment_likes cl ON c.comment_id = cl.comment_id
+        LEFT JOIN comment_likes cl_user ON c.comment_id = cl_user.comment_id AND cl_user.user_id = ?
+        WHERE c.post_id = ?
+        GROUP BY c.comment_id, c.post_id, c.user_id, c.content, c.created_at, c.updated_at, u.username, u.profile_image
+        ORDER BY c.created_at ASC`,
+        [userId, postId]
+      );
       
-      res.json(rows[0]);
+      console.log(`Successfully fetched ${rows.length} comments for post ${postId}`);
+      res.json(rows);
     } catch (error) {
       handleError(res, error, 'Error fetching comments');
     }

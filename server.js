@@ -69,14 +69,16 @@ const communityRoutes = require('./routes/community')(pool, authenticateFirebase
 const postsRoutes = require('./routes/posts')(pool, authenticateFirebaseToken);
 const commentsRoutes = require('./routes/comments')(pool, authenticateFirebaseToken);
 const itemShopRouter = require('./routes/itemshop')(pool, authenticateFirebaseToken);
-const profileRoutes = require('./routes/profile')(pool, authenticateFirebaseToken); // Add this line
+const profileRoutes = require('./routes/profile')(pool, authenticateFirebaseToken);
+const achievementRoutes = require('./routes/achievements')(pool, authenticateFirebaseToken); // Add this line
 
 // Use route modules
 app.use('/api/communities', communityRoutes);
 app.use('/api/posts', postsRoutes);
 app.use('/api/comments', commentsRoutes);
 app.use('/api/items', itemShopRouter);  // Mount at /api/items instead of /api
-app.use('/api/profile', profileRoutes);  // Add this line // Mount at /api/items instead of /api
+app.use('/api/profile', profileRoutes); 
+app.use('/api/achievements', achievementRoutes); // Add this line // Mount at /api/items instead of /api
 
 // ==== USER ROUTES ====
 
