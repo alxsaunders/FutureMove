@@ -305,7 +305,7 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   badges.map((badge, index) => (
                     <View key={index} style={styles.badgeItem}>
                       <Image
-                        source={{ uri: badge.icon }}
+                        source={badge.icon}
                         style={styles.badgeIcon}
                         defaultSource={require("../assets/images/placeholder-badge.png")}
                       />
@@ -407,7 +407,7 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
                       <Text style={styles.statsCardTitle}>Longest Streak</Text>
                     </View>
                     <Text style={styles.statsCardValue}>
-                      {stats.longest_streak || 0}
+                      {stats.longestStreak || 0}
                     </Text>
                   </View>
                 </View>
