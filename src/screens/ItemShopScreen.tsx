@@ -25,7 +25,7 @@ const screenWidth = Dimensions.get("window").width;
 const API_URL =
   Platform.OS === "android"
     ? "http://10.0.2.2:3001/api"
-    : "http://10.0.2.2:3001/api";;
+    : "http://10.0.2.2:3001/api";
 
 // EMERGENCY FALLBACK - replace with a valid user ID from your database
 const FALLBACK_USER_ID = "KbtY3t4Tatd0r5tCjnjlmJyNT5R2";
@@ -604,8 +604,8 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255, 255, 255, 0.3)",
   },
   coinIconLarge: {
-    width: 20,
-    height: 20,
+    width: 34, // Increased from 20
+    height: 34, // Increased from 20
     marginRight: 8,
   },
   coinsText: {
@@ -619,8 +619,8 @@ const styles = StyleSheet.create({
     marginVertical: 5,
   },
   coinIcon: {
-    width: 14,
-    height: 14,
+    width: 30, // Increased from 14
+    height: 30, // Increased from 14
     marginRight: 4,
   },
   // Tab Navigation
@@ -773,8 +773,8 @@ const styles = StyleSheet.create({
     marginVertical: 15,
   },
   modalCoinIcon: {
-    width: 20,
-    height: 20,
+    width: 44, // Increased from 20
+    height: 44, // Increased from 20
     marginRight: 8,
   },
   modalPrice: {

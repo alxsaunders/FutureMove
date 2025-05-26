@@ -12,6 +12,7 @@ import {
   Switch,
   ScrollView,
   ActivityIndicator,
+  Image,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { GoalsScreenProps } from "../types/navigaton";
@@ -242,7 +243,6 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
       setIsRefreshing(false);
     }
   };
-  
 
   // Check if route params request to open create goal form
   useEffect(() => {
@@ -251,9 +251,7 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
       // Reset the param to avoid reopening
       navigation.setParams({ openCreateGoal: undefined });
     }
-    
   }, [route.params?.openCreateGoal]);
-  
 
   // Use the useFocusEffect hook to refresh data when screen comes into focus
   useFocusEffect(
@@ -437,25 +435,23 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
 
     try {
       // Create a new goal using the service
-      const newGoal = await createGoal(
-        {
-          title: newGoalTitle,
-          description: newGoalDescription,
-          category: newGoalCategory,
-          isCompleted: false,
-          isDaily: newGoalIsDaily,
-          color: getCategoryColor(newGoalCategory),
-          startDate: new Date().toISOString().split("T")[0],
-          progress: 0,
-          userId: userId,
-          coinReward: 10, // Default reward
-          routineDays: newGoalIsDaily
-            ? newGoalSelectedDays.length > 0
-              ? newGoalSelectedDays
-              : [0, 1, 2, 3, 4, 5, 6]
-            : [],
-        },
-      );
+      const newGoal = await createGoal({
+        title: newGoalTitle,
+        description: newGoalDescription,
+        category: newGoalCategory,
+        isCompleted: false,
+        isDaily: newGoalIsDaily,
+        color: getCategoryColor(newGoalCategory),
+        startDate: new Date().toISOString().split("T")[0],
+        progress: 0,
+        userId: userId,
+        coinReward: 10, // Default reward
+        routineDays: newGoalIsDaily
+          ? newGoalSelectedDays.length > 0
+            ? newGoalSelectedDays
+            : [0, 1, 2, 3, 4, 5, 6]
+          : [],
+      });
 
       // Store the selected days for this goal
       if (newGoalIsDaily && newGoal.id) {
@@ -510,7 +506,10 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
           <Text style={styles.streakText}>{streakCount}</Text>
         </View>
         <View style={styles.coinsContainer}>
-          <Ionicons name="star" size={22} color={COLORS.accent1} />
+          <Image
+            source={require("../assets/images/future_coin.png")}
+            style={styles.coinIcon}
+          />
           <Text style={styles.coinsText}>{futureCoins}</Text>
         </View>
       </View>
@@ -1196,6 +1195,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingHorizontal: 10,
     paddingVertical: 5,
+  },
+  coinIcon: {
+    width: 22,
+    height: 22,
+    resizeMode: "contain",
   },
   coinsText: {
     fontSize: 16,

@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import {
   View,
   Text,
-  Image,
   StyleSheet,
   TouchableOpacity,
   TextInput,
@@ -10,6 +9,7 @@ import {
   SafeAreaView,
   Alert,
 } from "react-native";
+import { Image } from "expo-image";
 import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
@@ -79,8 +79,10 @@ const SignUpScreen = () => {
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         <View style={styles.container}>
           <Image
-            source={require("../assets/futuremove-logo.png")}
+            source={require("../assets/videos/FIXFUTURE-ezgif.com-optimize.gif")}
             style={styles.logo}
+            contentFit="contain"
+            transition={1000}
           />
           <Text style={styles.title}>FutureMove</Text>
           <Text style={styles.slogan}>"Move Forward, Achieve More."</Text>
@@ -134,7 +136,12 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: "#f5f5f5" },
   scrollContainer: { flexGrow: 1 },
   container: { flex: 1, alignItems: "center", padding: 20 },
-  logo: { width: 120, height: 120, marginTop: 40, marginBottom: 10 },
+  logo: {
+    width: 120,
+    height: 120,
+    marginTop: 40,
+    marginBottom: 10,
+  },
   title: {
     fontSize: 32,
     fontWeight: "bold",

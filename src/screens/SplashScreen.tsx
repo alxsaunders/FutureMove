@@ -2,13 +2,13 @@ import React, { useState } from "react";
 import {
   View,
   Text,
-  Image,
   StyleSheet,
   TouchableOpacity,
   TextInput,
   SafeAreaView,
   Alert,
 } from "react-native";
+import { Image } from "expo-image";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "../config/firebase";
 import { StackNavigationProp } from "@react-navigation/stack";
@@ -49,8 +49,10 @@ const SplashScreen = () => {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         <Image
-          source={require("../assets/futuremove-logo.png")}
+          source={require("../assets/videos/FIXFUTURE-ezgif.com-optimize.gif")}
           style={styles.logo}
+          contentFit="contain"
+          transition={1000}
         />
         <Text style={styles.title}>FutureMove</Text>
         <Text style={styles.slogan}>"Move Forward, Achieve More."</Text>
@@ -92,7 +94,11 @@ const styles = StyleSheet.create({
     padding: 20,
     justifyContent: "center",
   },
-  logo: { width: 120, height: 120, marginBottom: 10 },
+  logo: {
+    width: 120,
+    height: 120,
+    marginBottom: 10,
+  },
   title: {
     fontSize: 32,
     fontWeight: "bold",
