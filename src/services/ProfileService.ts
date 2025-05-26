@@ -1,8 +1,8 @@
-// src/services/ProfileService.ts - Updated with Achievement Badge Support
+// src/services/ProfileService.ts - Updated with Old Image Deletion
 import axios, { AxiosError } from 'axios';
 import { Platform } from 'react-native';
 import { auth } from '../config/firebase';
-import { getStorage, ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { User } from '../contexts/AuthContext';
 
 // Debug flag - set to true to enable detailed logging
@@ -19,7 +19,7 @@ const logDebug = (message: string, data?: any) => {
   }
 };
 
-// ✅ NEW: Achievement badge image mapping
+// Achievement badge image mapping
 const ACHIEVEMENT_BADGE_IMAGES: Record<string, any> = {
   // Personal badges
   'Personal_Pioneer_Badge': require("../assets/images/achivements-futuremove/Personal/Personal_Pioneer_Badge.png"),
@@ -119,18 +119,65 @@ export interface Community {
   created_by?: string;
 }
 
-// ✅ NEW: Badge interface
+// Badge interface
 export interface Badge {
   id: string;
   name: string;
   description: string;
   category?: string;
   milestone?: number;
-  icon: any; // This will be the actual image require()
+  icon: any;
   type: string;
   earned_at?: string;
   achievement_id?: string;
 }
+
+/**
+ * Delete an old profile image from Firebase Storage
+ * @param imageUrl - The Firebase Storage URL of the image to delete
+ * @returns Promise resolving to success status
+ */
+const deleteOldProfileImage = async (imageUrl: string): Promise<boolean> => {
+  try {
+    if (!imageUrl || !imageUrl.includes('firebasestorage.googleapis.com')) {
+      logDebug('No valid Firebase Storage URL to delete');
+      return false;
+    }
+
+    // Extract the path from the Firebase Storage URL
+    // URL format: https://firebasestorage.googleapis.com/v0/b/{bucket}/o/{encoded-path}?alt=media&token={token}
+    const urlParts = imageUrl.split('/o/');
+    if (urlParts.length < 2) {
+      logDebug('Invalid Firebase Storage URL format');
+      return false;
+    }
+
+    const pathWithQuery = urlParts[1];
+    const path = decodeURIComponent(pathWithQuery.split('?')[0]);
+    
+    logDebug(`Attempting to delete old image at path: ${path}`);
+
+    // Get Firebase Storage instance
+    const storage = getStorage();
+    const oldImageRef = ref(storage, path);
+
+    // Delete the old image
+    await deleteObject(oldImageRef);
+    logDebug(`Successfully deleted old profile image: ${path}`);
+    
+    return true;
+  } catch (error) {
+    // If the image doesn't exist, that's okay - it might have been deleted already
+    if (error instanceof Error && error.message.includes('object-not-found')) {
+      logDebug('Old image not found in storage (already deleted)');
+      return true;
+    }
+    
+    logDebug(`Error deleting old profile image: ${error instanceof Error ? error.message : String(error)}`);
+    // Don't throw the error - we don't want to block the update process
+    return false;
+  }
+};
 
 /**
  * Fetch a user's profile data
@@ -149,19 +196,16 @@ export const fetchUserProfile = async (userId: string): Promise<ExtendedUserProf
       logDebug(`Using currentUserId for context: ${currentUserId}`);
     } catch (error) {
       logDebug(`Using provided userId as fallback context: ${userId}`);
-      currentUserId = userId; // Fallback to provided userId
+      currentUserId = userId;
     }
 
-    // Log the full request URL for debugging
     const requestUrl = `${apiUrl}/profile/${userId}?userId=${currentUserId}`;
     logDebug(`Making request to: ${requestUrl}`);
 
-    // Make the request to the profile API
     const response = await axios.get(requestUrl, {
-      timeout: 10000 // 10 second timeout
+      timeout: 10000
     });
 
-    // Log response for debugging
     logDebug(`Profile API response status: ${response.status}`);
     logDebug(`Raw profile data received:`, response.data);
 
@@ -199,7 +243,7 @@ export const fetchUserProfile = async (userId: string): Promise<ExtendedUserProf
       logDebug(`Response data:`, error.response.data);
     }
     console.error('Error fetching user profile:', error);
-    throw error; // Let the UI handle this error
+    throw error;
   }
 };
 
@@ -213,19 +257,16 @@ export const fetchUserStats = async (userId: string): Promise<any> => {
     logDebug(`Fetching stats for user: ${userId}`);
     const apiUrl = getApiBaseUrl();
 
-    // Log the full request URL for debugging
     const requestUrl = `${apiUrl}/profile/${userId}/stats`;
     logDebug(`Making request to: ${requestUrl}`);
 
     const response = await axios.get(requestUrl, {
-      timeout: 8000 // 8 second timeout
+      timeout: 8000
     });
 
-    // Log complete response for debugging
     logDebug(`Stats API response status: ${response.status}`);
     logDebug(`Stats received for user: ${userId}`, response.data);
 
-    // Return the stats directly - our ProfileScreen will map these as needed
     return response.data;
   } catch (error) {
     logDebug(`Error fetching user stats: ${error instanceof Error ? error.message : String(error)}`);
@@ -339,11 +380,21 @@ export const updateUserProfile = async (
     // If there's a profile image to upload
     if (updates.profileImage && updates.fileName) {
       try {
-        // Use dedicated Firebase upload function with retry
+        // First, get the current profile data to check for existing image
+        let oldImageUrl: string | null = null;
+        try {
+          const currentProfile = await fetchUserProfile(userId);
+          oldImageUrl = currentProfile.profileImage || null;
+          logDebug(`Found existing profile image: ${oldImageUrl ? 'Yes' : 'No'}`);
+        } catch (error) {
+          logDebug('Could not fetch current profile for old image check');
+        }
+
+        // Upload new image to Firebase
         const downloadUrl = await uploadImageToFirebase(updates.profileImage, updates.fileName);
 
         try {
-          // Update the profile image URL in the database using the correct profile endpoint
+          // Update the profile image URL in the database
           const updateUrl = `${apiUrl}/profile/${userId}/profile-image`;
           logDebug(`Updating profile image URL in database: ${updateUrl}`);
 
@@ -352,10 +403,21 @@ export const updateUserProfile = async (
           }, { timeout: 10000 });
 
           logDebug('Profile image URL updated in database');
+
+          // After successful update, delete the old image if it exists
+          if (oldImageUrl && oldImageUrl !== downloadUrl) {
+            logDebug('Attempting to delete old profile image from storage');
+            const deleteSuccess = await deleteOldProfileImage(oldImageUrl);
+            if (deleteSuccess) {
+              logDebug('Old profile image deleted successfully');
+            } else {
+              logDebug('Failed to delete old profile image, but continuing');
+            }
+          }
+
         } catch (dbError) {
           logDebug(`Database update error: ${dbError instanceof Error ? dbError.message : String(dbError)}`);
           logDebug('Continuing despite database error - image was uploaded to Firebase');
-          // Continue execution - we'll return the URL even if DB update fails
         }
 
         // If there are other fields to update, do that separately
@@ -374,14 +436,12 @@ export const updateUserProfile = async (
             logDebug('Other profile fields updated');
           } catch (dbError) {
             logDebug(`Database update error: ${dbError instanceof Error ? dbError.message : String(dbError)}`);
-            // Continue execution
           }
         }
 
         return downloadUrl;
       } catch (firebaseError) {
         logDebug(`Firebase error: ${firebaseError instanceof Error ? firebaseError.message : String(firebaseError)}`);
-        // Rethrow the error to be handled by caller
         throw firebaseError;
       }
     }
@@ -418,6 +478,8 @@ export const updateUserProfile = async (
     throw error;
   }
 };
+
+// ... rest of the functions remain the same ...
 
 /**
  * Add a commend to a user
@@ -507,7 +569,7 @@ export const fetchUserCommenders = async (userId: string, page: number = 1, limi
 };
 
 /**
- * ✅ UPDATED: Fetch achievement badges for a user
+ * Fetch achievement badges for a user
  * @param userId - The ID of the user to get badges for
  * @returns Promise resolving to array of badges with proper image mapping
  */
@@ -532,7 +594,7 @@ export const fetchUserBadges = async (userId: string): Promise<Badge[]> => {
         description: badgeData.description,
         category: badgeData.category,
         milestone: badgeData.milestone,
-        icon: badgeImage, // ✅ Mapped to actual image require()
+        icon: badgeImage,
         type: badgeData.type || 'achievement',
         earned_at: badgeData.earned_at,
         achievement_id: badgeData.achievement_id
@@ -548,8 +610,6 @@ export const fetchUserBadges = async (userId: string): Promise<Badge[]> => {
       logDebug(`Response data:`, error.response.data);
     }
     console.error('Error fetching user badges:', error);
-    
-    // Return empty array instead of throwing to make UI more resilient
     return [];
   }
 };
@@ -590,45 +650,37 @@ export const fetchUserCommunities = async (userId: string): Promise<Community[]>
     logDebug(`Fetching joined communities for user: ${userId}`);
     const apiUrl = getApiBaseUrl();
 
-    // Get current user ID for authentication if needed
     let currentUserId;
     try {
       currentUserId = await getCurrentUserId();
       logDebug(`Using currentUserId for context: ${currentUserId}`);
     } catch (error) {
       logDebug(`Using provided userId as fallback context: ${userId}`);
-      currentUserId = userId; // Fallback to provided userId
+      currentUserId = userId;
     }
 
-    // Log the full request URL for debugging
     const requestUrl = `${apiUrl}/communities/user/${userId}/joined`;
     logDebug(`Making request to: ${requestUrl}`);
 
     const response = await axios.get(requestUrl, {
-      timeout: 8000 // 8 second timeout
+      timeout: 8000
     });
 
-    // Log response for debugging
     logDebug(`Communities API response status: ${response.status}`);
     logDebug(`Communities received: ${response.data ? (response.data.length || 0) : 0}`);
 
-    // If the API returns data in a nested structure, extract the communities array
     let communities = response.data;
     if (response.data && Array.isArray(response.data)) {
-      // Data is already an array
       communities = response.data;
     } else if (response.data && response.data.communities && Array.isArray(response.data.communities)) {
-      // Data is in a communities property
       communities = response.data.communities;
     }
 
-    // Ensure we return an array
     if (!Array.isArray(communities)) {
       logDebug('Invalid communities data structure, returning empty array');
       return [];
     }
 
-    // Map the communities to our interface if needed
     const mappedCommunities: Community[] = communities.map(community => ({
       community_id: community.community_id,
       name: community.name,
@@ -650,8 +702,6 @@ export const fetchUserCommunities = async (userId: string): Promise<Community[]>
       logDebug(`Response data:`, error.response.data);
     }
     console.error('Error fetching user communities:', error);
-
-    // Return empty array instead of throwing to make the UI more resilient
     return [];
   }
 };
@@ -671,14 +721,13 @@ export const createCommunity = async (communityData: {
     logDebug(`Creating community with name: ${communityData.name}`);
     const apiUrl = getApiBaseUrl();
 
-    // Get current user ID for community creator
     const currentUserId = await getCurrentUserId();
 
     const response = await axios.post(`${apiUrl}/communities`, {
       ...communityData,
       created_by: currentUserId
     }, {
-      timeout: 10000 // 10 second timeout
+      timeout: 10000
     });
 
     logDebug(`Community creation response:`, response.data);
