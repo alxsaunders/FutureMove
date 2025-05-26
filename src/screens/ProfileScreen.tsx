@@ -13,7 +13,11 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import { useNavigation, useRoute, useFocusEffect } from "@react-navigation/native";
+import {
+  useNavigation,
+  useRoute,
+  useFocusEffect,
+} from "@react-navigation/native";
 import { COLORS } from "../common/constants/colors";
 import { useAuth } from "../contexts/AuthContext";
 import {
@@ -23,7 +27,8 @@ import {
   fetchUserStats,
   fetchUserCommunities,
   ExtendedUserProfile,
-  Community
+  Community,
+  Badge, // ✅ Added Badge interface import
 } from "../services/ProfileService";
 
 // EMERGENCY FALLBACK - replace with a valid user ID from your database
@@ -33,28 +38,33 @@ const ProfileScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
   const { currentUser, logout } = useAuth();
-  const [profileData, setProfileData] = useState<ExtendedUserProfile | null>(null);
+  const [profileData, setProfileData] = useState<ExtendedUserProfile | null>(
+    null
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
-  const [badges, setBadges] = useState([]);
+  const [badges, setBadges] = useState<Badge[]>([]); // ✅ Updated to use Badge interface
   const [communities, setCommunities] = useState<Community[]>([]);
   const [loadingCommunities, setLoadingCommunities] = useState(false);
+  const [loadingBadges, setLoadingBadges] = useState(false); // ✅ Added loading state for badges
   const [stats, setStats] = useState({
     streakCount: 0,
     completedGoalsCount: 0,
     totalGoals: 0,
-    completionRate: 0
+    completionRate: 0,
   });
   const [loadingError, setLoadingError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [returnedFromEdit, setReturnedFromEdit] = useState(false);
 
   // Get userId from route params, current user, or use fallback
-  const userId = route.params?.userId || (currentUser ? currentUser.id : FALLBACK_USER_ID);
+  const userId =
+    route.params?.userId || (currentUser ? currentUser.id : FALLBACK_USER_ID);
 
   // Check if this is the user's own profile
   // The fix: Always treat this as the user's own profile when no specific userId is passed in route params
-  const isOwnProfile = !route.params?.userId || (currentUser && currentUser.id === userId);
+  const isOwnProfile =
+    !route.params?.userId || (currentUser && currentUser.id === userId);
 
   // Use useFocusEffect for handling screen focus events
   useFocusEffect(
@@ -67,10 +77,12 @@ const ProfileScreen = () => {
         console.log(`[PROFILE] Force refresh triggered: ${forceRefresh}`);
         loadProfileData();
         loadUserCommunities();
+        loadUserBadges(); // ✅ Added badge loading
       } else {
         // Initial load or regular focus
         loadProfileData();
         loadUserCommunities();
+        loadUserBadges(); // ✅ Added badge loading
       }
 
       return () => {
@@ -80,7 +92,11 @@ const ProfileScreen = () => {
   );
 
   useEffect(() => {
-    console.log(`[PROFILE] Using userId: ${userId}, currentUser: ${currentUser?.id || 'none'}, isOwnProfile: ${isOwnProfile}`);
+    console.log(
+      `[PROFILE] Using userId: ${userId}, currentUser: ${
+        currentUser?.id || "none"
+      }, isOwnProfile: ${isOwnProfile}`
+    );
     // Initial component setup - no data loading here as useFocusEffect handles it
   }, [userId, isOwnProfile]);
 
@@ -93,9 +109,27 @@ const ProfileScreen = () => {
       const userCommunities = await fetchUserCommunities(userId);
       setCommunities(userCommunities);
     } catch (error) {
-      console.error('[PROFILE] Error loading communities:', error);
+      console.error("[PROFILE] Error loading communities:", error);
     } finally {
       setLoadingCommunities(false);
+    }
+  };
+
+  // ✅ NEW: Load user achievement badges
+  const loadUserBadges = async () => {
+    if (!userId) return;
+
+    setLoadingBadges(true);
+    try {
+      console.log("[PROFILE] Loading achievement badges for user:", userId);
+      const userBadges = await fetchUserBadges(userId);
+      console.log(`[PROFILE] Loaded ${userBadges.length} badges:`, userBadges);
+      setBadges(userBadges);
+    } catch (error) {
+      console.error("[PROFILE] Error loading badges:", error);
+      setBadges([]); // Set empty array on error
+    } finally {
+      setLoadingBadges(false);
     }
   };
 
@@ -111,12 +145,18 @@ const ProfileScreen = () => {
     try {
       // Create timeout promise
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Request timeout after 15 seconds')), 15000)
+        setTimeout(
+          () => reject(new Error("Request timeout after 15 seconds")),
+          15000
+        )
       );
 
       // Fetch user profile
       const userDataPromise = fetchUserProfile(userId);
-      const userData = await Promise.race([userDataPromise, timeoutPromise]) as ExtendedUserProfile;
+      const userData = (await Promise.race([
+        userDataPromise,
+        timeoutPromise,
+      ])) as ExtendedUserProfile;
 
       if (!userData) {
         throw new Error("Failed to fetch user profile data");
@@ -124,22 +164,19 @@ const ProfileScreen = () => {
 
       setProfileData(userData);
 
-      // Fetch badges and stats in parallel
-      const [badgesData, statsData] = await Promise.all([
-        Promise.race([fetchUserBadges(userId), timeoutPromise]),
-        Promise.race([fetchUserStats(userId), timeoutPromise])
+      // Fetch stats (badges are loaded separately)
+      const statsData = await Promise.race([
+        fetchUserStats(userId),
+        timeoutPromise,
       ]);
-
-      setBadges(badgesData || []);
 
       // Map the stats
       setStats({
         streakCount: statsData?.currentStreak || 0,
         completedGoalsCount: statsData?.completedGoals || 0,
         totalGoals: statsData?.totalGoals || 0,
-        completionRate: statsData?.completionRate || 0
+        completionRate: statsData?.completionRate || 0,
       });
-
     } catch (error) {
       console.error("[PROFILE] Error loading profile data:", error);
       setLoadingError((error as Error).message || "Unknown error");
@@ -148,7 +185,7 @@ const ProfileScreen = () => {
         "We're having trouble loading your profile data. Please try again.",
         [
           { text: "Try Again", onPress: loadProfileData },
-          { text: "Continue", onPress: () => setIsLoading(false) }
+          { text: "Continue", onPress: () => setIsLoading(false) },
         ]
       );
     } finally {
@@ -162,7 +199,10 @@ const ProfileScreen = () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (status !== "granted") {
-      Alert.alert("Permission Required", "Please allow access to your photo library.");
+      Alert.alert(
+        "Permission Required",
+        "Please allow access to your photo library."
+      );
       return;
     }
 
@@ -180,7 +220,10 @@ const ProfileScreen = () => {
           "Use this image as your profile picture?",
           [
             { text: "Cancel", style: "cancel" },
-            { text: "Update", onPress: () => uploadProfileImage(result.assets[0].uri) }
+            {
+              text: "Update",
+              onPress: () => uploadProfileImage(result.assets[0].uri),
+            },
           ]
         );
       }
@@ -199,23 +242,25 @@ const ProfileScreen = () => {
       const blob = await response.blob();
 
       if (blob.size > 5 * 1024 * 1024) {
-        throw new Error("Image is too large. Please select an image under 5MB.");
+        throw new Error(
+          "Image is too large. Please select an image under 5MB."
+        );
       }
 
       // Generate filename
-      const fileNameParts = uri.split('/');
+      const fileNameParts = uri.split("/");
       const fileName = fileNameParts[fileNameParts.length - 1];
-      const fileType = fileName.split('.').pop()?.toLowerCase() || 'jpg';
+      const fileType = fileName.split(".").pop()?.toLowerCase() || "jpg";
       const finalFileName = `profile_${userId}_${Date.now()}.${fileType}`;
 
       // Upload to Firebase
       const imageUrl = await updateUserProfile(userId, {
         profileImage: blob,
-        fileName: finalFileName
+        fileName: finalFileName,
       });
 
       // Update local state
-      if (profileData && typeof imageUrl === 'string') {
+      if (profileData && typeof imageUrl === "string") {
         setProfileData({
           ...profileData,
           profileImage: imageUrl,
@@ -227,7 +272,10 @@ const ProfileScreen = () => {
       }
     } catch (error) {
       console.error("[PROFILE] Error in image upload:", error);
-      Alert.alert("Error", (error as Error).message || "Failed to upload profile picture.");
+      Alert.alert(
+        "Error",
+        (error as Error).message || "Failed to upload profile picture."
+      );
     } finally {
       setIsUploading(false);
     }
@@ -243,49 +291,62 @@ const ProfileScreen = () => {
     // Direct navigation to EditProfile screen
     navigation.navigate("EditProfile", {
       userId: userId,
-      profileData: profileData
+      profileData: profileData,
     });
   };
 
   const handleLogout = async () => {
-    Alert.alert(
-      "Logout",
-      "Are you sure you want to log out?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Logout",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              console.log("[PROFILE] Logging out user");
-              await logout();
+    Alert.alert("Logout", "Are you sure you want to log out?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Logout",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            console.log("[PROFILE] Logging out user");
+            await logout();
 
-              // Explicitly navigate to the Splash screen
-              navigation.reset({
-                index: 0,
-                routes: [{ name: 'Splash' }]
-              });
+            // Explicitly navigate to the Splash screen
+            navigation.reset({
+              index: 0,
+              routes: [{ name: "Splash" }],
+            });
 
-              console.log("[PROFILE] User logged out and redirected to Splash screen");
-            } catch (error) {
-              console.error("[PROFILE] Logout error:", error);
-              Alert.alert("Error", "Failed to log out. Please try again.");
-            }
+            console.log(
+              "[PROFILE] User logged out and redirected to Splash screen"
+            );
+          } catch (error) {
+            console.error("[PROFILE] Logout error:", error);
+            Alert.alert("Error", "Failed to log out. Please try again.");
           }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   const navigateToCommunityDetail = (communityId: string | number) => {
-    navigation.navigate('Community', {
-      screen: 'CommunityDetail',
+    navigation.navigate("Community", {
+      screen: "CommunityDetail",
       params: {
         communityId: String(communityId),
-        fromProfile: true
-      }
+        fromProfile: true,
+      },
     });
+  };
+
+  // ✅ NEW: Handle badge press to show details
+  const handleBadgePress = (badge: Badge) => {
+    Alert.alert(
+      `🏆 ${badge.name}`,
+      `${badge.description}\n\nCategory: ${badge.category}\nMilestone: ${
+        badge.milestone
+      } goals${
+        badge.earned_at
+          ? "\n\nEarned: " + new Date(badge.earned_at).toLocaleDateString()
+          : ""
+      }`,
+      [{ text: "Awesome!", style: "default" }]
+    );
   };
 
   if (isLoading) {
@@ -300,12 +361,13 @@ const ProfileScreen = () => {
   if (!profileData) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
-        <Ionicons name="alert-circle-outline" size={48} color={COLORS.textSecondary} />
+        <Ionicons
+          name="alert-circle-outline"
+          size={48}
+          color={COLORS.textSecondary}
+        />
         <Text style={styles.errorText}>Could not load profile data</Text>
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={loadProfileData}
-        >
+        <TouchableOpacity style={styles.actionButton} onPress={loadProfileData}>
           <Text style={styles.actionButtonText}>Try Again</Text>
         </TouchableOpacity>
       </SafeAreaView>
@@ -349,7 +411,9 @@ const ProfileScreen = () => {
             <Text style={styles.userName}>{profileData.name || "User"}</Text>
           </View>
 
-          <Text style={styles.userUsername}>@{profileData.username || "user"}</Text>
+          <Text style={styles.userUsername}>
+            @{profileData.username || "user"}
+          </Text>
 
           {/* Explicit Edit and Logout Buttons */}
           {isOwnProfile && (
@@ -359,7 +423,11 @@ const ProfileScreen = () => {
                 style={styles.explicitButton}
                 activeOpacity={0.7}
               >
-                <Ionicons name="create-outline" size={20} color={COLORS.white} />
+                <Ionicons
+                  name="create-outline"
+                  size={20}
+                  color={COLORS.white}
+                />
                 <Text style={styles.buttonText}>Edit Profile</Text>
               </TouchableOpacity>
 
@@ -368,7 +436,11 @@ const ProfileScreen = () => {
                 style={[styles.explicitButton, styles.logoutButton]}
                 activeOpacity={0.7}
               >
-                <Ionicons name="log-out-outline" size={20} color={COLORS.white} />
+                <Ionicons
+                  name="log-out-outline"
+                  size={20}
+                  color={COLORS.white}
+                />
                 <Text style={styles.buttonText}>Logout</Text>
               </TouchableOpacity>
             </View>
@@ -402,7 +474,9 @@ const ProfileScreen = () => {
 
           <View style={styles.goalStatsContainer}>
             <View style={styles.goalStatItem}>
-              <Text style={styles.goalStatValue}>{stats.completedGoalsCount}</Text>
+              <Text style={styles.goalStatValue}>
+                {stats.completedGoalsCount}
+              </Text>
               <Text style={styles.goalStatLabel}>Completed</Text>
             </View>
 
@@ -426,36 +500,73 @@ const ProfileScreen = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Badges Section */}
+        {/* ✅ UPDATED: Badges Section with Achievement Badges */}
         <View style={styles.sectionContainer}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Badges & Achievements</Text>
-            <TouchableOpacity onPress={() => navigation.navigate("Achievements")}>
-              <Text style={styles.seeAllText}>See All</Text>
-            </TouchableOpacity>
+            <Text style={styles.sectionTitle}>Achievement Badges</Text>
+            <View style={styles.badgeCountContainer}>
+              <Text style={styles.badgeCount}>{badges.length}</Text>
+              <TouchableOpacity
+                onPress={() => navigation.navigate("Achievements")}
+              >
+                <Text style={styles.seeAllText}>See All</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
-          {badges && badges.length > 0 ? (
+          {loadingBadges ? (
+            <View style={styles.loadingBadgesContainer}>
+              <ActivityIndicator size="small" color={COLORS.primary} />
+              <Text style={styles.loadingText}>Loading badges...</Text>
+            </View>
+          ) : badges && badges.length > 0 ? (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.badgesContainer}
             >
               {badges.map((badge, index) => (
-                <View key={index} style={styles.badgeItem}>
+                <TouchableOpacity
+                  key={badge.id || index}
+                  style={styles.badgeItem}
+                  onPress={() => handleBadgePress(badge)}
+                  activeOpacity={0.7}
+                >
                   <Image
-                    source={{ uri: badge.icon }}
+                    source={badge.icon} // ✅ Now uses the properly mapped image
                     style={styles.badgeIcon}
-                    defaultSource={require("../assets/images/placeholder-badge.png")}
+                    resizeMode="contain"
                   />
-                  <Text style={styles.badgeName}>{badge.name}</Text>
-                </View>
+                  <Text style={styles.badgeName} numberOfLines={2}>
+                    {badge.name}
+                  </Text>
+                  {badge.category && (
+                    <Text style={styles.badgeCategory}>{badge.category}</Text>
+                  )}
+                </TouchableOpacity>
               ))}
             </ScrollView>
           ) : (
             <View style={styles.emptyContainer}>
-              <Ionicons name="ribbon-outline" size={32} color={COLORS.textSecondary} />
-              <Text style={styles.emptyText}>Complete goals to earn badges</Text>
+              <Ionicons
+                name="ribbon-outline"
+                size={32}
+                color={COLORS.textSecondary}
+              />
+              <Text style={styles.emptyText}>
+                Complete goals to earn achievement badges
+              </Text>
+              <TouchableOpacity
+                style={[styles.viewAllButton, { marginTop: 16 }]}
+                onPress={() => navigation.navigate("Achievements")}
+              >
+                <Text style={styles.viewAllButtonText}>View Achievements</Text>
+                <Ionicons
+                  name="arrow-forward"
+                  size={16}
+                  color={COLORS.primary}
+                />
+              </TouchableOpacity>
             </View>
           )}
         </View>
@@ -464,7 +575,11 @@ const ProfileScreen = () => {
         <View style={styles.sectionContainer}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>My Communities</Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Community', { screen: 'CommunityMain' })}>
+            <TouchableOpacity
+              onPress={() =>
+                navigation.navigate("Community", { screen: "CommunityMain" })
+              }
+            >
               <Text style={styles.seeAllText}>See All</Text>
             </TouchableOpacity>
           </View>
@@ -483,7 +598,9 @@ const ProfileScreen = () => {
                 <TouchableOpacity
                   key={community.community_id}
                   style={styles.communityItem}
-                  onPress={() => navigateToCommunityDetail(community.community_id)}
+                  onPress={() =>
+                    navigateToCommunityDetail(community.community_id)
+                  }
                 >
                   <View style={styles.communityIconContainer}>
                     {community.image_url ? (
@@ -494,7 +611,11 @@ const ProfileScreen = () => {
                       />
                     ) : (
                       <View style={styles.communityIconPlaceholder}>
-                        <Ionicons name="people" size={24} color={COLORS.primary} />
+                        <Ionicons
+                          name="people"
+                          size={24}
+                          color={COLORS.primary}
+                        />
                       </View>
                     )}
                   </View>
@@ -509,14 +630,26 @@ const ProfileScreen = () => {
             </ScrollView>
           ) : (
             <View style={styles.emptyContainer}>
-              <Ionicons name="people-outline" size={32} color={COLORS.textSecondary} />
-              <Text style={styles.emptyText}>Join communities to connect with others</Text>
+              <Ionicons
+                name="people-outline"
+                size={32}
+                color={COLORS.textSecondary}
+              />
+              <Text style={styles.emptyText}>
+                Join communities to connect with others
+              </Text>
               <TouchableOpacity
                 style={[styles.viewAllButton, { marginTop: 16 }]}
-                onPress={() => navigation.navigate('Community', { screen: 'CommunityMain' })}
+                onPress={() =>
+                  navigation.navigate("Community", { screen: "CommunityMain" })
+                }
               >
                 <Text style={styles.viewAllButtonText}>Browse Communities</Text>
-                <Ionicons name="arrow-forward" size={16} color={COLORS.primary} />
+                <Ionicons
+                  name="arrow-forward"
+                  size={16}
+                  color={COLORS.primary}
+                />
               </TouchableOpacity>
             </View>
           )}
@@ -560,7 +693,7 @@ const styles = StyleSheet.create({
   },
   // Profile header
   profileHeader: {
-    alignItems: 'center',
+    alignItems: "center",
     paddingVertical: 20,
   },
   profileImageContainer: {
@@ -569,7 +702,7 @@ const styles = StyleSheet.create({
     borderRadius: 50,
     marginBottom: 16,
     borderWidth: 2,
-    borderColor: '#E1E5F2',
+    borderColor: "#E1E5F2",
   },
   profileImage: {
     height: 100,
@@ -580,31 +713,31 @@ const styles = StyleSheet.create({
     height: 100,
     width: 100,
     borderRadius: 50,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     backgroundColor: "rgba(0,0,0,0.3)",
   },
   editImageButton: {
-    position: 'absolute',
+    position: "absolute",
     right: 0,
     bottom: 0,
     backgroundColor: COLORS.primary,
     width: 28,
     height: 28,
     borderRadius: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     borderWidth: 2,
     borderColor: COLORS.background,
   },
   // Containers for name and username
   nameContainer: {
-    alignItems: 'center',
+    alignItems: "center",
     marginBottom: 4,
   },
   userName: {
     fontSize: 24,
-    fontWeight: '700',
+    fontWeight: "700",
     color: COLORS.text,
   },
   userUsername: {
@@ -614,15 +747,15 @@ const styles = StyleSheet.create({
   },
   // Explicit buttons container
   explicitButtonsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    width: '100%',
+    flexDirection: "row",
+    justifyContent: "center",
+    width: "100%",
     paddingHorizontal: 16,
   },
   explicitButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: COLORS.primary,
     paddingHorizontal: 16,
     paddingVertical: 10,
@@ -632,18 +765,18 @@ const styles = StyleSheet.create({
     maxWidth: 150,
   },
   logoutButton: {
-    backgroundColor: '#FF375F', // Red tint for logout button
+    backgroundColor: "#FF375F", // Red tint for logout button
   },
   buttonText: {
     color: COLORS.white,
-    fontWeight: '600',
+    fontWeight: "600",
     marginLeft: 6,
     fontSize: 14,
   },
   // Stats section
   statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
+    flexDirection: "row",
+    justifyContent: "space-around",
     paddingVertical: 20,
     paddingHorizontal: 16,
     backgroundColor: COLORS.cardBackground,
@@ -651,17 +784,17 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     marginTop: 16,
     elevation: 2,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
   },
   statItem: {
-    alignItems: 'center',
+    alignItems: "center",
   },
   statValue: {
     fontSize: 24,
-    fontWeight: '700',
+    fontWeight: "700",
     color: COLORS.text,
     marginTop: 8,
   },
@@ -676,34 +809,45 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 16,
   },
   sectionTitle: {
     fontSize: 20,
-    fontWeight: '700',
+    fontWeight: "700",
     color: COLORS.text,
     marginBottom: 16,
   },
   seeAllText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
     color: COLORS.primary,
+  },
+  // ✅ NEW: Badge count container
+  badgeCountContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  badgeCount: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: COLORS.textSecondary,
+    marginRight: 12,
   },
   // Goal stats
   goalStatsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
+    flexDirection: "row",
+    justifyContent: "space-around",
     marginBottom: 20,
   },
   goalStatItem: {
-    alignItems: 'center',
+    alignItems: "center",
   },
   goalStatValue: {
     fontSize: 28,
-    fontWeight: '700',
+    fontWeight: "700",
     color: COLORS.text,
   },
   goalStatLabel: {
@@ -712,9 +856,9 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   viewAllButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     paddingVertical: 12,
     borderRadius: 8,
     borderWidth: 1,
@@ -723,27 +867,42 @@ const styles = StyleSheet.create({
   },
   viewAllButtonText: {
     color: COLORS.primary,
-    fontWeight: '600',
+    fontWeight: "600",
     marginRight: 8,
   },
-  // Badges
+  // ✅ UPDATED: Badges styles
   badgesContainer: {
     paddingBottom: 8,
   },
   badgeItem: {
-    alignItems: 'center',
+    alignItems: "center",
     marginRight: 16,
-    width: 80,
+    width: 90, // Slightly wider for achievement badges
   },
   badgeIcon: {
-    width: 50,
-    height: 50,
+    width: 60, // Larger icon for better visibility
+    height: 60,
     marginBottom: 8,
   },
   badgeName: {
     fontSize: 12,
-    textAlign: 'center',
+    textAlign: "center",
     color: COLORS.text,
+    fontWeight: "600",
+    marginBottom: 2,
+  },
+  // ✅ NEW: Badge category style
+  badgeCategory: {
+    fontSize: 10,
+    textAlign: "center",
+    color: COLORS.textSecondary,
+    fontStyle: "italic",
+  },
+  // ✅ NEW: Loading badges container
+  loadingBadgesContainer: {
+    height: 100,
+    justifyContent: "center",
+    alignItems: "center",
   },
   // Communities
   communitiesContainer: {
@@ -752,15 +911,15 @@ const styles = StyleSheet.create({
   communityItem: {
     width: 120,
     marginRight: 16,
-    alignItems: 'center',
+    alignItems: "center",
   },
   communityIconContainer: {
     width: 80,
     height: 80,
     borderRadius: 16,
     marginBottom: 8,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    overflow: "hidden",
+    backgroundColor: "rgba(59, 130, 246, 0.1)",
   },
   communityIcon: {
     width: 80,
@@ -770,15 +929,15 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 16,
-    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "rgba(59, 130, 246, 0.1)",
+    justifyContent: "center",
+    alignItems: "center",
   },
   communityName: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
     color: COLORS.text,
-    textAlign: 'center',
+    textAlign: "center",
   },
   communityMembers: {
     fontSize: 12,
@@ -787,21 +946,21 @@ const styles = StyleSheet.create({
   },
   // Empty states
   emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     padding: 20,
-    width: '100%',
+    width: "100%",
   },
   emptyText: {
     fontSize: 14,
     color: COLORS.textSecondary,
     marginTop: 8,
-    textAlign: 'center',
+    textAlign: "center",
   },
   loadingCommunitiesContainer: {
     height: 120,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
 });
 

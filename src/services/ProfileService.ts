@@ -1,4 +1,4 @@
-// src/services/ProfileService.ts
+// src/services/ProfileService.ts - Updated with Achievement Badge Support
 import axios, { AxiosError } from 'axios';
 import { Platform } from 'react-native';
 import { auth } from '../config/firebase';
@@ -17,6 +17,59 @@ const logDebug = (message: string, data?: any) => {
       console.log(`[PROFILE CLIENT] ${message}`);
     }
   }
+};
+
+// ✅ NEW: Achievement badge image mapping
+const ACHIEVEMENT_BADGE_IMAGES: Record<string, any> = {
+  // Personal badges
+  'Personal_Pioneer_Badge': require("../assets/images/achivements-futuremove/Personal/Personal_Pioneer_Badge.png"),
+  'Self_Sovereign_Badge': require("../assets/images/achivements-futuremove/Personal/Self_Sovereign_Badge.png"),
+  'Identity_Architect_Badge': require("../assets/images/achivements-futuremove/Personal/Identity_Architect_Badge.png"),
+  'Legendary_Life_Curator_Badge': require("../assets/images/achivements-futuremove/Personal/Legendary_Life_Curator_Badge.png"),
+  
+  // Work badges
+  'Productivity_Prodigy_Badge': require("../assets/images/achivements-futuremove/Work/Productivity_Prodigy_Badge.png"),
+  'Workflow_Wizard_Badge': require("../assets/images/achivements-futuremove/Work/Workflow_Wizard_Badge.png"),
+  'Career_Cornerstone_Badge': require("../assets/images/achivements-futuremove/Work/Career_Cornerstone_Badge.png"),
+  'Executive_Excellence_Badge': require("../assets/images/achivements-futuremove/Work/Executive_Excellence_Badge.png"),
+  
+  // Learning badges
+  'Knowledge_Seeker_Badge': require("../assets/images/achivements-futuremove/Learning/Knowledge_Seeker_Badge.png"),
+  'Wisdom_Weaver_Badge': require("../assets/images/achivements-futuremove/Learning/Wisdom_Weaver_Badge.png"),
+  'Skill_Sculptor_Badge': require("../assets/images/achivements-futuremove/Learning/Skill_Sculptor_Badge.png"),
+  'Grand_Scholar_Badge': require("../assets/images/achivements-futuremove/Learning/Grand_Scholar_Badge.png"),
+  
+  // Health badges
+  'Vitality_Voyager_Badge': require("../assets/images/achivements-futuremove/Health/Vitality_Voyager_Badge.png"),
+  'Wellness_Warrior_Badge': require("../assets/images/achivements-futuremove/Health/Wellness_Warrior_Badge.png"),
+  'Health_Harmonizer_Badge': require("../assets/images/achivements-futuremove/Health/Health_Harmonizer_Badge.png"),
+  'Peak_Performance_Paragon_Badge': require("../assets/images/achivements-futuremove/Health/Peak_Performance_Paragon_Badge.png"),
+  
+  // Repair badges
+  'Fixer_Fledgling_Badge': require("../assets/images/achivements-futuremove/Repair/Fixer_Fledgling_Badge.png"),
+  'Restoration_Ranger_Badge': require("../assets/images/achivements-futuremove/Repair/Restoration_Ranger_Badge.png"),
+  'Mending_Master_Badge': require("../assets/images/achivements-futuremove/Repair/Mending_Master_Badge.png"),
+  'Legendary_Rebuilder_Badge': require("../assets/images/achivements-futuremove/Repair/Legendary_Rebuilder_Badge.png"),
+  
+  // Finance badges
+  'Fiscal_Foundling_Badge': require("../assets/images/achivements-futuremove/Finance/Fiscal_Foundling_Badge.png"),
+  'Wealth_Warden_Badge': require("../assets/images/achivements-futuremove/Finance/Wealth_Warden_Badge.png"),
+  'Money_Maestro_Badge': require("../assets/images/achivements-futuremove/Finance/Money_Maestro_Badge.png"),
+  'Fortune_Forger_Badge': require("../assets/images/achivements-futuremove/Finance/Fortune_Forger_Badge.png"),
+};
+
+// Default badge placeholder
+const DEFAULT_BADGE_IMAGE = require("../assets/images/placeholder-badge.png");
+
+// Helper function to get badge image
+const getBadgeImage = (badgeIconName: string): any => {
+  const badgeImage = ACHIEVEMENT_BADGE_IMAGES[badgeIconName];
+  if (badgeImage) {
+    return badgeImage;
+  }
+  
+  logDebug(`Badge image not found for: ${badgeIconName}, using default`);
+  return DEFAULT_BADGE_IMAGE;
 };
 
 // Get API base URL based on platform
@@ -64,6 +117,19 @@ export interface Community {
   posts_count?: number;
   is_joined?: boolean;
   created_by?: string;
+}
+
+// ✅ NEW: Badge interface
+export interface Badge {
+  id: string;
+  name: string;
+  description: string;
+  category?: string;
+  milestone?: number;
+  icon: any; // This will be the actual image require()
+  type: string;
+  earned_at?: string;
+  achievement_id?: string;
 }
 
 /**
@@ -441,19 +507,40 @@ export const fetchUserCommenders = async (userId: string, page: number = 1, limi
 };
 
 /**
- * Fetch badges for a user
+ * ✅ UPDATED: Fetch achievement badges for a user
  * @param userId - The ID of the user to get badges for
- * @returns Promise resolving to array of badges
+ * @returns Promise resolving to array of badges with proper image mapping
  */
-export const fetchUserBadges = async (userId: string): Promise<any[]> => {
+export const fetchUserBadges = async (userId: string): Promise<Badge[]> => {
   try {
-    logDebug(`Fetching badges for user: ${userId}`);
+    logDebug(`Fetching achievement badges for user: ${userId}`);
     const apiUrl = getApiBaseUrl();
 
-    const response = await axios.get(`${apiUrl}/profile/${userId}/badges`);
+    const response = await axios.get(`${apiUrl}/profile/${userId}/badges`, {
+      timeout: 8000
+    });
 
-    logDebug(`Badges received: ${response.data.length || 0}`);
-    return response.data;
+    logDebug(`Raw badges received:`, response.data);
+
+    // Transform the backend badge data to include proper images
+    const badges: Badge[] = (response.data || []).map((badgeData: any) => {
+      const badgeImage = getBadgeImage(badgeData.icon);
+      
+      return {
+        id: badgeData.id,
+        name: badgeData.name,
+        description: badgeData.description,
+        category: badgeData.category,
+        milestone: badgeData.milestone,
+        icon: badgeImage, // ✅ Mapped to actual image require()
+        type: badgeData.type || 'achievement',
+        earned_at: badgeData.earned_at,
+        achievement_id: badgeData.achievement_id
+      };
+    });
+
+    logDebug(`Mapped ${badges.length} badges with images`);
+    return badges;
   } catch (error) {
     logDebug(`Error fetching user badges: ${error instanceof Error ? error.message : String(error)}`);
     if (axios.isAxiosError(error) && error.response) {
@@ -461,7 +548,9 @@ export const fetchUserBadges = async (userId: string): Promise<any[]> => {
       logDebug(`Response data:`, error.response.data);
     }
     console.error('Error fetching user badges:', error);
-    throw error;
+    
+    // Return empty array instead of throwing to make UI more resilient
+    return [];
   }
 };
 

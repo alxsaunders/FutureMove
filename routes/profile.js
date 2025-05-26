@@ -1,8 +1,64 @@
-// routes/profile.js
+// routes/profile.js - Updated with Achievement Badges Support
 const express = require('express');
 
 module.exports = (pool, authenticateFirebaseToken) => {
   const router = express.Router();
+
+  // Achievement titles mapping (same as in achievements.js)
+  const ACHIEVEMENT_TITLES = {
+    Personal: {
+      7: "Personal Pioneer",
+      14: "Self Sovereign", 
+      30: "Identity Architect",
+      90: "Legendary Life Curator",
+    },
+    Work: {
+      7: "Productivity Prodigy",
+      14: "Workflow Wizard",
+      30: "Career Cornerstone", 
+      90: "Executive Excellence",
+    },
+    Learning: {
+      7: "Knowledge Seeker",
+      14: "Wisdom Weaver",
+      30: "Skill Sculptor",
+      90: "Grand Scholar",
+    },
+    Health: {
+      7: "Vitality Voyager",
+      14: "Wellness Warrior",
+      30: "Health Harmonizer",
+      90: "Peak Performance Paragon",
+    },
+    Repair: {
+      7: "Fixer Fledgling",
+      14: "Restoration Ranger",
+      30: "Mending Master",
+      90: "Legendary Rebuilder",
+    },
+    Finance: {
+      7: "Fiscal Foundling",
+      14: "Wealth Warden",
+      30: "Money Maestro",
+      90: "Fortune Forger",
+    },
+  };
+
+  // Helper function to get achievement badge info
+  const getAchievementBadgeInfo = (category, milestone) => {
+    const title = ACHIEVEMENT_TITLES[category]?.[milestone] || `${category} Achievement`;
+    const badgeImageName = title.replace(/\s+/g, '_') + '_Badge';
+    
+    return {
+      id: `badge_${category.toLowerCase()}_${milestone}`,
+      name: title,
+      description: `Complete ${milestone} goals in ${category}`,
+      category: category,
+      milestone: milestone,
+      icon: badgeImageName, // This will be mapped to actual image in frontend
+      type: 'achievement'
+    };
+  };
 
   // Middleware to verify user exists or create a basic user record
   const verifyOrCreateUser = async (req, res, next) => {
@@ -109,8 +165,18 @@ module.exports = (pool, authenticateFirebaseToken) => {
         // If table doesn't exist yet, just use 0 as the count
       }
 
-      // Get badge count (placeholder - you'll need to implement badges table)
-      const badgeCount = 0; // Placeholder
+      // ✅ NEW: Get badge count from user achievements
+      let badgeCount = 0;
+      try {
+        const [badgeRows] = await pool.execute(
+          `SELECT COUNT(*) as count FROM user_achievements WHERE user_id = ?`,
+          [userId]
+        );
+        badgeCount = badgeRows[0].count;
+      } catch (badgeError) {
+        console.warn('Error fetching badge count:', badgeError.message);
+        // If table doesn't exist, use 0
+      }
 
       // Check if current user has commended this user
       let hasCommended = false;
@@ -132,7 +198,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
       const profileData = {
         ...userData,
         streakCount: streakCount,
-        badgeCount: badgeCount,
+        badgeCount: badgeCount, // ✅ Now returns actual badge count
         completedGoalsCount: completedGoalsCount,
         communityCount: communityCount,
         hasCommended: hasCommended
@@ -563,22 +629,57 @@ module.exports = (pool, authenticateFirebaseToken) => {
     }
   });
 
-  // Get user badges (placeholder - you'll need to implement badges table)
+  // ✅ UPDATED: Get user achievement badges
   router.get('/:userId/badges', authenticateFirebaseToken, verifyOrCreateUser, async (req, res) => {
     try {
-      // This is a placeholder implementation until you create a badges system
-      res.json([
-        // Example badge format for frontend to use
-        /*
-        {
-          id: 1,
-          name: 'Goal Achiever',
-          description: 'Completed 5 goals',
-          icon: 'https://example.com/badges/goal-achiever.png',
-          earned_at: '2024-05-01T12:00:00Z'
-        }
-        */
-      ]);
+      const userId = req.params.userId;
+
+      console.log(`[PROFILE BADGES] Fetching badges for user: ${userId}`);
+
+      // Get user's unlocked achievements from user_achievements table
+      try {
+        const [achievementRows] = await pool.execute(
+          `SELECT 
+            ua.category, 
+            ua.milestone, 
+            ua.title, 
+            ua.unlocked_at,
+            ua.achievement_id
+           FROM user_achievements ua
+           WHERE ua.user_id = ?
+           ORDER BY ua.unlocked_at DESC`,
+          [userId]
+        );
+
+        console.log(`[PROFILE BADGES] Found ${achievementRows.length} achievements for user ${userId}`);
+
+        // Transform achievements into badge format
+        const badges = achievementRows.map(achievement => {
+          const badgeInfo = getAchievementBadgeInfo(achievement.category, achievement.milestone);
+          
+          return {
+            id: badgeInfo.id,
+            name: achievement.title || badgeInfo.name,
+            description: badgeInfo.description,
+            category: achievement.category,
+            milestone: achievement.milestone,
+            icon: badgeInfo.icon, // Frontend will map this to actual image
+            type: 'achievement',
+            earned_at: achievement.unlocked_at,
+            achievement_id: achievement.achievement_id
+          };
+        });
+
+        console.log(`[PROFILE BADGES] Returning ${badges.length} badges`);
+        res.json(badges);
+
+      } catch (achievementError) {
+        console.warn('Error fetching achievement badges:', achievementError.message);
+        
+        // If user_achievements table doesn't exist yet, return empty array
+        res.json([]);
+      }
+
     } catch (error) {
       console.error('Error fetching badges:', error);
       res.status(500).json({ error: 'Internal server error', details: error.message });
