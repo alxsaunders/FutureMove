@@ -1148,29 +1148,53 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {renderHeader()}
+    <ImageBackground
+      source={require("../assets/images/futuremove-bg.jpg")}
+      style={styles.backgroundImage}
+      imageStyle={styles.backgroundImageStyle}
+    >
+      <SafeAreaView style={styles.container}>
+        {/* Light overlay to make the background subtle */}
+        <View style={styles.backgroundOverlay} />
 
-      <SectionList
-        ref={sectionListRef}
-        sections={sections}
-        renderItem={renderSection}
-        renderSectionHeader={() => null} // No section headers
-        keyExtractor={(item) => item.id}
-        stickySectionHeadersEnabled={false}
-        showsVerticalScrollIndicator={true}
-        contentContainerStyle={styles.sectionListContent}
-        refreshing={isRefreshing}
-        onRefresh={handleRefresh}
-      />
-    </SafeAreaView>
+        {renderHeader()}
+
+        <SectionList
+          ref={sectionListRef}
+          sections={sections}
+          renderItem={renderSection}
+          renderSectionHeader={() => null} // No section headers
+          keyExtractor={(item) => item.id}
+          stickySectionHeadersEnabled={false}
+          showsVerticalScrollIndicator={true}
+          contentContainerStyle={styles.sectionListContent}
+          refreshing={isRefreshing}
+          onRefresh={handleRefresh}
+        />
+      </SafeAreaView>
+    </ImageBackground>
   );
 };
 
 const styles = StyleSheet.create({
+  // Background image styles
+  backgroundImage: {
+    flex: 1,
+  },
+  backgroundImageStyle: {
+    opacity: 0.4, // Increased opacity for more visible background
+  },
+  backgroundOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(255, 255, 255, 0.7)", // Reduced white overlay for more visible background
+  },
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: "transparent", // Changed from COLORS.background to transparent
   },
   sectionListContent: {
     paddingBottom: 20,
@@ -1181,7 +1205,7 @@ const styles = StyleSheet.create({
   },
   header: {
     padding: 16,
-    marginTop: 20,
+    marginTop: 40, // INCREASED from 20 to 40 to prevent logo cutoff on various devices
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -1189,7 +1213,7 @@ const styles = StyleSheet.create({
   // ADDED: Achievement button style
   achievementButton: {
     padding: 8,
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: "rgba(255, 255, 255, 0.85)", // Slightly transparent
     borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
@@ -1207,7 +1231,7 @@ const styles = StyleSheet.create({
   userCoinsContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: "rgba(255, 255, 255, 0.85)", // Slightly transparent
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 18,
@@ -1224,7 +1248,7 @@ const styles = StyleSheet.create({
   },
   progressSection: {
     padding: 16,
-    backgroundColor: COLORS.cardBackground,
+    backgroundColor: "rgba(255, 255, 255, 0.95)", // Slightly transparent white
     borderRadius: 16,
     marginHorizontal: 16,
     marginVertical: 8,
@@ -1251,7 +1275,7 @@ const styles = StyleSheet.create({
   streakContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: "rgba(255, 255, 255, 0.85)", // Slightly transparent
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -1305,7 +1329,7 @@ const styles = StyleSheet.create({
   },
   expBarContainer: {
     height: 10,
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: "rgba(0, 0, 0, 0.1)", // Transparent dark for contrast
     borderRadius: 5,
     overflow: "hidden",
   },
@@ -1335,7 +1359,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   emptyStateContainer: {
-    backgroundColor: COLORS.cardBackground,
+    backgroundColor: "rgba(255, 255, 255, 0.9)", // Slightly transparent
     borderRadius: 12,
     padding: 20,
     alignItems: "center",

@@ -13,6 +13,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Image,
+  ImageBackground,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { GoalsScreenProps } from "../types/navigaton";
@@ -1119,49 +1120,73 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {renderHeader()}
-      {renderFilterTabs()}
-      {renderSearchBar()}
+    <ImageBackground
+      source={require("../assets/images/futuremove-bg.jpg")}
+      style={styles.backgroundImage}
+      imageStyle={styles.backgroundImageStyle}
+    >
+      <SafeAreaView style={styles.container}>
+        {/* Light overlay to make the background subtle */}
+        <View style={styles.backgroundOverlay} />
 
-      {filteredGoals.length > 0 ? (
-        <FlatList
-          data={filteredGoals}
-          renderItem={renderGoalItem}
-          keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={styles.listContent}
-          refreshing={isRefreshing}
-          onRefresh={handleRefresh}
-        />
-      ) : (
-        renderEmptyState()
-      )}
+        {renderHeader()}
+        {renderFilterTabs()}
+        {renderSearchBar()}
 
-      <TouchableOpacity
-        style={styles.floatingButton}
-        onPress={() => setCreateModalVisible(true)}
-      >
-        <Ionicons name="add" size={30} color={COLORS.white} />
-      </TouchableOpacity>
+        {filteredGoals.length > 0 ? (
+          <FlatList
+            data={filteredGoals}
+            renderItem={renderGoalItem}
+            keyExtractor={(item) => item.id.toString()}
+            contentContainerStyle={styles.listContent}
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+          />
+        ) : (
+          renderEmptyState()
+        )}
 
-      {renderCreateModal()}
-      {renderFilterModal()}
-      {renderDeleteModal()}
-    </SafeAreaView>
+        <TouchableOpacity
+          style={styles.floatingButton}
+          onPress={() => setCreateModalVisible(true)}
+        >
+          <Ionicons name="add" size={30} color={COLORS.white} />
+        </TouchableOpacity>
+
+        {renderCreateModal()}
+        {renderFilterModal()}
+        {renderDeleteModal()}
+      </SafeAreaView>
+    </ImageBackground>
   );
 };
 
 const styles = StyleSheet.create({
+  // Background image styles
+  backgroundImage: {
+    flex: 1,
+  },
+  backgroundImageStyle: {
+    opacity: 0.4, // Increased opacity for more visible background
+  },
+  backgroundOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(255, 255, 255, 0.7)", // Reduced white overlay for more visible background
+  },
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: "transparent", // Changed from COLORS.background to transparent
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingTop: 20,
+    paddingTop: 40, // INCREASED from 20 to 40 to prevent header cutoff
     paddingBottom: 10,
   },
   headerTitle: {
@@ -1176,7 +1201,7 @@ const styles = StyleSheet.create({
   streakContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: "rgba(255, 255, 255, 0.85)", // Slightly transparent
     borderRadius: 16,
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -1191,7 +1216,7 @@ const styles = StyleSheet.create({
   coinsContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: "rgba(255, 255, 255, 0.85)", // Slightly transparent
     borderRadius: 16,
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -1241,7 +1266,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: COLORS.cardBackground,
+    backgroundColor: "rgba(255, 255, 255, 0.95)", // Slightly transparent
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -1254,7 +1279,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   filterButton: {
-    backgroundColor: COLORS.cardBackground,
+    backgroundColor: "rgba(255, 255, 255, 0.95)", // Slightly transparent
     borderRadius: 12,
     padding: 8,
   },
@@ -1266,7 +1291,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   goalItem: {
-    backgroundColor: COLORS.cardBackground,
+    backgroundColor: "rgba(255, 255, 255, 0.95)", // Slightly transparent white
     borderRadius: 12,
     padding: 16,
     flexDirection: "row",
@@ -1305,7 +1330,7 @@ const styles = StyleSheet.create({
   progressBar: {
     flex: 1,
     height: 6,
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: "rgba(0, 0, 0, 0.1)", // Transparent dark for contrast
     borderRadius: 3,
     marginRight: 8,
     overflow: "hidden",
@@ -1467,7 +1492,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   textInput: {
-    backgroundColor: COLORS.cardBackground,
+    backgroundColor: "rgba(255, 255, 255, 0.95)", // Slightly transparent
     borderRadius: 12,
     padding: 12,
     marginBottom: 16,
@@ -1588,7 +1613,7 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   resetButton: {
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: "rgba(0, 0, 0, 0.05)", // Very light transparent background
     borderRadius: 12,
     padding: 14,
     alignItems: "center",
@@ -1618,7 +1643,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   cancelButton: {
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: "rgba(0, 0, 0, 0.05)", // Very light transparent background
   },
   confirmButton: {
     backgroundColor: "#F44336", // Red color for delete
