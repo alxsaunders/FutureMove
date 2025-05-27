@@ -21,13 +21,33 @@ import {
   fetchUserBadges,
   fetchUserStats,
   fetchUserCommunities,
+  fetchUserEquippedItems,
   commendUser,
   removeCommend,
   ExtendedUserProfile,
   Community,
+  Badge,
 } from "../services/ProfileService";
+import { getItemImage, hasItemImage } from "../utils/itemImageMapping";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
+
+// Interfaces
+interface EquippedItem {
+  item_id: number;
+  name: string;
+  description: string;
+  image_url: string | null;
+  category: string;
+  price: number;
+  is_equipped: number;
+}
+
+interface EquippedItems {
+  theme?: EquippedItem;
+  profile_ring?: EquippedItem;
+  badges: EquippedItem[];
+}
 
 interface UserProfileModalProps {
   visible: boolean;
@@ -45,11 +65,16 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const [profileData, setProfileData] = useState<ExtendedUserProfile | null>(
     null
   );
-  const [badges, setBadges] = useState<any[]>([]);
+  const [badges, setBadges] = useState<Badge[]>([]);
   const [communities, setCommunities] = useState<Community[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCommending, setIsCommending] = useState(false);
+
+  // New state for equipped items
+  const [equippedItems, setEquippedItems] = useState<EquippedItems>({
+    badges: [],
+  });
 
   // Check if this is the current user's profile
   const isOwnProfile = currentUser && currentUser.id === userId;
@@ -65,23 +90,26 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
     setIsLoading(true);
     try {
-      // Load profile, badges, stats, and communities in parallel
+      // Load profile, badges, stats, communities, and equipped items in parallel
       const [
         profileResponse,
         badgesResponse,
         statsResponse,
         communitiesResponse,
+        equippedResponse,
       ] = await Promise.all([
         fetchUserProfile(userId),
         fetchUserBadges(userId),
         fetchUserStats(userId),
         fetchUserCommunities(userId),
+        fetchUserEquippedItems(userId),
       ]);
 
       setProfileData(profileResponse);
       setBadges(badgesResponse || []);
       setStats(statsResponse);
       setCommunities(communitiesResponse || []);
+      setEquippedItems(equippedResponse || { badges: [] });
     } catch (error) {
       console.error("Error loading profile data:", error);
       Alert.alert("Error", "Failed to load profile data. Please try again.");
@@ -156,6 +184,20 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
     });
   };
 
+  const handleBadgePress = (badge: Badge) => {
+    Alert.alert(
+      `🏆 ${badge.name}`,
+      `${badge.description}\n\nCategory: ${badge.category}\nMilestone: ${
+        badge.milestone
+      } goals${
+        badge.earned_at
+          ? "\n\nEarned: " + new Date(badge.earned_at).toLocaleDateString()
+          : ""
+      }`,
+      [{ text: "Awesome!", style: "default" }]
+    );
+  };
+
   if (!visible) return null;
 
   return (
@@ -194,75 +236,119 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
             style={styles.content}
             showsVerticalScrollIndicator={false}
           >
-            {/* Profile Section */}
-            <View style={styles.profileSection}>
-              <Image
-                source={
-                  profileData.profileImage
-                    ? { uri: profileData.profileImage }
-                    : require("../assets/default-avatar.png")
-                }
-                style={styles.profileImage}
-              />
+            {/* Profile Section with Theme Background */}
+            <View style={styles.profileSectionContainer}>
+              {/* Theme Background */}
+              {equippedItems.theme &&
+                hasItemImage(equippedItems.theme.image_url) && (
+                  <Image
+                    source={getItemImage(equippedItems.theme.image_url)}
+                    style={styles.themeBackground}
+                    resizeMode="cover"
+                  />
+                )}
 
-              <Text style={styles.userName}>{profileData.name || "User"}</Text>
+              {/* Overlay for better text visibility */}
+              <View style={styles.themeOverlay} />
 
-              <Text style={styles.userUsername}>
-                @{profileData.username || userId.substring(0, 8) || "user"}
-              </Text>
+              <View style={styles.profileSection}>
+                {/* Profile Image with Ring */}
+                <View style={styles.profileImageWrapper}>
+                  {/* Profile Ring */}
+                  {equippedItems.profile_ring &&
+                    hasItemImage(equippedItems.profile_ring.image_url) && (
+                      <Image
+                        source={getItemImage(
+                          equippedItems.profile_ring.image_url
+                        )}
+                        style={styles.profileRing}
+                        resizeMode="contain"
+                      />
+                    )}
 
-              {/* Commend Button - only shown when viewing another user's profile */}
-              {currentUser && !isOwnProfile && (
-                <TouchableOpacity
+                  <Image
+                    source={
+                      profileData.profileImage
+                        ? { uri: profileData.profileImage }
+                        : require("../assets/default-avatar.png")
+                    }
+                    style={styles.profileImage}
+                  />
+                </View>
+
+                <Text
                   style={[
-                    styles.commendButton,
-                    profileData.hasCommended ? styles.commendedButton : null,
+                    styles.userName,
+                    equippedItems.theme && styles.userNameWithTheme,
                   ]}
-                  onPress={handleCommend}
-                  disabled={isCommending}
                 >
-                  {isCommending ? (
-                    <ActivityIndicator
-                      size="small"
-                      color={
-                        profileData.hasCommended ? COLORS.primary : COLORS.white
-                      }
-                    />
-                  ) : (
-                    <>
-                      <Ionicons
-                        name={
-                          profileData.hasCommended
-                            ? "thumbs-up"
-                            : "thumbs-up-outline"
-                        }
-                        size={16}
+                  {profileData.name || "User"}
+                </Text>
+
+                <Text
+                  style={[
+                    styles.userUsername,
+                    equippedItems.theme && styles.userUsernameWithTheme,
+                  ]}
+                >
+                  @{profileData.username || userId.substring(0, 8) || "user"}
+                </Text>
+
+                {/* Commend Button - only shown when viewing another user's profile */}
+                {currentUser && !isOwnProfile && (
+                  <TouchableOpacity
+                    style={[
+                      styles.commendButton,
+                      profileData.hasCommended ? styles.commendedButton : null,
+                    ]}
+                    onPress={handleCommend}
+                    disabled={isCommending}
+                  >
+                    {isCommending ? (
+                      <ActivityIndicator
+                        size="small"
                         color={
                           profileData.hasCommended
                             ? COLORS.primary
                             : COLORS.white
                         }
                       />
-                      <Text
-                        style={[
-                          styles.commendButtonText,
-                          profileData.hasCommended
-                            ? styles.commendedButtonText
-                            : null,
-                        ]}
-                      >
-                        {profileData.hasCommended ? "Commended" : "Commend"}
-                      </Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              )}
+                    ) : (
+                      <>
+                        <Ionicons
+                          name={
+                            profileData.hasCommended
+                              ? "thumbs-up"
+                              : "thumbs-up-outline"
+                          }
+                          size={16}
+                          color={
+                            profileData.hasCommended
+                              ? COLORS.primary
+                              : COLORS.white
+                          }
+                        />
+                        <Text
+                          style={[
+                            styles.commendButtonText,
+                            profileData.hasCommended
+                              ? styles.commendedButtonText
+                              : null,
+                          ]}
+                        >
+                          {profileData.hasCommended ? "Commended" : "Commend"}
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
 
             {/* Stats Section */}
             <View style={styles.statsContainer}>
               <View style={styles.statItem}>
-                <Ionicons name="flame" size={24} color={COLORS.primary} />
+                <Ionicons name="flame" size={24} color="#5D5FEF" />
                 <Text style={styles.statValue}>
                   {profileData.streakCount || 0}
                 </Text>
@@ -276,23 +362,26 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
               </View>
 
               <View style={styles.statItem}>
+                <Image
+                  source={require("../assets/images/future_coin.png")}
+                  style={styles.coinIconStat}
+                />
+                <Text style={styles.statValue}>
+                  {profileData.future_coins || 0}
+                </Text>
+                <Text style={styles.statLabel}>FutureCoins</Text>
+              </View>
+
+              <View style={styles.statItem}>
                 <Ionicons name="thumbs-up" size={24} color="#FF9500" />
                 <Text style={styles.statValue}>
                   {profileData.commends || 0}
                 </Text>
                 <Text style={styles.statLabel}>Commends</Text>
               </View>
-
-              <View style={styles.statItem}>
-                <Ionicons name="ribbon" size={24} color="#5E6CE7" />
-                <Text style={styles.statValue}>
-                  {profileData.badgeCount || 0}
-                </Text>
-                <Text style={styles.statLabel}>Badges</Text>
-              </View>
             </View>
 
-            {/* Badges Section */}
+            {/* Badges Section - Combined Achievement and Shop Badges */}
             <View style={styles.sectionContainer}>
               <Text style={styles.sectionTitle}>Badges & Achievements</Text>
 
@@ -301,27 +390,67 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.badgesContainer}
               >
-                {badges.length > 0 ? (
-                  badges.map((badge, index) => (
-                    <View key={index} style={styles.badgeItem}>
+                {/* Shop Badges First (Equipped) */}
+                {equippedItems.badges.map((badge, index) => (
+                  <TouchableOpacity
+                    key={`shop-badge-${badge.item_id || index}`}
+                    style={[styles.badgeItem, styles.shopBadgeItem]}
+                    onPress={() =>
+                      Alert.alert(
+                        `🎖️ ${badge.name}`,
+                        `${badge.description}\n\nType: Shop Badge (Equipped)`,
+                        [{ text: "Cool!", style: "default" }]
+                      )
+                    }
+                    activeOpacity={0.7}
+                  >
+                    {hasItemImage(badge.image_url) ? (
                       <Image
-                        source={badge.icon}
+                        source={getItemImage(badge.image_url)}
                         style={styles.badgeIcon}
-                        defaultSource={require("../assets/images/placeholder-badge.png")}
+                        resizeMode="contain"
                       />
-                      <Text style={styles.badgeName}>{badge.name}</Text>
-                    </View>
-                  ))
-                ) : (
-                  <View style={styles.emptyBadges}>
-                    <Ionicons
-                      name="ribbon-outline"
-                      size={32}
-                      color={COLORS.textSecondary}
-                    />
-                    <Text style={styles.emptyText}>No badges yet</Text>
-                  </View>
-                )}
+                    ) : (
+                      <View style={[styles.badgeIcon, styles.badgePlaceholder]}>
+                        <Text style={styles.badgePlaceholderText}>B</Text>
+                      </View>
+                    )}
+                    <Text style={styles.badgeName} numberOfLines={2}>
+                      {badge.name}
+                    </Text>
+                    <Text style={styles.shopBadgeLabel}>Shop</Text>
+                  </TouchableOpacity>
+                ))}
+
+                {/* Achievement Badges */}
+                {badges.length > 0
+                  ? badges.map((badge, index) => (
+                      <TouchableOpacity
+                        key={badge.id || index}
+                        style={styles.badgeItem}
+                        onPress={() => handleBadgePress(badge)}
+                        activeOpacity={0.7}
+                      >
+                        <Image
+                          source={badge.icon}
+                          style={styles.badgeIcon}
+                          resizeMode="contain"
+                        />
+                        <Text style={styles.badgeName} numberOfLines={2}>
+                          {badge.name}
+                        </Text>
+                      </TouchableOpacity>
+                    ))
+                  : equippedItems.badges.length === 0 && (
+                      <View style={styles.emptyBadges}>
+                        <Ionicons
+                          name="ribbon-outline"
+                          size={32}
+                          color={COLORS.textSecondary}
+                        />
+                        <Text style={styles.emptyText}>No badges yet</Text>
+                      </View>
+                    )}
               </ScrollView>
             </View>
 
@@ -470,18 +599,50 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: 12,
   },
+  // Profile section with theme
+  profileSectionContainer: {
+    position: "relative",
+  },
+  themeBackground: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 200,
+    width: "100%",
+  },
+  themeOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 200,
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+  },
   profileSection: {
     alignItems: "center",
     paddingVertical: 24,
-    backgroundColor: COLORS.cardBackground,
+  },
+  profileImageWrapper: {
+    position: "relative",
+    width: 100,
+    height: 100,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  profileRing: {
+    position: "absolute",
+    width: 100,
+    height: 100,
+    zIndex: 1,
   },
   profileImage: {
-    height: 80,
-    width: 80,
-    borderRadius: 40,
+    height: 75,
+    width: 75,
+    borderRadius: 37.5,
     borderWidth: 2,
     borderColor: COLORS.primary,
-    marginBottom: 12,
   },
   userName: {
     fontSize: 20,
@@ -489,10 +650,17 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     marginBottom: 4,
   },
+  userNameWithTheme: {
+    color: COLORS.white,
+  },
   userUsername: {
     fontSize: 14,
     color: COLORS.textSecondary,
     marginBottom: 16,
+  },
+  userUsernameWithTheme: {
+    color: COLORS.white,
+    opacity: 0.8,
   },
   commendButton: {
     flexDirection: "row",
@@ -538,6 +706,10 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: 2,
   },
+  coinIconStat: {
+    width: 24,
+    height: 24,
+  },
   sectionContainer: {
     backgroundColor: COLORS.cardBackground,
     padding: 16,
@@ -566,6 +738,29 @@ const styles = StyleSheet.create({
     fontSize: 10,
     textAlign: "center",
     color: COLORS.text,
+  },
+  // Shop badge specific
+  shopBadgeItem: {
+    backgroundColor: "rgba(106, 90, 205, 0.1)",
+    borderRadius: 8,
+    padding: 6,
+  },
+  shopBadgeLabel: {
+    fontSize: 9,
+    color: COLORS.primary,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  badgePlaceholder: {
+    backgroundColor: "#e0e0e0",
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: 20,
+  },
+  badgePlaceholderText: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#757575",
   },
   emptyBadges: {
     alignItems: "center",

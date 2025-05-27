@@ -516,7 +516,10 @@ const ProfileScreen = () => {
           </View>
 
           <View style={styles.statItem}>
-            <Ionicons name="logo-bitcoin" size={24} color="#FF9500" />
+            <Image
+              source={require("../assets/images/future_coin.png")}
+              style={styles.coinIconStat}
+            />
             <Text style={styles.statValue}>{profileData.future_coins}</Text>
             <Text style={styles.statLabel}>FutureCoins</Text>
           </View>
@@ -857,6 +860,10 @@ const styles = StyleSheet.create({
   nameContainer: {
     alignItems: "center",
     marginBottom: 4,
+  },
+  coinIconStat: {
+    width: 24,
+    height: 24,
   },
   userName: {
     fontSize: 24,
