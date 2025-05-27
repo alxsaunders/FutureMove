@@ -802,3 +802,44 @@ export const leaveCommunity = async (communityId: number | string): Promise<bool
     throw error;
   }
 };
+/**
+ * Fetch user's equipped items from the shop
+ * @param userId - The ID of the user to fetch equipped items for
+ * @returns Promise resolving to equipped items by category
+ */
+export const fetchUserEquippedItems = async (userId: string): Promise<{
+  theme?: any;
+  profile_ring?: any;
+  badges: any[];
+}> => {
+  try {
+    logDebug(`Fetching equipped items for user: ${userId}`);
+    const apiUrl = getApiBaseUrl();
+
+    const requestUrl = `${apiUrl}/items/user/${userId}`;
+    logDebug(`Making request to: ${requestUrl}`);
+
+    const response = await axios.get(requestUrl, {
+      timeout: 8000
+    });
+
+    logDebug(`User items response status: ${response.status}`);
+    
+    const userItems = response.data || [];
+    const equippedItems = userItems.filter((item: any) => item.is_equipped === 1);
+    
+    // Organize by category
+    const result = {
+      theme: equippedItems.find((item: any) => item.category === 'theme'),
+      profile_ring: equippedItems.find((item: any) => item.category === 'profile_ring'),
+      badges: equippedItems.filter((item: any) => item.category === 'badge')
+    };
+    
+    logDebug(`Equipped items:`, result);
+    return result;
+  } catch (error) {
+    logDebug(`Error fetching equipped items: ${error instanceof Error ? error.message : String(error)}`);
+    console.error('Error fetching equipped items:', error);
+    return { badges: [] };
+  }
+};

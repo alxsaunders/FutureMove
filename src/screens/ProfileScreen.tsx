@@ -26,13 +26,32 @@ import {
   fetchUserBadges,
   fetchUserStats,
   fetchUserCommunities,
+  fetchUserEquippedItems,
   ExtendedUserProfile,
   Community,
-  Badge, // ✅ Added Badge interface import
+  Badge,
 } from "../services/ProfileService";
+import { getItemImage, hasItemImage } from "../utils/itemImageMapping";
 
 // EMERGENCY FALLBACK - replace with a valid user ID from your database
 const FALLBACK_USER_ID = "KbtY3t4Tatd0r5tCjnjlmJyNT5R2";
+
+// Interfaces
+interface EquippedItem {
+  item_id: number;
+  name: string;
+  description: string;
+  image_url: string | null;
+  category: string;
+  price: number;
+  is_equipped: number;
+}
+
+interface EquippedItems {
+  theme?: EquippedItem;
+  profile_ring?: EquippedItem;
+  badges: EquippedItem[];
+}
 
 const ProfileScreen = () => {
   const navigation = useNavigation();
@@ -43,10 +62,10 @@ const ProfileScreen = () => {
   );
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
-  const [badges, setBadges] = useState<Badge[]>([]); // ✅ Updated to use Badge interface
+  const [badges, setBadges] = useState<Badge[]>([]);
   const [communities, setCommunities] = useState<Community[]>([]);
   const [loadingCommunities, setLoadingCommunities] = useState(false);
-  const [loadingBadges, setLoadingBadges] = useState(false); // ✅ Added loading state for badges
+  const [loadingBadges, setLoadingBadges] = useState(false);
   const [stats, setStats] = useState({
     streakCount: 0,
     completedGoalsCount: 0,
@@ -57,12 +76,17 @@ const ProfileScreen = () => {
   const [refreshKey, setRefreshKey] = useState(0);
   const [returnedFromEdit, setReturnedFromEdit] = useState(false);
 
+  // New state for equipped items
+  const [equippedItems, setEquippedItems] = useState<EquippedItems>({
+    badges: [],
+  });
+  const [loadingEquippedItems, setLoadingEquippedItems] = useState(false);
+
   // Get userId from route params, current user, or use fallback
   const userId =
     route.params?.userId || (currentUser ? currentUser.id : FALLBACK_USER_ID);
 
   // Check if this is the user's own profile
-  // The fix: Always treat this as the user's own profile when no specific userId is passed in route params
   const isOwnProfile =
     !route.params?.userId || (currentUser && currentUser.id === userId);
 
@@ -71,23 +95,21 @@ const ProfileScreen = () => {
     React.useCallback(() => {
       console.log("[PROFILE] Screen focused - refreshing data");
 
-      // Check if we should refresh based on route params
       const forceRefresh = route.params?.forceRefresh;
       if (forceRefresh) {
         console.log(`[PROFILE] Force refresh triggered: ${forceRefresh}`);
         loadProfileData();
         loadUserCommunities();
-        loadUserBadges(); // ✅ Added badge loading
+        loadUserBadges();
+        loadEquippedItems();
       } else {
-        // Initial load or regular focus
         loadProfileData();
         loadUserCommunities();
-        loadUserBadges(); // ✅ Added badge loading
+        loadUserBadges();
+        loadEquippedItems();
       }
 
-      return () => {
-        // Cleanup when screen loses focus
-      };
+      return () => {};
     }, [route.params?.forceRefresh, userId])
   );
 
@@ -97,7 +119,6 @@ const ProfileScreen = () => {
         currentUser?.id || "none"
       }, isOwnProfile: ${isOwnProfile}`
     );
-    // Initial component setup - no data loading here as useFocusEffect handles it
   }, [userId, isOwnProfile]);
 
   const loadUserCommunities = async () => {
@@ -115,7 +136,6 @@ const ProfileScreen = () => {
     }
   };
 
-  // ✅ NEW: Load user achievement badges
   const loadUserBadges = async () => {
     if (!userId) return;
 
@@ -127,9 +147,25 @@ const ProfileScreen = () => {
       setBadges(userBadges);
     } catch (error) {
       console.error("[PROFILE] Error loading badges:", error);
-      setBadges([]); // Set empty array on error
+      setBadges([]);
     } finally {
       setLoadingBadges(false);
+    }
+  };
+
+  // New function to load equipped items
+  const loadEquippedItems = async () => {
+    if (!userId) return;
+
+    setLoadingEquippedItems(true);
+    try {
+      console.log("[PROFILE] Loading equipped items for user:", userId);
+      const equipped = await fetchUserEquippedItems(userId);
+      setEquippedItems(equipped);
+    } catch (error) {
+      console.error("[PROFILE] Error loading equipped items:", error);
+    } finally {
+      setLoadingEquippedItems(false);
     }
   };
 
@@ -143,7 +179,6 @@ const ProfileScreen = () => {
     setLoadingError(null);
 
     try {
-      // Create timeout promise
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(
           () => reject(new Error("Request timeout after 15 seconds")),
@@ -151,7 +186,6 @@ const ProfileScreen = () => {
         )
       );
 
-      // Fetch user profile
       const userDataPromise = fetchUserProfile(userId);
       const userData = (await Promise.race([
         userDataPromise,
@@ -164,13 +198,11 @@ const ProfileScreen = () => {
 
       setProfileData(userData);
 
-      // Fetch stats (badges are loaded separately)
       const statsData = await Promise.race([
         fetchUserStats(userId),
         timeoutPromise,
       ]);
 
-      // Map the stats
       setStats({
         streakCount: statsData?.currentStreak || 0,
         completedGoalsCount: statsData?.completedGoals || 0,
@@ -237,7 +269,6 @@ const ProfileScreen = () => {
     setIsUploading(true);
 
     try {
-      // Create a blob from the file
       const response = await fetch(uri);
       const blob = await response.blob();
 
@@ -247,19 +278,16 @@ const ProfileScreen = () => {
         );
       }
 
-      // Generate filename
       const fileNameParts = uri.split("/");
       const fileName = fileNameParts[fileNameParts.length - 1];
       const fileType = fileName.split(".").pop()?.toLowerCase() || "jpg";
       const finalFileName = `profile_${userId}_${Date.now()}.${fileType}`;
 
-      // Upload to Firebase
       const imageUrl = await updateUserProfile(userId, {
         profileImage: blob,
         fileName: finalFileName,
       });
 
-      // Update local state
       if (profileData && typeof imageUrl === "string") {
         setProfileData({
           ...profileData,
@@ -268,7 +296,7 @@ const ProfileScreen = () => {
 
         Alert.alert("Success", "Profile picture updated successfully!");
       } else {
-        loadProfileData(); // Refresh data
+        loadProfileData();
       }
     } catch (error) {
       console.error("[PROFILE] Error in image upload:", error);
@@ -288,7 +316,6 @@ const ProfileScreen = () => {
 
     console.log("[PROFILE] Navigating to EditProfile");
 
-    // Direct navigation to EditProfile screen
     navigation.navigate("EditProfile", {
       userId: userId,
       profileData: profileData,
@@ -306,7 +333,6 @@ const ProfileScreen = () => {
             console.log("[PROFILE] Logging out user");
             await logout();
 
-            // Explicitly navigate to the Splash screen
             navigation.reset({
               index: 0,
               routes: [{ name: "Splash" }],
@@ -334,7 +360,6 @@ const ProfileScreen = () => {
     });
   };
 
-  // ✅ NEW: Handle badge press to show details
   const handleBadgePress = (badge: Badge) => {
     Alert.alert(
       `🏆 ${badge.name}`,
@@ -377,74 +402,103 @@ const ProfileScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Profile Header with Explicit Edit and Logout Buttons */}
-        <View style={styles.profileHeader}>
-          {/* Profile Image */}
-          <TouchableOpacity
-            onPress={isOwnProfile ? handlePickImage : undefined}
-            activeOpacity={isOwnProfile ? 0.6 : 1}
-            style={styles.profileImageContainer}
-          >
-            {isUploading ? (
-              <View style={styles.imageLoading}>
-                <ActivityIndicator size="small" color={COLORS.white} />
-              </View>
-            ) : (
+        {/* Profile Header with Theme Background */}
+        <View style={styles.profileHeaderContainer}>
+          {/* Theme Background */}
+          {equippedItems.theme &&
+            hasItemImage(equippedItems.theme.image_url) && (
               <Image
-                source={
-                  profileData.profileImage
-                    ? { uri: profileData.profileImage }
-                    : require("../assets/default-avatar.png")
-                }
-                style={styles.profileImage}
+                source={getItemImage(equippedItems.theme.image_url)}
+                style={styles.themeBackground}
+                resizeMode="cover"
               />
             )}
+
+          {/* Overlay for better text visibility */}
+          <View style={styles.themeOverlay} />
+
+          {/* Profile Header Content */}
+          <View style={styles.profileHeader}>
+            {/* Profile Image with Ring */}
+            <TouchableOpacity
+              onPress={isOwnProfile ? handlePickImage : undefined}
+              activeOpacity={isOwnProfile ? 0.6 : 1}
+              style={styles.profileImageWrapper}
+            >
+              {/* Profile Ring */}
+              {equippedItems.profile_ring &&
+                hasItemImage(equippedItems.profile_ring.image_url) && (
+                  <Image
+                    source={getItemImage(equippedItems.profile_ring.image_url)}
+                    style={styles.profileRing}
+                    resizeMode="contain"
+                  />
+                )}
+
+              {/* Profile Image Container */}
+              <View style={styles.profileImageContainer}>
+                {isUploading ? (
+                  <View style={styles.imageLoading}>
+                    <ActivityIndicator size="small" color={COLORS.white} />
+                  </View>
+                ) : (
+                  <Image
+                    source={
+                      profileData.profileImage
+                        ? { uri: profileData.profileImage }
+                        : require("../assets/default-avatar.png")
+                    }
+                    style={styles.profileImage}
+                  />
+                )}
+                {isOwnProfile && (
+                  <View style={styles.editImageButton}>
+                    <Ionicons name="camera" size={14} color={COLORS.white} />
+                  </View>
+                )}
+              </View>
+            </TouchableOpacity>
+
+            {/* Profile Name with Edit and Logout Buttons */}
+            <View style={styles.nameContainer}>
+              <Text style={styles.userName}>{profileData.name || "User"}</Text>
+            </View>
+
+            <Text style={styles.userUsername}>
+              @{profileData.username || "user"}
+            </Text>
+
+            {/* Explicit Edit and Logout Buttons */}
             {isOwnProfile && (
-              <View style={styles.editImageButton}>
-                <Ionicons name="camera" size={14} color={COLORS.white} />
+              <View style={styles.explicitButtonsContainer}>
+                <TouchableOpacity
+                  onPress={handleEditProfile}
+                  style={styles.explicitButton}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name="create-outline"
+                    size={20}
+                    color={COLORS.white}
+                  />
+                  <Text style={styles.buttonText}>Edit Profile</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={handleLogout}
+                  style={[styles.explicitButton, styles.logoutButton]}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name="log-out-outline"
+                    size={20}
+                    color={COLORS.white}
+                  />
+                  <Text style={styles.buttonText}>Logout</Text>
+                </TouchableOpacity>
               </View>
             )}
-          </TouchableOpacity>
-
-          {/* Profile Name with Edit and Logout Buttons */}
-          <View style={styles.nameContainer}>
-            <Text style={styles.userName}>{profileData.name || "User"}</Text>
           </View>
-
-          <Text style={styles.userUsername}>
-            @{profileData.username || "user"}
-          </Text>
-
-          {/* Explicit Edit and Logout Buttons */}
-          {isOwnProfile && (
-            <View style={styles.explicitButtonsContainer}>
-              <TouchableOpacity
-                onPress={handleEditProfile}
-                style={styles.explicitButton}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name="create-outline"
-                  size={20}
-                  color={COLORS.white}
-                />
-                <Text style={styles.buttonText}>Edit Profile</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={handleLogout}
-                style={[styles.explicitButton, styles.logoutButton]}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name="log-out-outline"
-                  size={20}
-                  color={COLORS.white}
-                />
-                <Text style={styles.buttonText}>Logout</Text>
-              </TouchableOpacity>
-            </View>
-          )}
         </View>
 
         {/* Stats Section */}
@@ -500,12 +554,14 @@ const ProfileScreen = () => {
           </TouchableOpacity>
         </View>
 
-        {/* ✅ UPDATED: Badges Section with Achievement Badges */}
+        {/* UPDATED Badges Section - Combine Achievement Badges with Shop Badges */}
         <View style={styles.sectionContainer}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Achievement Badges</Text>
+            <Text style={styles.sectionTitle}>Badges</Text>
             <View style={styles.badgeCountContainer}>
-              <Text style={styles.badgeCount}>{badges.length}</Text>
+              <Text style={styles.badgeCount}>
+                {badges.length + equippedItems.badges.length}
+              </Text>
               <TouchableOpacity
                 onPress={() => navigation.navigate("Achievements")}
               >
@@ -514,17 +570,51 @@ const ProfileScreen = () => {
             </View>
           </View>
 
-          {loadingBadges ? (
+          {loadingBadges || loadingEquippedItems ? (
             <View style={styles.loadingBadgesContainer}>
               <ActivityIndicator size="small" color={COLORS.primary} />
               <Text style={styles.loadingText}>Loading badges...</Text>
             </View>
-          ) : badges && badges.length > 0 ? (
+          ) : (badges && badges.length > 0) ||
+            equippedItems.badges.length > 0 ? (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.badgesContainer}
             >
+              {/* Shop Badges First (Equipped) */}
+              {equippedItems.badges.map((badge, index) => (
+                <TouchableOpacity
+                  key={`shop-badge-${badge.item_id || index}`}
+                  style={[styles.badgeItem, styles.shopBadgeItem]}
+                  onPress={() =>
+                    Alert.alert(
+                      `🎖️ ${badge.name}`,
+                      `${badge.description}\n\nType: Shop Badge (Equipped)`,
+                      [{ text: "Cool!", style: "default" }]
+                    )
+                  }
+                  activeOpacity={0.7}
+                >
+                  {hasItemImage(badge.image_url) ? (
+                    <Image
+                      source={getItemImage(badge.image_url)}
+                      style={styles.badgeIcon}
+                      resizeMode="contain"
+                    />
+                  ) : (
+                    <View style={[styles.badgeIcon, styles.badgePlaceholder]}>
+                      <Text style={styles.badgePlaceholderText}>B</Text>
+                    </View>
+                  )}
+                  <Text style={styles.badgeName} numberOfLines={2}>
+                    {badge.name}
+                  </Text>
+                  <Text style={styles.shopBadgeLabel}>Shop</Text>
+                </TouchableOpacity>
+              ))}
+
+              {/* Achievement Badges */}
               {badges.map((badge, index) => (
                 <TouchableOpacity
                   key={badge.id || index}
@@ -533,7 +623,7 @@ const ProfileScreen = () => {
                   activeOpacity={0.7}
                 >
                   <Image
-                    source={badge.icon} // ✅ Now uses the properly mapped image
+                    source={badge.icon}
                     style={styles.badgeIcon}
                     resizeMode="contain"
                   />
@@ -691,36 +781,69 @@ const styles = StyleSheet.create({
     color: COLORS.white,
     fontWeight: "600",
   },
-  // Profile header
+  // Profile header with theme
+  profileHeaderContainer: {
+    position: "relative",
+  },
+  themeBackground: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 250,
+    width: "100%",
+  },
+  themeOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 250,
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+  },
   profileHeader: {
     alignItems: "center",
     paddingVertical: 20,
   },
-  profileImageContainer: {
-    height: 100,
-    width: 100,
-    borderRadius: 50,
+  profileImageWrapper: {
+    position: "relative",
+    width: 120,
+    height: 120,
+    alignItems: "center",
+    justifyContent: "center",
     marginBottom: 16,
+  },
+  profileRing: {
+    position: "absolute",
+    width: 120,
+    height: 120,
+    zIndex: 1,
+  },
+  profileImageContainer: {
+    height: 90,
+    width: 90,
+    borderRadius: 45,
     borderWidth: 2,
     borderColor: "#E1E5F2",
+    overflow: "hidden",
   },
   profileImage: {
-    height: 100,
-    width: 100,
-    borderRadius: 50,
+    height: 90,
+    width: 90,
+    borderRadius: 45,
   },
   imageLoading: {
-    height: 100,
-    width: 100,
-    borderRadius: 50,
+    height: 90,
+    width: 90,
+    borderRadius: 45,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "rgba(0,0,0,0.3)",
   },
   editImageButton: {
     position: "absolute",
-    right: 0,
-    bottom: 0,
+    right: -5,
+    bottom: -5,
     backgroundColor: COLORS.primary,
     width: 28,
     height: 28,
@@ -730,7 +853,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: COLORS.background,
   },
-  // Containers for name and username
+  // Name and username
   nameContainer: {
     alignItems: "center",
     marginBottom: 4,
@@ -738,14 +861,15 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: 24,
     fontWeight: "700",
-    color: COLORS.text,
+    color: COLORS.white,
   },
   userUsername: {
     fontSize: 16,
-    color: COLORS.textSecondary,
+    color: COLORS.white,
     marginBottom: 16,
+    opacity: 0.8,
   },
-  // Explicit buttons container
+  // Explicit buttons
   explicitButtonsContainer: {
     flexDirection: "row",
     justifyContent: "center",
@@ -765,7 +889,7 @@ const styles = StyleSheet.create({
     maxWidth: 150,
   },
   logoutButton: {
-    backgroundColor: "#FF375F", // Red tint for logout button
+    backgroundColor: "#FF375F",
   },
   buttonText: {
     color: COLORS.white,
@@ -825,7 +949,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: COLORS.primary,
   },
-  // ✅ NEW: Badge count container
+  // Badge count
   badgeCountContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -870,17 +994,17 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginRight: 8,
   },
-  // ✅ UPDATED: Badges styles
+  // Badges
   badgesContainer: {
     paddingBottom: 8,
   },
   badgeItem: {
     alignItems: "center",
     marginRight: 16,
-    width: 90, // Slightly wider for achievement badges
+    width: 90,
   },
   badgeIcon: {
-    width: 60, // Larger icon for better visibility
+    width: 60,
     height: 60,
     marginBottom: 8,
   },
@@ -891,18 +1015,38 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginBottom: 2,
   },
-  // ✅ NEW: Badge category style
   badgeCategory: {
     fontSize: 10,
     textAlign: "center",
     color: COLORS.textSecondary,
     fontStyle: "italic",
   },
-  // ✅ NEW: Loading badges container
   loadingBadgesContainer: {
     height: 100,
     justifyContent: "center",
     alignItems: "center",
+  },
+  // Shop badge specific
+  shopBadgeItem: {
+    backgroundColor: "rgba(106, 90, 205, 0.1)",
+    borderRadius: 8,
+    padding: 8,
+  },
+  shopBadgeLabel: {
+    fontSize: 10,
+    color: COLORS.primary,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  badgePlaceholder: {
+    backgroundColor: "#e0e0e0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  badgePlaceholderText: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#757575",
   },
   // Communities
   communitiesContainer: {

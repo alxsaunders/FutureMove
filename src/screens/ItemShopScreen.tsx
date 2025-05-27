@@ -1,6 +1,6 @@
-// Log user ID and route params
+// src/screens/ItemShopScreen.tsx
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -16,7 +16,43 @@ import {
   Dimensions,
   Modal,
   ScrollView,
+  ListRenderItem,
 } from "react-native";
+import { NavigationProp, RouteProp } from "@react-navigation/native";
+import { getItemImage, hasItemImage } from "../utils/itemImageMapping";
+
+// Type definitions
+interface ShopItem {
+  item_id: number;
+  name: string;
+  description: string;
+  image_url: string | null;
+  category: string;
+  price: number;
+  is_active: number;
+  created_at?: string;
+}
+
+interface UserItem extends ShopItem {
+  user_item_id: number;
+  user_id: string;
+  purchased_at: string;
+  is_equipped: number;
+}
+
+interface ItemWithOwnership extends ShopItem {
+  isOwned?: boolean;
+}
+
+interface RouteParams {
+  userId?: string;
+  forceRefresh?: number;
+}
+
+interface Props {
+  route: RouteProp<{ params: RouteParams }, "params">;
+  navigation: NavigationProp<any>;
+}
 
 // Get screen width for calculating item width
 const screenWidth = Dimensions.get("window").width;
@@ -30,41 +66,26 @@ const API_URL =
 // EMERGENCY FALLBACK - replace with a valid user ID from your database
 const FALLBACK_USER_ID = "KbtY3t4Tatd0r5tCjnjlmJyNT5R2";
 
-const ItemShopScreen = ({ route, navigation }) => {
+const ItemShopScreen: React.FC<Props> = ({ route, navigation }) => {
   // Screen state
-  const [items, setItems] = useState([]);
-  const [userItems, setUserItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [coins, setCoins] = useState(0);
-  const [activeTab, setActiveTab] = useState("shop"); // 'shop' or 'inventory'
-  const [refreshKey, setRefreshKey] = useState(0); // Add state for forcing refresh
+  const [items, setItems] = useState<ShopItem[]>([]);
+  const [userItems, setUserItems] = useState<UserItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [coins, setCoins] = useState<number>(0);
+  const [activeTab, setActiveTab] = useState<"shop" | "inventory">("shop");
+  const [refreshKey, setRefreshKey] = useState<number>(0);
 
   // Modal state
-  const [modalVisible, setModalVisible] = useState(false);
-  const [selectedItem, setSelectedItem] = useState(null);
+  const [modalVisible, setModalVisible] = useState<boolean>(false);
+  const [selectedItem, setSelectedItem] = useState<ItemWithOwnership | null>(
+    null
+  );
 
   // Get userId from route params or use fallback
   const userId = route.params?.userId || FALLBACK_USER_ID;
 
-  // Add focus listener to refresh when screen is focused
-  useEffect(() => {
-    // This will trigger whenever the screen comes into focus
-    const unsubscribe = navigation.addListener("focus", () => {
-      console.log("[SHOP] Screen focused - refreshing data");
-      // Perform a full data refresh
-      fetchData();
-    });
-
-    // Clean up the listener when component unmounts
-    return unsubscribe;
-  }, [navigation, fetchData]);
-
-  // Fetch shop data when params or refresh key changes
-  useEffect(() => {
-    fetchData();
-  }, [userId, route.params?.forceRefresh, refreshKey]);
-
-  const fetchData = async () => {
+  // Memoized fetch function
+  const fetchData = useCallback(async () => {
     if (!userId) {
       console.log("[SHOP] No userId available, skipping fetch");
       setLoading(false);
@@ -77,7 +98,7 @@ const ItemShopScreen = ({ route, navigation }) => {
     try {
       // Get shop items
       const shopResponse = await fetch(`${API_URL}/items`);
-      const shopData = await shopResponse.json();
+      const shopData: ShopItem[] = await shopResponse.json();
       setItems(shopData);
       console.log(`[SHOP] Fetched ${shopData.length} shop items`);
 
@@ -89,7 +110,7 @@ const ItemShopScreen = ({ route, navigation }) => {
 
       // Get user inventory
       const inventoryResponse = await fetch(`${API_URL}/items/user/${userId}`);
-      const inventoryData = await inventoryResponse.json();
+      const inventoryData: UserItem[] = await inventoryResponse.json();
       setUserItems(inventoryData);
       console.log(`[SHOP] User has ${inventoryData.length} items in inventory`);
     } catch (error) {
@@ -98,34 +119,46 @@ const ItemShopScreen = ({ route, navigation }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId]);
+
+  // Add focus listener to refresh when screen is focused
+  useEffect(() => {
+    const unsubscribe = navigation.addListener("focus", () => {
+      console.log("[SHOP] Screen focused - refreshing data");
+      fetchData();
+    });
+
+    return unsubscribe;
+  }, [navigation, fetchData]);
+
+  // Fetch shop data when params or refresh key changes
+  useEffect(() => {
+    fetchData();
+  }, [userId, route.params?.forceRefresh, refreshKey, fetchData]);
 
   // Function to force a screen refresh
-  const refreshScreen = () => {
+  const refreshScreen = (): void => {
     setRefreshKey((prevKey) => prevKey + 1);
   };
 
-  // Show item detail in modal instead of navigating to another screen
-  const showItemDetail = (item) => {
-    // Make sure we have the latest data before showing details
+  // Show item detail in modal
+  const showItemDetail = (item: ShopItem): void => {
     refreshScreen();
 
     const isOwned = userItems.some(
       (userItem) => userItem.item_id === item.item_id
     );
 
-    // Set the selected item with ownership status
     setSelectedItem({
       ...item,
       isOwned,
     });
 
-    // Show the modal
     setModalVisible(true);
   };
 
   // Handle item purchase
-  const handlePurchase = async (itemId) => {
+  const handlePurchase = async (itemId: number): Promise<void> => {
     if (!userId) return;
 
     try {
@@ -140,15 +173,11 @@ const ItemShopScreen = ({ route, navigation }) => {
       const result = await response.json();
 
       if (result.success) {
-        // Close the modal if open
         if (modalVisible) {
           setModalVisible(false);
         }
 
-        // Switch to inventory tab to show the new item
         setActiveTab("inventory");
-
-        // Perform a full refresh of the screen data
         await fetchData();
 
         Alert.alert(
@@ -167,7 +196,7 @@ const ItemShopScreen = ({ route, navigation }) => {
   };
 
   // Handle equip/unequip
-  const toggleEquip = async (itemId) => {
+  const toggleEquip = async (itemId: number): Promise<void> => {
     if (!userId) return;
 
     try {
@@ -182,12 +211,9 @@ const ItemShopScreen = ({ route, navigation }) => {
       const result = await response.json();
 
       if (result.success) {
-        // Perform a full refresh of all screen data
         await fetchData();
 
-        // Update modal item if it's currently displayed
         if (modalVisible && selectedItem && selectedItem.item_id === itemId) {
-          // Find the updated item from the refreshed userItems state
           const updatedItem = userItems.find((item) => item.item_id === itemId);
           if (updatedItem) {
             setSelectedItem({
@@ -198,6 +224,15 @@ const ItemShopScreen = ({ route, navigation }) => {
         }
 
         Alert.alert("Success", result.message);
+
+        const equippedItem = userItems.find((item) => item.item_id === itemId);
+        if (
+          equippedItem &&
+          (equippedItem.category === "theme" ||
+            equippedItem.category === "profile_ring")
+        ) {
+          navigation.navigate("Profile", { forceRefresh: Date.now() });
+        }
       } else {
         Alert.alert("Failed", result.message);
       }
@@ -209,12 +244,10 @@ const ItemShopScreen = ({ route, navigation }) => {
     }
   };
 
-  // Handle tab switching without refreshing
-  const handleTabSwitch = (tab) => {
-    // Only change tabs if different
+  // Handle tab switching
+  const handleTabSwitch = (tab: "shop" | "inventory"): void => {
     if (tab !== activeTab) {
       setActiveTab(tab);
-      // No data refresh when switching between Shop and Inventory tabs
     }
   };
 
@@ -228,8 +261,8 @@ const ItemShopScreen = ({ route, navigation }) => {
     );
   }
 
-  // Render shop item (Grid Layout)
-  const renderShopItem = ({ item }) => {
+  // Render shop item
+  const renderShopItem: ListRenderItem<ShopItem> = ({ item }) => {
     const isOwned = userItems.some(
       (userItem) => userItem.item_id === item.item_id
     );
@@ -240,12 +273,12 @@ const ItemShopScreen = ({ route, navigation }) => {
         style={styles.gridItem}
         onPress={() => showItemDetail(item)}
       >
-        {/* Item image or placeholder */}
         <View style={styles.gridImageContainer}>
-          {item.image_url ? (
+          {item.image_url && hasItemImage(item.image_url) ? (
             <Image
-              source={{ uri: item.image_url }}
+              source={getItemImage(item.image_url)}
               style={styles.gridItemImage}
+              resizeMode="contain"
             />
           ) : (
             <View style={[styles.gridItemImage, styles.placeholder]}>
@@ -256,7 +289,6 @@ const ItemShopScreen = ({ route, navigation }) => {
           )}
         </View>
 
-        {/* Item details */}
         <View style={styles.gridItemDetails}>
           <Text
             style={styles.gridItemName}
@@ -281,7 +313,6 @@ const ItemShopScreen = ({ route, navigation }) => {
             <Text style={styles.itemPrice}>{item.price}</Text>
           </View>
 
-          {/* Purchase or status button */}
           {isOwned ? (
             <View style={styles.ownedBadge}>
               <Text style={styles.ownedText}>Owned</Text>
@@ -293,7 +324,7 @@ const ItemShopScreen = ({ route, navigation }) => {
                 !canAfford && styles.disabledButton,
               ]}
               onPress={(e) => {
-                e.stopPropagation(); // Prevent triggering the card's onPress
+                e.stopPropagation();
                 handlePurchase(item.item_id);
               }}
               disabled={!canAfford}
@@ -308,8 +339,8 @@ const ItemShopScreen = ({ route, navigation }) => {
     );
   };
 
-  // Render inventory item (Grid Layout)
-  const renderInventoryItem = ({ item }) => {
+  // Render inventory item
+  const renderInventoryItem: ListRenderItem<UserItem> = ({ item }) => {
     const isEquipped = item.is_equipped === 1;
 
     return (
@@ -317,12 +348,12 @@ const ItemShopScreen = ({ route, navigation }) => {
         style={[styles.gridItem, isEquipped && styles.equippedCard]}
         onPress={() => showItemDetail(item)}
       >
-        {/* Item image or placeholder */}
         <View style={styles.gridImageContainer}>
-          {item.image_url ? (
+          {item.image_url && hasItemImage(item.image_url) ? (
             <Image
-              source={{ uri: item.image_url }}
+              source={getItemImage(item.image_url)}
               style={styles.gridItemImage}
+              resizeMode="contain"
             />
           ) : (
             <View style={[styles.gridItemImage, styles.placeholder]}>
@@ -332,7 +363,6 @@ const ItemShopScreen = ({ route, navigation }) => {
             </View>
           )}
 
-          {/* Equipped badge */}
           {isEquipped && (
             <View style={styles.equippedBadge}>
               <Text style={styles.equippedText}>Equipped</Text>
@@ -340,7 +370,6 @@ const ItemShopScreen = ({ route, navigation }) => {
           )}
         </View>
 
-        {/* Item details */}
         <View style={styles.gridItemDetails}>
           <Text
             style={styles.gridItemName}
@@ -357,11 +386,10 @@ const ItemShopScreen = ({ route, navigation }) => {
             {item.category}
           </Text>
 
-          {/* Toggle equip button */}
           <TouchableOpacity
             style={[styles.equipButton, isEquipped && styles.unequipButton]}
             onPress={(e) => {
-              e.stopPropagation(); // Prevent triggering the card's onPress
+              e.stopPropagation();
               toggleEquip(item.item_id);
             }}
           >
@@ -375,13 +403,16 @@ const ItemShopScreen = ({ route, navigation }) => {
   };
 
   // Item Detail Modal Component
-  const ItemDetailModal = () => {
+  const ItemDetailModal: React.FC = () => {
     if (!selectedItem) return null;
 
     const isOwned =
       selectedItem.isOwned ||
       userItems.some((item) => item.item_id === selectedItem.item_id);
-    const isEquipped = selectedItem.is_equipped === 1;
+    const userItem = userItems.find(
+      (item) => item.item_id === selectedItem.item_id
+    );
+    const isEquipped = userItem?.is_equipped === 1;
     const canAfford = coins >= selectedItem.price;
 
     return (
@@ -393,7 +424,6 @@ const ItemShopScreen = ({ route, navigation }) => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            {/* Close button */}
             <TouchableOpacity
               style={styles.closeButton}
               onPress={() => setModalVisible(false)}
@@ -401,14 +431,14 @@ const ItemShopScreen = ({ route, navigation }) => {
               <Text style={styles.closeButtonText}>✕</Text>
             </TouchableOpacity>
 
-            {/* Scrollable content */}
             <ScrollView>
-              {/* Item image */}
               <View style={styles.modalImageContainer}>
-                {selectedItem.image_url ? (
+                {selectedItem.image_url &&
+                hasItemImage(selectedItem.image_url) ? (
                   <Image
-                    source={{ uri: selectedItem.image_url }}
+                    source={getItemImage(selectedItem.image_url)}
                     style={styles.modalImage}
+                    resizeMode="contain"
                   />
                 ) : (
                   <View style={[styles.modalImage, styles.placeholder]}>
@@ -419,7 +449,6 @@ const ItemShopScreen = ({ route, navigation }) => {
                 )}
               </View>
 
-              {/* Item details */}
               <Text style={styles.modalTitle}>{selectedItem.name}</Text>
               <View style={styles.modalCategoryContainer}>
                 <Text style={styles.modalCategory}>
@@ -427,7 +456,6 @@ const ItemShopScreen = ({ route, navigation }) => {
                 </Text>
               </View>
 
-              {/* Price */}
               {!isOwned && (
                 <View style={styles.modalPriceContainer}>
                   <Image
@@ -438,13 +466,11 @@ const ItemShopScreen = ({ route, navigation }) => {
                 </View>
               )}
 
-              {/* Description */}
               <Text style={styles.modalDescriptionTitle}>Description:</Text>
               <Text style={styles.modalDescription}>
                 {selectedItem.description || "No description available."}
               </Text>
 
-              {/* Action buttons */}
               {isOwned ? (
                 <TouchableOpacity
                   style={[
@@ -482,12 +508,9 @@ const ItemShopScreen = ({ route, navigation }) => {
     <SafeAreaView style={styles.container}>
       <StatusBar backgroundColor="#6A5ACD" barStyle="light-content" />
 
-      {/* Header with Title on left and Coins on right */}
       <View style={styles.header}>
-        {/* Left side - Title */}
         <Text style={styles.headerTitle}>Item Shop</Text>
 
-        {/* Right side - Coins */}
         <View style={styles.coinsContainer}>
           <Image
             source={require("../assets/images/future_coin.png")}
@@ -497,7 +520,6 @@ const ItemShopScreen = ({ route, navigation }) => {
         </View>
       </View>
 
-      {/* Tab Navigation */}
       <View style={styles.tabs}>
         <TouchableOpacity
           style={[styles.tab, activeTab === "shop" && styles.activeTab]}
@@ -528,7 +550,6 @@ const ItemShopScreen = ({ route, navigation }) => {
         </TouchableOpacity>
       </View>
 
-      {/* Content based on active tab - GRID LAYOUT */}
       {activeTab === "shop" ? (
         items.length > 0 ? (
           <FlatList
@@ -538,8 +559,8 @@ const ItemShopScreen = ({ route, navigation }) => {
               item.item_id?.toString() || Math.random().toString()
             }
             contentContainerStyle={styles.gridList}
-            numColumns={2} // Display 2 items per row
-            columnWrapperStyle={styles.gridRow} // Style for each row
+            numColumns={2}
+            columnWrapperStyle={styles.gridRow}
           />
         ) : (
           <View style={styles.emptyState}>
@@ -554,8 +575,8 @@ const ItemShopScreen = ({ route, navigation }) => {
             item.user_item_id?.toString() || `user-item-${item.item_id}`
           }
           contentContainerStyle={styles.gridList}
-          numColumns={2} // Display 2 items per row
-          columnWrapperStyle={styles.gridRow} // Style for each row
+          numColumns={2}
+          columnWrapperStyle={styles.gridRow}
         />
       ) : (
         <View style={styles.emptyState}>
@@ -563,7 +584,6 @@ const ItemShopScreen = ({ route, navigation }) => {
         </View>
       )}
 
-      {/* Item Detail Modal */}
       <ItemDetailModal />
     </SafeAreaView>
   );
@@ -574,7 +594,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#f5f5f5",
   },
-  // Header with Title and Coins
   header: {
     backgroundColor: "#6A5ACD",
     flexDirection: "row",
@@ -604,8 +623,8 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255, 255, 255, 0.3)",
   },
   coinIconLarge: {
-    width: 34, // Increased from 20
-    height: 34, // Increased from 20
+    width: 34,
+    height: 34,
     marginRight: 8,
   },
   coinsText: {
@@ -619,11 +638,10 @@ const styles = StyleSheet.create({
     marginVertical: 5,
   },
   coinIcon: {
-    width: 30, // Increased from 14
-    height: 30, // Increased from 14
+    width: 30,
+    height: 30,
     marginRight: 4,
   },
-  // Tab Navigation
   tabs: {
     flexDirection: "row",
     backgroundColor: "#fff",
@@ -653,8 +671,6 @@ const styles = StyleSheet.create({
     color: "#6A5ACD",
     fontWeight: "bold",
   },
-
-  // Grid Layout Styles
   gridList: {
     padding: 10,
   },
@@ -671,7 +687,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3,
     elevation: 2,
-    width: screenWidth / 2 - 15, // 2 items per row with margins
+    width: screenWidth / 2 - 15,
   },
   gridImageContainer: {
     position: "relative",
@@ -700,8 +716,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 5,
   },
-
-  // Modal styles
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
@@ -773,8 +787,8 @@ const styles = StyleSheet.create({
     marginVertical: 15,
   },
   modalCoinIcon: {
-    width: 44, // Increased from 20
-    height: 44, // Increased from 20
+    width: 44,
+    height: 44,
     marginRight: 8,
   },
   modalPrice: {
@@ -814,8 +828,6 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#757575",
   },
-
-  // Original styles kept for backward compatibility
   placeholder: {
     backgroundColor: "#e0e0e0",
     justifyContent: "center",
@@ -891,7 +903,6 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     fontSize: 12,
   },
-  // Loading and Empty States
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
