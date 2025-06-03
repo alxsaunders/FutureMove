@@ -14,7 +14,7 @@ import {
   Alert,
 } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import { CommonActions } from "@react-navigation/native"; // 👈 Import CommonActions
+import { CommonActions } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "../../common/constants/colors";
 import { useAuth } from "../../contexts/AuthContext";
@@ -24,7 +24,8 @@ import {
   leaveCommunity,
 } from "../../services/CommunityService";
 import { Community } from "../../types";
-import { auth } from "../../config/firebase.js"; // 👈 Import Firebase auth directly
+import { auth } from "../../config/firebase.js";
+import CommunityRequestModal from "./CommunityRequestModal";
 
 // Get screen width for category pills
 const { width } = Dimensions.get("window");
@@ -44,6 +45,7 @@ const CommunityHubTab = () => {
   const [loadingCommunityIds, setLoadingCommunityIds] = useState<Set<string>>(
     new Set()
   );
+  const [isRequestModalVisible, setIsRequestModalVisible] = useState(false);
   const navigation = useNavigation();
 
   // Available categories with fixed widths
@@ -67,7 +69,6 @@ const CommunityHubTab = () => {
       );
 
       if (!firebaseUser) {
-        // If in development mode, show a warning
         if (__DEV__) {
           console.warn(
             "No Firebase user available. Some features may not work."
@@ -78,41 +79,57 @@ const CommunityHubTab = () => {
 
     checkFirebaseAuth();
 
-    // Set up auth state listener
     const unsubscribe = auth.onAuthStateChanged((user) => {
       console.log(
         "Firebase auth state changed:",
         user ? user.uid : "signed out"
       );
-      // You could refresh data here if needed
     });
 
-    // Clean up listener
     return () => unsubscribe();
   }, []);
 
   // Function to navigate to CommunityDetail
   const navigateToCommunityDetail = (communityId: string | number) => {
-    // Change this to correctly navigate to a nested screen
-    navigation.navigate('Community', {
-      screen: 'CommunityDetail',
-      params: { communityId: String(communityId) }
+    navigation.navigate("Community", {
+      screen: "CommunityDetail",
+      params: { communityId: String(communityId) },
     });
   };
 
   // Function to navigate to CreatePost
   const navigateToCreatePost = (communityId?: string | number) => {
-    // This is the key fix - use the proper nesting path
     navigation.getParent()?.navigate("CreatePost", {
       communityId: communityId ? String(communityId) : undefined,
     });
+  };
+
+  // Handle community request button press
+  const handleRequestCommunity = () => {
+    const firebaseUser = auth.currentUser;
+
+    if (!firebaseUser) {
+      Alert.alert(
+        "Authentication Required",
+        "Please sign in to request a new community.",
+        [{ text: "OK" }]
+      );
+      return;
+    }
+
+    setIsRequestModalVisible(true);
+  };
+
+  // Handle successful community request submission
+  const handleRequestSuccess = () => {
+    // Optionally refresh the communities list or show a success message
+    console.log("Community request submitted successfully");
   };
 
   // Fetch communities with enhanced error handling
   const fetchCommunityData = useCallback(async () => {
     setIsLoading(true);
     try {
-      // Check Firebase auth directly
       const firebaseUser = auth.currentUser;
       console.log(
         "Firebase auth user when fetching communities:",
@@ -121,7 +138,6 @@ const CommunityHubTab = () => {
 
       if (!firebaseUser) {
         console.warn("Cannot fetch communities: No Firebase user");
-        // If in development, provide mock data for testing
         if (__DEV__) {
           console.log("Using mock data for development");
           const mockCommunities = [
@@ -151,7 +167,6 @@ const CommunityHubTab = () => {
             },
           ];
 
-          // Map mock communities to app format
           const mappedMockCommunities = mockCommunities.map((community) => ({
             id: String(community.id),
             name: community.name,
@@ -173,30 +188,26 @@ const CommunityHubTab = () => {
         return;
       }
 
-      // Fetch communities from the service (which will get Firebase user ID internally)
       const serviceData = await fetchCommunities();
       console.log("Fetched service data:", serviceData.length, "communities");
 
-      // Map service communities to app communities with proper type handling
       const mappedCommunities = serviceData.map((community) => ({
         id: String(community.id),
         name: community.name || "",
         description: community.description || "",
         category: community.category || "General",
         members: community.memberCount || 0,
-        posts: 0, // Default value since the service doesn't provide this
+        posts: 0,
         image: community.imageUrl || "https://via.placeholder.com/150",
         isJoined: Boolean(community.isJoined),
       }));
 
       console.log("Mapped communities:", mappedCommunities.length);
 
-      // Set both state values
       setCommunities(mappedCommunities);
       setFilteredCommunities(mappedCommunities);
     } catch (error) {
       console.error("Error fetching communities:", error);
-      // Set empty arrays to avoid errors
       setCommunities([]);
       setFilteredCommunities([]);
 
@@ -215,19 +226,16 @@ const CommunityHubTab = () => {
   const applyFilters = useCallback(() => {
     let result = [...communities];
 
-    // Apply category filter
     if (selectedCategory !== "All") {
       result = result.filter(
         (community) => community.category === selectedCategory
       );
     }
 
-    // Apply joined filter
     if (showJoinedOnly) {
       result = result.filter((community) => community.isJoined);
     }
 
-    // Apply search
     if (searchQuery.trim() !== "") {
       const lowerCaseQuery = searchQuery.toLowerCase();
       result = result.filter(
@@ -245,10 +253,9 @@ const CommunityHubTab = () => {
     useCallback(() => {
       fetchCommunityData();
 
-      // Set up a refresh interval when screen is active
       const refreshTimer = setInterval(() => {
         fetchCommunityData();
-      }, 60000); // Refresh every minute
+      }, 60000);
 
       return () => {
         clearInterval(refreshTimer);
@@ -266,7 +273,6 @@ const CommunityHubTab = () => {
     id: string | number,
     isCurrentlyJoined: boolean
   ) => {
-    // Check Firebase auth directly
     const firebaseUser = auth.currentUser;
     const idStr = String(id);
 
@@ -288,7 +294,6 @@ const CommunityHubTab = () => {
     );
     console.log("Using Firebase user ID:", firebaseUser.uid);
 
-    // Set loading state for this community
     setLoadingCommunityIds((prev) => {
       const updated = new Set(prev);
       updated.add(idStr);
@@ -296,7 +301,7 @@ const CommunityHubTab = () => {
     });
 
     try {
-      // First, update UI optimistically for better user experience
+      // Optimistic update
       setCommunities((prevCommunities) =>
         prevCommunities.map((community) =>
           String(community.id) === idStr
@@ -325,7 +330,6 @@ const CommunityHubTab = () => {
         )
       );
 
-      // Then make the actual API call
       let success;
       if (isCurrentlyJoined) {
         console.log("Calling leaveCommunity API...");
@@ -337,9 +341,9 @@ const CommunityHubTab = () => {
 
       console.log("API call result:", success);
 
-      // If the API call failed, revert the UI changes
       if (!success) {
         console.warn("API call failed, reverting UI");
+        // Revert changes
         setCommunities((prevCommunities) =>
           prevCommunities.map((community) =>
             String(community.id) === idStr
@@ -386,7 +390,7 @@ const CommunityHubTab = () => {
     } catch (error) {
       console.error("Error toggling community membership:", error);
 
-      // Revert UI changes on error
+      // Revert changes on error
       setCommunities((prevCommunities) =>
         prevCommunities.map((community) =>
           String(community.id) === idStr
@@ -424,7 +428,6 @@ const CommunityHubTab = () => {
         );
       }
     } finally {
-      // Remove loading state for this community
       setLoadingCommunityIds((prev) => {
         const updated = new Set(prev);
         updated.delete(idStr);
@@ -446,7 +449,7 @@ const CommunityHubTab = () => {
             key={category.id}
             style={[
               styles.categoryPill,
-              { width: category.width }, // Fixed width
+              { width: category.width },
               selectedCategory === category.id && styles.selectedCategoryPill,
             ]}
             onPress={() => setSelectedCategory(category.id)}
@@ -552,12 +555,12 @@ const CommunityHubTab = () => {
   // Helper function to get category color
   const getCategoryColor = (category: string) => {
     const categoryColors: Record<string, string> = {
-      Health: "#F44336", // Red
-      Learning: "#5E6CE7", // Purple
-      Work: "#4CAF50", // Green
-      Finance: "#FF9800", // Orange
-      Wellness: "#9C27B0", // Deep Purple
-      Repair: "#56C3B6", // Teal
+      Health: "#F44336",
+      Learning: "#5E6CE7",
+      Work: "#4CAF50",
+      Finance: "#FF9800",
+      Wellness: "#9C27B0",
+      Repair: "#56C3B6",
     };
 
     return categoryColors[category] || COLORS.primary;
@@ -565,7 +568,20 @@ const CommunityHubTab = () => {
 
   return (
     <View style={styles.container}>
+      {/* Updated filter header with request button */}
       <View style={styles.filterHeader}>
+        <TouchableOpacity
+          style={styles.requestButton}
+          onPress={handleRequestCommunity}
+        >
+          <Ionicons
+            name="add-circle-outline"
+            size={20}
+            color={COLORS.primary}
+          />
+          <Text style={styles.requestButtonText}>Request</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity
           style={styles.filterButton}
           onPress={() => setShowJoinedOnly(!showJoinedOnly)}
@@ -647,6 +663,13 @@ const CommunityHubTab = () => {
           )}
         </View>
       )}
+
+      {/* Community Request Modal */}
+      <CommunityRequestModal
+        visible={isRequestModalVisible}
+        onClose={() => setIsRequestModalVisible(false)}
+        onSuccess={handleRequestSuccess}
+      />
     </View>
   );
 };
@@ -658,10 +681,27 @@ const styles = StyleSheet.create({
   },
   filterHeader: {
     flexDirection: "row",
-    justifyContent: "flex-end",
+    justifyContent: "space-between",
+    alignItems: "center",
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 4,
+  },
+  requestButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.cardBackground,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+  },
+  requestButtonText: {
+    marginLeft: 4,
+    fontSize: 14,
+    fontWeight: "500",
+    color: COLORS.primary,
   },
   filterButton: {
     flexDirection: "row",
@@ -697,14 +737,14 @@ const styles = StyleSheet.create({
     color: COLORS.text,
   },
   categoryOuterContainer: {
-    height: 50, // Fixed height for the category container
+    height: 50,
     marginBottom: 8,
   },
   categoryContainer: {
     paddingHorizontal: 16,
   },
   categoryPill: {
-    height: 36, // Fixed height
+    height: 36,
     justifyContent: "center",
     alignItems: "center",
     borderRadius: 18,
@@ -712,7 +752,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardBackground,
     borderWidth: 1,
     borderColor: COLORS.border,
-    paddingHorizontal: 4, // Reduced padding to account for fixed width
+    paddingHorizontal: 4,
   },
   selectedCategoryPill: {
     backgroundColor: COLORS.primary,

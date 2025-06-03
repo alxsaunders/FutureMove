@@ -1093,8 +1093,25 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   // News section
   const renderNewsSection = () => (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>News</Text>
-      <NewsList news={news} />
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>News</Text>
+        <TouchableOpacity
+          style={styles.viewAllButton}
+          onPress={() => {
+            // Navigate to NewsScreen to see all news
+            navigation.navigate("NewsScreen");
+          }}
+        >
+          <Text style={styles.viewAllText}>View All</Text>
+        </TouchableOpacity>
+      </View>
+      <NewsList
+        news={news}
+        onItemPress={(selectedNews) => {
+          // Navigate to NewsScreen with the selected news item
+          navigation.navigate("NewsScreen", { selectedNews });
+        }}
+      />
     </View>
   );
 

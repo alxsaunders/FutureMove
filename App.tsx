@@ -1,5 +1,5 @@
 // Add DOMException polyfill at the top of the file, before other imports
-if (typeof global.DOMException === 'undefined') {
+if (typeof global.DOMException === "undefined") {
   // More complete DOMException polyfill with required constants
   class DOMExceptionPolyfill extends Error {
     static readonly INDEX_SIZE_ERR = 1;
@@ -27,24 +27,24 @@ if (typeof global.DOMException === 'undefined') {
     static readonly TIMEOUT_ERR = 23;
     static readonly INVALID_NODE_TYPE_ERR = 24;
     static readonly DATA_CLONE_ERR = 25;
-    
+
     code: number;
-    
+
     constructor(message?: string, name?: string) {
-      super(message || '');
-      this.name = name || 'DOMException';
-      this.message = message || '';
+      super(message || "");
+      this.name = name || "DOMException";
+      this.message = message || "";
       this.code = 0;
     }
   }
-  
+
   // Add all the static properties to the prototype and constructor
-  Object.getOwnPropertyNames(DOMExceptionPolyfill).forEach(prop => {
-    if (typeof DOMExceptionPolyfill[prop] === 'number') {
+  Object.getOwnPropertyNames(DOMExceptionPolyfill).forEach((prop) => {
+    if (typeof DOMExceptionPolyfill[prop] === "number") {
       DOMExceptionPolyfill.prototype[prop] = DOMExceptionPolyfill[prop];
     }
   });
-  
+
   // Use type assertion to bypass TypeScript's type checking for this assignment
   global.DOMException = DOMExceptionPolyfill as unknown as typeof DOMException;
 }
@@ -62,7 +62,8 @@ import { AuthProvider, useAuth } from "./src/contexts/AuthContext";
 // Import screens
 import SplashScreen from "./src/screens/SplashScreen";
 import SignUpScreen from "./src/screens/SignUpScreen";
-import AchievementsScreen from "./src/screens/AchievementsScreen"; // ← ADDED: Achievement screen import
+import AchievementsScreen from "./src/screens/AchievementsScreen";
+import NewsScreen from "./src/screens/NewsScreen"; // ← ADDED: NewsScreen import
 import { RootStackParamList } from "./src/types/navigaton";
 
 // Import bottom tab navigator
@@ -72,10 +73,6 @@ const Stack = createStackNavigator<RootStackParamList>();
 
 // Create a wrapper component to handle the case where screens might not be loaded yet
 const AppContent = () => {
-  // Note: We're not initializing routine reset service here
-  // It will be initialized in HomeScreenWrapper instead
-  // This avoids potential issues with imports and timing
-
   return (
     <NavigationContainer>
       <Stack.Navigator
@@ -85,7 +82,18 @@ const AppContent = () => {
         <Stack.Screen name="Splash" component={SplashScreen} />
         <Stack.Screen name="SignUp" component={SignUpScreen} />
         <Stack.Screen name="Main" component={BottomTabNavigator} />
-        <Stack.Screen name="Achievements" component={AchievementsScreen} /> 
+        <Stack.Screen name="Achievements" component={AchievementsScreen} />
+        <Stack.Screen
+          name="NewsScreen"
+          component={NewsScreen}
+          options={{
+            headerShown: false,
+            presentation: "modal", // Makes it slide up like a modal
+            animationTypeForReplace: "push",
+            gestureEnabled: true,
+            gestureDirection: "vertical",
+          }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );

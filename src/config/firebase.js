@@ -2,7 +2,8 @@
 import { initializeApp } from 'firebase/app';
 import {
   initializeAuth,
-  getReactNativePersistence
+  getReactNativePersistence,
+  getAuth
 } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
@@ -18,13 +19,49 @@ const firebaseConfig = {
   measurementId: "G-09284YZSRN",
 };
 
+// Initialize Firebase app
 const app = initializeApp(firebaseConfig);
 
-const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(ReactNativeAsyncStorage)
-});
+// Initialize Auth with persistence
+let auth;
+try {
+  auth = initializeAuth(app, {
+    persistence: getReactNativePersistence(ReactNativeAsyncStorage)
+  });
+} catch (error) {
+  // If auth is already initialized, get the existing instance
+  if (error.code === 'auth/already-initialized') {
+    auth = getAuth(app);
+  } else {
+    throw error;
+  }
+}
 
+// Initialize Firestore
 const db = getFirestore(app);
+
+// Initialize Storage
 const storage = getStorage(app);
 
-export { auth, db, storage };
+// Test Firebase connection (optional - for debugging)
+const testFirebaseConnection = () => {
+  try {
+    console.log('🔥 Firebase initialized successfully');
+    console.log('📱 App:', app.name);
+    console.log('🔐 Auth domain:', firebaseConfig.authDomain);
+    console.log('💾 Storage bucket:', firebaseConfig.storageBucket);
+    console.log('📊 Project ID:', firebaseConfig.projectId);
+    return true;
+  } catch (error) {
+    console.error('❌ Firebase initialization failed:', error);
+    return false;
+  }
+};
+
+// Run connection test in development
+if (__DEV__) {
+  testFirebaseConnection();
+}
+
+export { auth, db, storage, app };
+export default app;

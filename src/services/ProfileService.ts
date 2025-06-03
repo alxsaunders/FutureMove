@@ -1,4 +1,4 @@
-// src/services/ProfileService.ts - Updated with Old Image Deletion
+// src/services/ProfileService.ts - Complete Implementation with Command Feature and Old Image Deletion
 import axios, { AxiosError } from 'axios';
 import { Platform } from 'react-native';
 import { auth } from '../config/firebase';
@@ -132,6 +132,18 @@ export interface Badge {
   achievement_id?: string;
 }
 
+// Command interface
+export interface UserCommand {
+  id: number;
+  command_text: string;
+  created_at: string;
+  is_read: boolean;
+  from_user_id: string;
+  from_user_name: string;
+  from_user_username: string;
+  from_user_image?: string;
+}
+
 /**
  * Delete an old profile image from Firebase Storage
  * @param imageUrl - The Firebase Storage URL of the image to delete
@@ -189,14 +201,14 @@ export const fetchUserProfile = async (userId: string): Promise<ExtendedUserProf
     logDebug(`Fetching profile for user: ${userId}`);
     const apiUrl = getApiBaseUrl();
 
-    // Get current user ID for authorization context
+    // Try to get current user ID for authorization context, but don't fail if not available
     let currentUserId;
     try {
       currentUserId = await getCurrentUserId();
-      logDebug(`Using currentUserId for context: ${currentUserId}`);
+      logDebug(`Using authenticated currentUserId for context: ${currentUserId}`);
     } catch (error) {
-      logDebug(`Using provided userId as fallback context: ${userId}`);
-      currentUserId = userId;
+      logDebug(`No authenticated user found, using userId as context: ${userId}`);
+      currentUserId = userId; // Use the requested userId as fallback for context
     }
 
     const requestUrl = `${apiUrl}/profile/${userId}?userId=${currentUserId}`;
@@ -479,8 +491,6 @@ export const updateUserProfile = async (
   }
 };
 
-// ... rest of the functions remain the same ...
-
 /**
  * Add a commend to a user
  * @param userId - The ID of the user to commend
@@ -538,6 +548,117 @@ export const removeCommend = async (userId: string): Promise<{ success: boolean,
     }
     console.error('Error removing commend:', error);
     throw error;
+  }
+};
+
+/**
+ * Send a command to another user
+ * @param toUserId - The ID of the user to send the command to
+ * @param commandText - The command message text
+ * @returns Promise resolving to success status and message
+ */
+export const sendUserCommand = async (
+  toUserId: string, 
+  commandText: string
+): Promise<{ success: boolean; message?: string }> => {
+  try {
+    logDebug(`Sending command to user: ${toUserId}`);
+    const apiUrl = getApiBaseUrl();
+    const currentUserId = await getCurrentUserId();
+
+    const response = await axios.post(`${apiUrl}/profile/${toUserId}/commands`, {
+      command: commandText,
+      fromUserId: currentUserId
+    }, {
+      timeout: 10000
+    });
+
+    logDebug('Command sent successfully', response.data);
+    return {
+      success: response.data.success,
+      message: response.data.message || 'Command sent successfully',
+    };
+  } catch (error) {
+    logDebug(`Error sending command: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+      return {
+        success: false,
+        message: error.response.data.error || `Error response from API: ${error.response.status}`,
+      };
+    }
+    console.error('Error sending command:', error);
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : 'Failed to send command',
+    };
+  }
+};
+
+/**
+ * Fetch commands received by the current user
+ * @param limit - Number of commands to fetch
+ * @param offset - Offset for pagination
+ * @returns Promise resolving to commands list
+ */
+export const fetchUserCommands = async (limit: number = 20, offset: number = 0): Promise<{
+  commands: UserCommand[];
+  total: number;
+}> => {
+  try {
+    logDebug(`Fetching commands with limit: ${limit}, offset: ${offset}`);
+    const apiUrl = getApiBaseUrl();
+
+    const response = await axios.get(`${apiUrl}/profile/commands?limit=${limit}&offset=${offset}`, {
+      timeout: 8000
+    });
+
+    logDebug(`Commands API response status: ${response.status}`);
+    logDebug(`Commands received:`, response.data);
+
+    return {
+      commands: response.data.commands || [],
+      total: response.data.total || 0
+    };
+  } catch (error) {
+    logDebug(`Error fetching commands: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    console.error('Error fetching commands:', error);
+    return {
+      commands: [],
+      total: 0
+    };
+  }
+};
+
+/**
+ * Mark a command as read
+ * @param commandId - The ID of the command to mark as read
+ * @returns Promise resolving to success status
+ */
+export const markCommandAsRead = async (commandId: number): Promise<boolean> => {
+  try {
+    logDebug(`Marking command as read: ${commandId}`);
+    const apiUrl = getApiBaseUrl();
+
+    const response = await axios.patch(`${apiUrl}/profile/commands/${commandId}/read`, {}, {
+      timeout: 8000
+    });
+
+    logDebug('Command marked as read successfully', response.data);
+    return response.data.success === true;
+  } catch (error) {
+    logDebug(`Error marking command as read: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    console.error('Error marking command as read:', error);
+    return false;
   }
 };
 
@@ -650,13 +771,14 @@ export const fetchUserCommunities = async (userId: string): Promise<Community[]>
     logDebug(`Fetching joined communities for user: ${userId}`);
     const apiUrl = getApiBaseUrl();
 
+    // Try to get current user ID for authorization context, but don't fail if not available
     let currentUserId;
     try {
       currentUserId = await getCurrentUserId();
-      logDebug(`Using currentUserId for context: ${currentUserId}`);
+      logDebug(`Using authenticated currentUserId for context: ${currentUserId}`);
     } catch (error) {
-      logDebug(`Using provided userId as fallback context: ${userId}`);
-      currentUserId = userId;
+      logDebug(`No authenticated user found, using userId as context: ${userId}`);
+      currentUserId = userId; // Use the requested userId as fallback for context
     }
 
     const requestUrl = `${apiUrl}/communities/user/${userId}/joined`;
@@ -802,6 +924,7 @@ export const leaveCommunity = async (communityId: number | string): Promise<bool
     throw error;
   }
 };
+
 /**
  * Fetch user's equipped items from the shop
  * @param userId - The ID of the user to fetch equipped items for
@@ -841,5 +964,270 @@ export const fetchUserEquippedItems = async (userId: string): Promise<{
     logDebug(`Error fetching equipped items: ${error instanceof Error ? error.message : String(error)}`);
     console.error('Error fetching equipped items:', error);
     return { badges: [] };
+  }
+};
+
+/**
+ * Search for users by name or username
+ * @param query - Search query string
+ * @param limit - Number of results to return
+ * @returns Promise resolving to array of user search results
+ */
+export const searchUsers = async (query: string, limit: number = 10): Promise<any[]> => {
+  try {
+    logDebug(`Searching users with query: ${query}, limit: ${limit}`);
+    const apiUrl = getApiBaseUrl();
+
+    const response = await axios.get(`${apiUrl}/users/search?q=${encodeURIComponent(query)}&limit=${limit}`, {
+      timeout: 8000
+    });
+
+    logDebug(`User search response status: ${response.status}`);
+    logDebug(`Found ${response.data.length || 0} users`);
+
+    return response.data || [];
+  } catch (error) {
+    logDebug(`Error searching users: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    console.error('Error searching users:', error);
+    return [];
+  }
+};
+
+/**
+ * Follow a user
+ * @param userId - The ID of the user to follow
+ * @returns Promise resolving to success status
+ */
+export const followUser = async (userId: string): Promise<boolean> => {
+  try {
+    logDebug(`Following user: ${userId}`);
+    const apiUrl = getApiBaseUrl();
+    const currentUserId = await getCurrentUserId();
+
+    const response = await axios.post(`${apiUrl}/users/${userId}/follow`, {
+      followerId: currentUserId
+    }, {
+      timeout: 8000
+    });
+
+    logDebug('Follow successful', response.data);
+    return response.data.success === true;
+  } catch (error) {
+    logDebug(`Error following user: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    console.error('Error following user:', error);
+    return false;
+  }
+};
+
+/**
+ * Unfollow a user
+ * @param userId - The ID of the user to unfollow
+ * @returns Promise resolving to success status
+ */
+export const unfollowUser = async (userId: string): Promise<boolean> => {
+  try {
+    logDebug(`Unfollowing user: ${userId}`);
+    const apiUrl = getApiBaseUrl();
+    const currentUserId = await getCurrentUserId();
+
+    const response = await axios.delete(`${apiUrl}/users/${userId}/follow?followerId=${currentUserId}`, {
+      timeout: 8000
+    });
+
+    logDebug('Unfollow successful', response.data);
+    return response.data.success === true;
+  } catch (error) {
+    logDebug(`Error unfollowing user: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    console.error('Error unfollowing user:', error);
+    return false;
+  }
+};
+
+/**
+ * Fetch user's followers
+ * @param userId - The ID of the user to get followers for
+ * @param page - Page number for pagination
+ * @param limit - Number of results per page
+ * @returns Promise resolving to followers list with pagination info
+ */
+export const fetchUserFollowers = async (userId: string, page: number = 1, limit: number = 20): Promise<any> => {
+  try {
+    logDebug(`Fetching followers for user: ${userId}, page: ${page}, limit: ${limit}`);
+    const apiUrl = getApiBaseUrl();
+
+    const response = await axios.get(`${apiUrl}/users/${userId}/followers?page=${page}&limit=${limit}`, {
+      timeout: 8000
+    });
+
+    logDebug(`Followers received:`, response.data);
+    return response.data;
+  } catch (error) {
+    logDebug(`Error fetching user followers: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    console.error('Error fetching user followers:', error);
+    return { followers: [], pagination: { total: 0, page: 1, limit, totalPages: 0, hasNext: false, hasPrev: false } };
+  }
+};
+
+/**
+ * Fetch users that a user is following
+ * @param userId - The ID of the user to get following list for
+ * @param page - Page number for pagination
+ * @param limit - Number of results per page
+ * @returns Promise resolving to following list with pagination info
+ */
+export const fetchUserFollowing = async (userId: string, page: number = 1, limit: number = 20): Promise<any> => {
+  try {
+    logDebug(`Fetching following for user: ${userId}, page: ${page}, limit: ${limit}`);
+    const apiUrl = getApiBaseUrl();
+
+    const response = await axios.get(`${apiUrl}/users/${userId}/following?page=${page}&limit=${limit}`, {
+      timeout: 8000
+    });
+
+    logDebug(`Following received:`, response.data);
+    return response.data;
+  } catch (error) {
+    logDebug(`Error fetching user following: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    console.error('Error fetching user following:', error);
+    return { following: [], pagination: { total: 0, page: 1, limit, totalPages: 0, hasNext: false, hasPrev: false } };
+  }
+};
+
+/**
+ * Block a user
+ * @param userId - The ID of the user to block
+ * @returns Promise resolving to success status
+ */
+export const blockUser = async (userId: string): Promise<boolean> => {
+  try {
+    logDebug(`Blocking user: ${userId}`);
+    const apiUrl = getApiBaseUrl();
+    const currentUserId = await getCurrentUserId();
+
+    const response = await axios.post(`${apiUrl}/users/${userId}/block`, {
+      blockerId: currentUserId
+    }, {
+      timeout: 8000
+    });
+
+    logDebug('Block successful', response.data);
+    return response.data.success === true;
+  } catch (error) {
+    logDebug(`Error blocking user: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    console.error('Error blocking user:', error);
+    return false;
+  }
+};
+
+/**
+ * Unblock a user
+ * @param userId - The ID of the user to unblock
+ * @returns Promise resolving to success status
+ */
+export const unblockUser = async (userId: string): Promise<boolean> => {
+  try {
+    logDebug(`Unblocking user: ${userId}`);
+    const apiUrl = getApiBaseUrl();
+    const currentUserId = await getCurrentUserId();
+
+    const response = await axios.delete(`${apiUrl}/users/${userId}/block?blockerId=${currentUserId}`, {
+      timeout: 8000
+    });
+
+    logDebug('Unblock successful', response.data);
+    return response.data.success === true;
+  } catch (error) {
+    logDebug(`Error unblocking user: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    console.error('Error unblocking user:', error);
+    return false;
+  }
+};
+
+/**
+ * Report a user
+ * @param userId - The ID of the user to report
+ * @param reason - Reason for reporting
+ * @param description - Additional description
+ * @returns Promise resolving to success status
+ */
+export const reportUser = async (userId: string, reason: string, description?: string): Promise<boolean> => {
+  try {
+    logDebug(`Reporting user: ${userId}, reason: ${reason}`);
+    const apiUrl = getApiBaseUrl();
+    const currentUserId = await getCurrentUserId();
+
+    const response = await axios.post(`${apiUrl}/users/${userId}/report`, {
+      reporterId: currentUserId,
+      reason,
+      description
+    }, {
+      timeout: 8000
+    });
+
+    logDebug('Report successful', response.data);
+    return response.data.success === true;
+  } catch (error) {
+    logDebug(`Error reporting user: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    console.error('Error reporting user:', error);
+    return false;
+  }
+};
+
+/**
+ * Delete user account
+ * @param userId - The ID of the user account to delete
+ * @returns Promise resolving to success status
+ */
+export const deleteUserAccount = async (userId: string): Promise<boolean> => {
+  try {
+    logDebug(`Deleting user account: ${userId}`);
+    const apiUrl = getApiBaseUrl();
+
+    const response = await axios.delete(`${apiUrl}/profile/${userId}/account`, {
+      timeout: 10000
+    });
+
+    logDebug('Account deletion successful', response.data);
+    return response.data.success === true;
+  } catch (error) {
+    logDebug(`Error deleting user account: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    console.error('Error deleting user account:', error);
+    return false;
   }
 };

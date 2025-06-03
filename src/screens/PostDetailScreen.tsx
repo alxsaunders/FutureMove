@@ -4,7 +4,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Image,
   TouchableOpacity,
   FlatList,
   TextInput,
@@ -26,10 +25,9 @@ import {
   createComment,
   toggleLikePost,
   toggleLikeComment,
-  fetchCommunityPosts,
 } from "../services/CommunityPostService";
-import { fetchJoinedCommunities } from "../services/CommunityService";
 import UserProfileModal from "../components/UserProfileModal";
+import FirebaseImage from "../components/common/FirebaseImage"; // Import our new component
 
 const PostDetailScreen = () => {
   const { currentUser } = useAuth();
@@ -194,7 +192,7 @@ const PostDetailScreen = () => {
 
   // Submit new comment
   const handleSubmitComment = async () => {
-    // if (!newComment.trim() || !currentUser || !post) return;
+    if (!newComment.trim() || !post) return;
 
     setIsSubmitting(true);
 
@@ -262,10 +260,11 @@ const PostDetailScreen = () => {
         onPress={() => handleUserProfileClick(item.userId)}
         activeOpacity={0.7}
       >
-        <Image
-          source={{ uri: item.userAvatar }}
-          style={styles.commentAvatar}
+        <FirebaseImage
+          uri={item.userAvatar}
+          imageStyle={styles.commentAvatar}
           defaultSource={require("../assets/default-avatar.png")}
+          optimizeSize={{ width: 72, height: 72 }} // 2x for sharp display
         />
       </TouchableOpacity>
       <View style={styles.commentContent}>
@@ -298,14 +297,6 @@ const PostDetailScreen = () => {
               {item.likes}
             </Text>
           </TouchableOpacity>
-          {/* <TouchableOpacity style={styles.commentAction}>
-            <Ionicons
-              name="chatbubble-outline"
-              size={16}
-              color={COLORS.textSecondary}
-            />
-            <Text style={styles.commentActionText}>Reply</Text>
-          </TouchableOpacity> */}
         </View>
       </View>
     </View>
@@ -376,10 +367,11 @@ const PostDetailScreen = () => {
                   activeOpacity={0.7}
                   style={styles.postHeaderClickable}
                 >
-                  <Image
-                    source={{ uri: post.userAvatar }}
-                    style={styles.avatar}
+                  <FirebaseImage
+                    uri={post.userAvatar}
+                    imageStyle={styles.avatar}
                     defaultSource={require("../assets/default-avatar.png")}
+                    optimizeSize={{ width: 80, height: 80 }} // 2x for sharp display
                   />
                   <View style={styles.postHeaderInfo}>
                     <Text style={styles.userName}>{post.userName}</Text>
@@ -393,12 +385,15 @@ const PostDetailScreen = () => {
               {/* Post Content */}
               <Text style={styles.postContent}>{post.content}</Text>
 
-              {/* Post Image (if exists) */}
+              {/* Post Image (if exists) - Now using FirebaseImage */}
               {post.image && (
-                <Image
-                  source={{ uri: post.image }}
-                  style={styles.postImage}
+                <FirebaseImage
+                  uri={post.image}
+                  imageStyle={styles.postImage}
+                  optimizeSize={{ width: 600, height: 500 }} // Larger for post images
                   resizeMode="cover"
+                  showLoading={true}
+                  showError={true}
                 />
               )}
 
@@ -473,13 +468,11 @@ const PostDetailScreen = () => {
 
         {/* Comment Input */}
         <View style={styles.commentInputContainer}>
-          <Image
-            source={{
-              uri:
-                currentUser?.profileImage || "https://via.placeholder.com/150",
-            }}
-            style={styles.currentUserAvatar}
+          <FirebaseImage
+            uri={currentUser?.profileImage}
+            imageStyle={styles.currentUserAvatar}
             defaultSource={require("../assets/default-avatar.png")}
+            optimizeSize={{ width: 72, height: 72 }} // 2x for sharp display
           />
           <TextInput
             ref={commentInputRef}
@@ -742,44 +735,6 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     backgroundColor: COLORS.border,
-  },
-  loginPromptContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    backgroundColor: COLORS.cardBackground,
-  },
-  loginPromptText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    flex: 1,
-  },
-  loginButton: {
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 6,
-    marginLeft: 12,
-  },
-  loginButtonText: {
-    color: COLORS.white,
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  debugInfo: {
-    position: "absolute",
-    bottom: -30,
-    left: 0,
-    right: 0,
-    backgroundColor: "rgba(255, 0, 0, 0.1)",
-    padding: 4,
-  },
-  debugText: {
-    fontSize: 10,
-    color: "red",
   },
 });
 

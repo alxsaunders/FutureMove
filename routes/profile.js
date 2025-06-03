@@ -1,4 +1,4 @@
-// routes/profile.js - Updated with Achievement Badges Support
+// routes/profile.js - Updated with Achievement Badges Support and Command Feature
 const express = require('express');
 
 module.exports = (pool, authenticateFirebaseToken) => {
@@ -113,6 +113,13 @@ module.exports = (pool, authenticateFirebaseToken) => {
     try {
       const userId = req.params.userId;
       const currentUserId = req.query.userId || req.user?.uid;
+
+      // Ensure we have a current user ID for proper authentication context
+      if (!currentUserId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      console.log(`[PROFILE] Fetching profile for ${userId}, requested by ${currentUserId}`);
 
       // Get user basic info
       const [userRows] = await pool.execute(
@@ -564,6 +571,201 @@ module.exports = (pool, authenticateFirebaseToken) => {
         details: error.message,
         success: false
       });
+    }
+  });
+
+  // Send command to a user
+  router.post('/:userId/commands', authenticateFirebaseToken, async (req, res) => {
+    try {
+      const toUserId = req.params.userId;
+      const { command, fromUserId } = req.body;
+      const authenticatedUserId = req.user?.uid;
+
+      // Use the authenticated user ID or the provided fromUserId
+      const actualFromUserId = authenticatedUserId || fromUserId;
+
+      if (!actualFromUserId) {
+        return res.status(400).json({ error: 'From user ID is required' });
+      }
+
+      if (!command || command.trim().length === 0) {
+        return res.status(400).json({ error: 'Command text is required' });
+      }
+
+      if (command.length > 280) {
+        return res.status(400).json({ error: 'Command text too long (max 280 characters)' });
+      }
+
+      if (actualFromUserId === toUserId) {
+        return res.status(400).json({ error: 'Cannot send command to yourself' });
+      }
+
+      // Check if target user exists
+      const [targetUser] = await pool.execute(
+        'SELECT user_id, name FROM users WHERE user_id = ?',
+        [toUserId]
+      );
+
+      if (targetUser.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      // Create user_commands table if it doesn't exist
+      try {
+        await pool.execute(`
+          CREATE TABLE IF NOT EXISTS user_commands (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            from_user_id VARCHAR(255) NOT NULL,
+            to_user_id VARCHAR(255) NOT NULL,
+            command_text TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_read BOOLEAN DEFAULT FALSE,
+            INDEX idx_to_user_created (to_user_id, created_at),
+            INDEX idx_from_user_created (from_user_id, created_at),
+            FOREIGN KEY (from_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+            FOREIGN KEY (to_user_id) REFERENCES users(user_id) ON DELETE CASCADE
+          )
+        `);
+      } catch (tableError) {
+        console.error('Error creating user_commands table:', tableError);
+        // Continue anyway
+      }
+
+      // Insert the command into database
+      const [result] = await pool.execute(
+        `INSERT INTO user_commands (
+          from_user_id, 
+          to_user_id, 
+          command_text, 
+          created_at,
+          is_read
+        ) VALUES (?, ?, ?, NOW(), FALSE)`,
+        [actualFromUserId, toUserId, command.trim()]
+      );
+
+      // Optional: Create activity log entry
+      try {
+        await pool.execute(`
+          CREATE TABLE IF NOT EXISTS activity_logs (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id VARCHAR(255) NOT NULL,
+            action_type VARCHAR(100) NOT NULL,
+            target_user_id VARCHAR(255),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+          )
+        `);
+        
+        await pool.execute(
+          `INSERT INTO activity_logs (
+            user_id, 
+            action_type, 
+            target_user_id, 
+            created_at
+          ) VALUES (?, 'sent_command', ?, NOW())`,
+          [actualFromUserId, toUserId]
+        );
+      } catch (activityError) {
+        console.warn('Could not log activity:', activityError.message);
+        // Continue without activity logging
+      }
+
+      res.json({
+        success: true,
+        message: 'Command sent successfully',
+        commandId: result.insertId
+      });
+
+    } catch (error) {
+      console.error('Error sending command:', error);
+      res.status(500).json({ 
+        error: 'Internal server error', 
+        details: error.message,
+        success: false
+      });
+    }
+  });
+
+  // Get commands for the authenticated user
+  router.get('/commands', authenticateFirebaseToken, async (req, res) => {
+    try {
+      const userId = req.user?.uid;
+      const { limit = 20, offset = 0 } = req.query;
+
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      try {
+        const [commands] = await pool.execute(
+          `SELECT 
+            uc.id,
+            uc.command_text,
+            uc.created_at,
+            uc.is_read,
+            u.user_id as from_user_id,
+            u.name as from_user_name,
+            u.username as from_user_username,
+            u.profile_image as from_user_image
+          FROM user_commands uc
+          JOIN users u ON uc.from_user_id = u.user_id
+          WHERE uc.to_user_id = ?
+          ORDER BY uc.created_at DESC
+          LIMIT ? OFFSET ?`,
+          [userId, parseInt(limit), parseInt(offset)]
+        );
+
+        res.json({
+          commands,
+          total: commands.length
+        });
+      } catch (tableError) {
+        console.warn('Error fetching commands:', tableError.message);
+        // If table doesn't exist yet
+        res.json({
+          commands: [],
+          total: 0
+        });
+      }
+
+    } catch (error) {
+      console.error('Error fetching commands:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // Mark command as read
+  router.patch('/commands/:commandId/read', authenticateFirebaseToken, async (req, res) => {
+    try {
+      const { commandId } = req.params;
+      const userId = req.user?.uid;
+
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      try {
+        // Update command to mark as read (only if it belongs to the user)
+        const [result] = await pool.execute(
+          `UPDATE user_commands 
+           SET is_read = TRUE 
+           WHERE id = ? AND to_user_id = ?`,
+          [commandId, userId]
+        );
+
+        if (result.affectedRows === 0) {
+          return res.status(404).json({ error: 'Command not found' });
+        }
+
+        res.json({ success: true, message: 'Command marked as read' });
+      } catch (tableError) {
+        console.warn('Error marking command as read:', tableError.message);
+        res.status(404).json({ error: 'Command not found' });
+      }
+
+    } catch (error) {
+      console.error('Error marking command as read:', error);
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
 

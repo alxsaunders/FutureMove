@@ -32,8 +32,11 @@ export const checkAndResetDailyGoals = async (userId: string): Promise<void> => 
       // Continue with the reset to be safe
     }
     
+    console.log(`Last reset date: ${lastResetDate}, Today: ${today}`);
+    
     // If it's a new day or we've never reset before, reset the daily goals
     if (!lastResetDate || lastResetDate !== today) {
+      console.log(`New day detected, resetting daily goals...`);
       await resetDailyGoals(userId);
       
       // Update the last reset date to today
@@ -54,7 +57,8 @@ export const checkAndResetDailyGoals = async (userId: string): Promise<void> => 
 };
 
 /**
- * Resets all daily/routine goals that were completed the previous day
+ * Resets all daily/routine goals that are scheduled for today
+ * This resets both completed and incomplete daily goals to ensure a fresh start
  */
 const resetDailyGoals = async (userId: string): Promise<void> => {
   try {
@@ -79,31 +83,37 @@ const resetDailyGoals = async (userId: string): Promise<void> => {
       return;
     }
     
-    // Get today's day of week
-    const today = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
-    
-    // For each daily goal that's scheduled for today and was completed
+    // FIXED: Filter for daily/recurring goals that are scheduled for TODAY
+    // Reset all daily goals that are active today, regardless of completion status
     let resetCount = 0;
-    const dailyGoals = goals.filter(g => g.isDaily && g.isCompleted);
+    const dailyGoalsToReset = goals.filter(goal => {
+      // Check if it's a daily/recurring goal
+      const isDaily = goal.isDaily || goal.type === 'recurring';
+      if (!isDaily) return false;
+      
+      // Check if it's scheduled for today
+      const activeToday = isGoalActiveToday(goal);
+      
+      console.log(`Goal "${goal.title}": isDaily=${isDaily}, activeToday=${activeToday}, isCompleted=${goal.isCompleted}`);
+      
+      return activeToday;
+    });
     
-    console.log(`Found ${dailyGoals.length} completed daily goals to check`);
+    console.log(`Found ${dailyGoalsToReset.length} daily goals scheduled for today to reset`);
     
-    for (const goal of dailyGoals) {
+    for (const goal of dailyGoalsToReset) {
       try {
-        // Check if this goal is active today
-        const activeToday = isGoalActiveToday(goal);
+        // Reset ALL daily goals scheduled for today (whether they were completed or not)
+        // This ensures a fresh start for the new day
+        console.log(`Resetting daily goal: ${goal.title} (ID: ${goal.id}) from progress ${goal.progress} to 0`);
         
-        if (activeToday) {
-          console.log(`Resetting daily goal: ${goal.title} (ID: ${goal.id})`);
-          
-          try {
-            // Reset the progress to 0 and isCompleted to false
-            await updateGoalProgress(goal.id, 0);
-            resetCount++;
-          } catch (updateError) {
-            console.error(`Error updating goal ${goal.id} progress:`, updateError);
-            // Continue with other goals
-          }
+        try {
+          // Reset the progress to 0 and isCompleted to false
+          await updateGoalProgress(goal.id, 0);
+          resetCount++;
+        } catch (updateError) {
+          console.error(`Error updating goal ${goal.id} progress:`, updateError);
+          // Continue with other goals
         }
       } catch (goalError) {
         console.error(`Error processing goal ${goal.id}:`, goalError);
@@ -111,14 +121,55 @@ const resetDailyGoals = async (userId: string): Promise<void> => {
       }
     }
     
-    console.log(`Reset ${resetCount} daily goals`);
+    console.log(`Successfully reset ${resetCount} daily goals for the new day`);
   } catch (error) {
     console.error('Error resetting daily goals:', error);
     // Even if there's an error, we don't want to crash the app
   }
 };
 
+/**
+ * Get the last reset date for debugging purposes
+ */
+export const getLastResetDate = async (userId: string): Promise<string | null> => {
+  try {
+    return await AsyncStorage.getItem(`${LAST_RESET_DATE_KEY}_${userId}`);
+  } catch (error) {
+    console.error('Error getting last reset date:', error);
+    return null;
+  }
+};
+
+/**
+ * Force reset goals (for testing purposes)
+ */
+export const forceResetDailyGoals = async (userId: string): Promise<void> => {
+  try {
+    // Clear the last reset date to force a reset
+    await AsyncStorage.removeItem(`${LAST_RESET_DATE_KEY}_${userId}`);
+    // Then perform the reset
+    await checkAndResetDailyGoals(userId);
+  } catch (error) {
+    console.error('Error forcing reset:', error);
+  }
+};
+
+/**
+ * Clear reset tracking (for testing/debugging)
+ */
+export const clearResetTracking = async (userId: string): Promise<void> => {
+  try {
+    await AsyncStorage.removeItem(`${LAST_RESET_DATE_KEY}_${userId}`);
+    console.log(`Cleared reset tracking for user: ${userId}`);
+  } catch (error) {
+    console.error('Error clearing reset tracking:', error);
+  }
+};
+
 // Export both as named exports AND default export to handle different import styles
 export default {
-  checkAndResetDailyGoals 
+  checkAndResetDailyGoals,
+  getLastResetDate,
+  forceResetDailyGoals,
+  clearResetTracking
 };

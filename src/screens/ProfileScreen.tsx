@@ -20,6 +20,7 @@ import {
 } from "@react-navigation/native";
 import { COLORS } from "../common/constants/colors";
 import { useAuth } from "../contexts/AuthContext";
+import { auth } from "../config/firebase";
 import {
   fetchUserProfile,
   updateUserProfile,
@@ -32,9 +33,6 @@ import {
   Badge,
 } from "../services/ProfileService";
 import { getItemImage, hasItemImage } from "../utils/itemImageMapping";
-
-// EMERGENCY FALLBACK - replace with a valid user ID from your database
-const FALLBACK_USER_ID = "KbtY3t4Tatd0r5tCjnjlmJyNT5R2";
 
 // Interfaces
 interface EquippedItem {
@@ -82,44 +80,76 @@ const ProfileScreen = () => {
   });
   const [loadingEquippedItems, setLoadingEquippedItems] = useState(false);
 
-  // Get userId from route params, current user, or use fallback
-  const userId =
-    route.params?.userId || (currentUser ? currentUser.id : FALLBACK_USER_ID);
+  // Get userId from route params, current user, or try to fetch from auth
+  const [resolvedUserId, setResolvedUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const resolveUserId = async () => {
+      // First try route params
+      if (route.params?.userId) {
+        setResolvedUserId(route.params.userId);
+        return;
+      }
+
+      // Then try current user
+      if (currentUser?.id) {
+        setResolvedUserId(currentUser.id);
+        return;
+      }
+
+      // Finally try Firebase auth directly
+      if (auth.currentUser?.uid) {
+        setResolvedUserId(auth.currentUser.uid);
+        return;
+      }
+
+      console.log("[PROFILE] Could not resolve user ID");
+      setResolvedUserId(null);
+    };
+
+    resolveUserId();
+  }, [route.params?.userId, currentUser?.id]);
+
+  const userId = resolvedUserId;
 
   // Check if this is the user's own profile
   const isOwnProfile =
-    !route.params?.userId || (currentUser && currentUser.id === userId);
+    !route.params?.userId ||
+    (resolvedUserId && currentUser && currentUser.id === resolvedUserId);
 
   // Use useFocusEffect for handling screen focus events
   useFocusEffect(
     React.useCallback(() => {
-      console.log("[PROFILE] Screen focused - refreshing data");
+      console.log("[PROFILE] Screen focused - loading data");
+
+      if (!userId) {
+        console.log("[PROFILE] No userId available");
+        return;
+      }
+
+      console.log("[PROFILE] Loading data for user:", userId);
 
       const forceRefresh = route.params?.forceRefresh;
       if (forceRefresh) {
         console.log(`[PROFILE] Force refresh triggered: ${forceRefresh}`);
-        loadProfileData();
-        loadUserCommunities();
-        loadUserBadges();
-        loadEquippedItems();
-      } else {
-        loadProfileData();
-        loadUserCommunities();
-        loadUserBadges();
-        loadEquippedItems();
       }
 
+      loadProfileData();
+      loadUserCommunities();
+      loadUserBadges();
+      loadEquippedItems();
+
       return () => {};
-    }, [route.params?.forceRefresh, userId])
+    }, [route.params?.forceRefresh, userId, resolvedUserId])
   );
 
   useEffect(() => {
     console.log(
-      `[PROFILE] Using userId: ${userId}, currentUser: ${
+      `[PROFILE] Using userId: ${userId}, resolvedUserId: ${resolvedUserId}, currentUser: ${
         currentUser?.id || "none"
       }, isOwnProfile: ${isOwnProfile}`
     );
-  }, [userId, isOwnProfile]);
+  }, [userId, resolvedUserId, isOwnProfile]);
 
   const loadUserCommunities = async () => {
     if (!userId) return;
@@ -212,6 +242,7 @@ const ProfileScreen = () => {
     } catch (error) {
       console.error("[PROFILE] Error loading profile data:", error);
       setLoadingError((error as Error).message || "Unknown error");
+
       Alert.alert(
         "Error Loading Profile",
         "We're having trouble loading your profile data. Please try again.",
@@ -373,6 +404,26 @@ const ProfileScreen = () => {
       [{ text: "Awesome!", style: "default" }]
     );
   };
+
+  // Show loading if no userId (this shouldn't happen in normal flow)
+  if (!userId) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <Ionicons
+          name="person-outline"
+          size={48}
+          color={COLORS.textSecondary}
+        />
+        <Text style={styles.errorText}>No user ID available</Text>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={styles.actionButtonText}>Go Back</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
 
   if (isLoading) {
     return (

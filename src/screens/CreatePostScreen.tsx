@@ -21,7 +21,8 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import { fetchJoinedCommunities } from "../services/CommunityService";
 import { createPost } from "../services/CommunityPostService";
 import { Community } from "../types";
-import { auth } from "../config/firebase"; // Import Firebase auth
+import { auth } from "../config/firebase";
+import ImageService from "../services/ImageService"; // Import our new service
 
 // Fixed user ID for development/testing
 const FALLBACK_USER_ID = "KbtY3t4Tatd0r5tCjnjlmJyoNT5R2";
@@ -58,7 +59,10 @@ const CreatePostScreen = () => {
   const [postContent, setPostContent] = useState("");
   const [selectedImage, setSelectedImage] = useState<string | undefined>(
     undefined
-  ); // Changed null to undefined
+  );
+  const [uploadedImageUrl, setUploadedImageUrl] = useState<string | undefined>(
+    undefined
+  ); // Track uploaded URL
   const [isUploading, setIsUploading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showCommunityModal, setShowCommunityModal] = useState(false);
@@ -69,24 +73,19 @@ const CreatePostScreen = () => {
   const [isLoadingCommunities, setIsLoadingCommunities] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0); // Track upload progress
 
   // Authentication check effect
   useEffect(() => {
-    // This ensures we've at least checked for authentication once and resolves the userId
     let resolvedUserId = null;
 
-    // First try to get from context
     if (currentUser && currentUser.id) {
       resolvedUserId = currentUser.id;
       console.log(`User found from AuthContext: ${resolvedUserId}`);
-    }
-    // Then try to get directly from Firebase
-    else if (auth.currentUser) {
+    } else if (auth.currentUser) {
       resolvedUserId = auth.currentUser.uid;
       console.log(`User found from Firebase: ${resolvedUserId}`);
-    }
-    // As a last resort, use the fallback ID
-    else {
+    } else {
       resolvedUserId = FALLBACK_USER_ID;
       console.log(`No user ID found, using fallback: ${FALLBACK_USER_ID}`);
     }
@@ -122,11 +121,9 @@ const CreatePostScreen = () => {
         return;
       }
 
-      // Convert API communities to UI communities
       const adaptedCommunities = joinedCommunitiesApi.map(adaptCommunity);
       setCommunities(adaptedCommunities);
 
-      // If a community ID was passed as a parameter, select that community
       if (preselectedCommunityId) {
         console.log(
           `Looking for preselected community ID: ${preselectedCommunityId}`
@@ -142,11 +139,9 @@ const CreatePostScreen = () => {
           setSelectedCommunity(preselectedCommunity);
         } else {
           console.log("Preselected community not found, using first community");
-          // Set default community if preselected not found
           setSelectedCommunity(adaptedCommunities[0]);
         }
       } else if (adaptedCommunities.length > 0) {
-        // No preselected community, use the first one
         console.log(`Setting default community: ${adaptedCommunities[0].name}`);
         setSelectedCommunity(adaptedCommunities[0]);
       }
@@ -166,7 +161,7 @@ const CreatePostScreen = () => {
     }
   }, [fetchUserCommunities, authChecked]);
 
-  // Handle image picking
+  // Handle image picking with Firebase upload
   const pickImage = async () => {
     const permissionResult =
       await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -186,12 +181,16 @@ const CreatePostScreen = () => {
       quality: 0.8,
     });
 
-    if (!result.canceled) {
-      setSelectedImage(result.assets[0].uri);
+    if (!result.canceled && result.assets[0]) {
+      const imageUri = result.assets[0].uri;
+      setSelectedImage(imageUri);
+
+      // Upload image to Firebase Storage
+      await uploadImageToFirebase(imageUri);
     }
   };
 
-  // Handle camera access
+  // Handle camera access with Firebase upload
   const takePicture = async () => {
     const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
 
@@ -209,17 +208,73 @@ const CreatePostScreen = () => {
       quality: 0.8,
     });
 
-    if (!result.canceled) {
-      setSelectedImage(result.assets[0].uri);
+    if (!result.canceled && result.assets[0]) {
+      const imageUri = result.assets[0].uri;
+      setSelectedImage(imageUri);
+
+      // Upload image to Firebase Storage
+      await uploadImageToFirebase(imageUri);
     }
   };
 
-  // Remove selected image
-  const removeImage = () => {
-    setSelectedImage(undefined); // Changed null to undefined
+  // Upload image to Firebase Storage
+  const uploadImageToFirebase = async (imageUri: string) => {
+    if (!userId) {
+      Alert.alert("Error", "You need to be logged in to upload images");
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadProgress(0);
+
+    try {
+      console.log("🔄 Starting image upload to Firebase Storage");
+
+      // Validate image first
+      await ImageService.validateImage(imageUri);
+
+      // Upload to Firebase Storage
+      const downloadURL = await ImageService.uploadImage(
+        imageUri,
+        "posts", // folder
+        userId,
+        ImageService.generateUniqueFileName("post")
+      );
+
+      setUploadedImageUrl(downloadURL);
+      setUploadProgress(100);
+
+      console.log("✅ Image uploaded successfully:", downloadURL);
+    } catch (error) {
+      console.error("❌ Error uploading image:", error);
+      Alert.alert(
+        "Upload Failed",
+        error.message || "Failed to upload image. Please try again.",
+        [{ text: "OK", onPress: () => removeImage() }]
+      );
+    } finally {
+      setIsUploading(false);
+    }
   };
 
-  // Submit post
+  // Remove selected image and delete from Firebase if uploaded
+  const removeImage = async () => {
+    // If image was uploaded to Firebase, delete it
+    if (uploadedImageUrl) {
+      try {
+        await ImageService.deleteImage(uploadedImageUrl);
+        console.log("🗑️ Uploaded image deleted from Firebase Storage");
+      } catch (error) {
+        console.error("❌ Error deleting image from Firebase:", error);
+      }
+    }
+
+    setSelectedImage(undefined);
+    setUploadedImageUrl(undefined);
+    setUploadProgress(0);
+  };
+
+  // Submit post with Firebase Storage URL
   const handleSubmitPost = async () => {
     if (!postContent.trim()) {
       Alert.alert("Error", "Please enter some content for your post");
@@ -236,16 +291,29 @@ const CreatePostScreen = () => {
       return;
     }
 
+    // Check if image is still uploading
+    if (isUploading) {
+      Alert.alert(
+        "Please wait",
+        "Image is still uploading. Please wait for it to complete."
+      );
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
       console.log(
         `Creating post in community: ${selectedCommunity.id} as user: ${userId}`
       );
+
+      // Use the uploaded Firebase Storage URL instead of local URI
+      const imageUrlToSubmit = uploadedImageUrl || undefined;
+
       const response = await createPost(
         String(selectedCommunity.id),
         postContent,
-        selectedImage
+        imageUrlToSubmit // This is now a Firebase Storage URL
       );
 
       if (response) {
@@ -253,7 +321,9 @@ const CreatePostScreen = () => {
 
         // Clear form
         setPostContent("");
-        setSelectedImage(undefined); // Changed null to undefined
+        setSelectedImage(undefined);
+        setUploadedImageUrl(undefined);
+        setUploadProgress(0);
 
         // Navigate back
         navigation.goBack();
@@ -270,6 +340,17 @@ const CreatePostScreen = () => {
       setIsSubmitting(false);
     }
   };
+
+  // Clean up uploaded image if user navigates away without posting
+  useEffect(() => {
+    return () => {
+      // Cleanup function when component unmounts
+      if (uploadedImageUrl && !isSubmitting) {
+        // Only delete if we're not in the middle of submitting
+        ImageService.deleteImage(uploadedImageUrl).catch(console.error);
+      }
+    };
+  }, [uploadedImageUrl, isSubmitting]);
 
   // Login required view
   const LoginRequiredView = () => (
@@ -330,7 +411,6 @@ const CreatePostScreen = () => {
                     setShowCommunityModal(false);
                   }}
                 >
-                  {/* Fixed Image source prop */}
                   <Image
                     source={{ uri: item.image || undefined }}
                     style={styles.communityImage}
@@ -370,8 +450,7 @@ const CreatePostScreen = () => {
                 style={styles.joinCommunityButton}
                 onPress={() => {
                   setShowCommunityModal(false);
-                  // Changed string navigation to use proper screen name
-                  navigation.navigate("Home"); // Update this to your actual screen name
+                  navigation.navigate("Home");
                 }}
               >
                 <Text style={styles.joinCommunityButtonText}>
@@ -384,6 +463,54 @@ const CreatePostScreen = () => {
       </View>
     </Modal>
   );
+
+  // Render image preview with upload status
+  const renderImagePreview = () => {
+    if (!selectedImage) return null;
+
+    return (
+      <View style={styles.imagePreviewContainer}>
+        <Image source={{ uri: selectedImage }} style={styles.imagePreview} />
+
+        {/* Upload overlay */}
+        {isUploading && (
+          <View style={styles.uploadOverlay}>
+            <ActivityIndicator size="large" color={COLORS.white} />
+            <Text style={styles.uploadText}>Uploading...</Text>
+            <View style={styles.progressBar}>
+              <View
+                style={[styles.progressFill, { width: `${uploadProgress}%` }]}
+              />
+            </View>
+          </View>
+        )}
+
+        {/* Success indicator */}
+        {uploadedImageUrl && !isUploading && (
+          <View style={styles.uploadSuccessIndicator}>
+            <Ionicons
+              name="checkmark-circle"
+              size={24}
+              color={COLORS.success}
+            />
+          </View>
+        )}
+
+        {/* Remove button */}
+        <TouchableOpacity
+          style={styles.removeImageButton}
+          onPress={removeImage}
+          disabled={isUploading}
+        >
+          <Ionicons
+            name="close-circle"
+            size={24}
+            color={isUploading ? COLORS.textSecondary : COLORS.white}
+          />
+        </TouchableOpacity>
+      </View>
+    );
+  };
 
   // If not authenticated, show login screen
   if (!authChecked) {
@@ -416,11 +543,16 @@ const CreatePostScreen = () => {
         <TouchableOpacity
           style={[
             styles.submitButton,
-            (!postContent.trim() || !selectedCommunity) &&
+            (!postContent.trim() || !selectedCommunity || isUploading) &&
               styles.submitButtonDisabled,
           ]}
           onPress={handleSubmitPost}
-          disabled={!postContent.trim() || !selectedCommunity || isSubmitting}
+          disabled={
+            !postContent.trim() ||
+            !selectedCommunity ||
+            isSubmitting ||
+            isUploading
+          }
         >
           {isSubmitting ? (
             <ActivityIndicator size="small" color={COLORS.white} />
@@ -438,14 +570,13 @@ const CreatePostScreen = () => {
             if (communities.length > 0) {
               setShowCommunityModal(true);
             } else if (!isLoadingCommunities) {
-              // If no communities and not loading, redirect to find communities
               Alert.alert(
                 "No Communities",
                 "You need to join a community before posting",
                 [
                   {
                     text: "Find Communities",
-                    onPress: () => navigation.navigate("Home"), // Update this to your actual screen name
+                    onPress: () => navigation.navigate("Home"),
                   },
                   { text: "Cancel", style: "cancel" },
                 ]
@@ -462,7 +593,6 @@ const CreatePostScreen = () => {
             </View>
           ) : selectedCommunity ? (
             <View style={styles.selectedCommunityContainer}>
-              {/* Fixed Image source prop */}
               <Image
                 source={{ uri: selectedCommunity.image || undefined }}
                 style={styles.selectedCommunityImage}
@@ -505,21 +635,8 @@ const CreatePostScreen = () => {
           editable={selectedCommunity !== null}
         />
 
-        {/* Selected Image Preview */}
-        {selectedImage && (
-          <View style={styles.imagePreviewContainer}>
-            <Image
-              source={{ uri: selectedImage }}
-              style={styles.imagePreview}
-            />
-            <TouchableOpacity
-              style={styles.removeImageButton}
-              onPress={removeImage}
-            >
-              <Ionicons name="close-circle" size={24} color={COLORS.white} />
-            </TouchableOpacity>
-          </View>
-        )}
+        {/* Image Preview with Upload Status */}
+        {renderImagePreview()}
       </ScrollView>
 
       {/* Bottom Action Bar */}
@@ -527,23 +644,31 @@ const CreatePostScreen = () => {
         <TouchableOpacity
           style={styles.actionButton}
           onPress={pickImage}
-          disabled={!selectedCommunity}
+          disabled={!selectedCommunity || isUploading}
         >
           <Ionicons
             name="image"
             size={24}
-            color={selectedCommunity ? COLORS.primary : COLORS.textSecondary}
+            color={
+              selectedCommunity && !isUploading
+                ? COLORS.primary
+                : COLORS.textSecondary
+            }
           />
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.actionButton}
           onPress={takePicture}
-          disabled={!selectedCommunity}
+          disabled={!selectedCommunity || isUploading}
         >
           <Ionicons
             name="camera"
             size={24}
-            color={selectedCommunity ? COLORS.primary : COLORS.textSecondary}
+            color={
+              selectedCommunity && !isUploading
+                ? COLORS.primary
+                : COLORS.textSecondary
+            }
           />
         </TouchableOpacity>
         <TouchableOpacity
@@ -667,6 +792,43 @@ const styles = StyleSheet.create({
     height: 200,
     borderRadius: 8,
   },
+  uploadOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: 8,
+  },
+  uploadText: {
+    color: COLORS.white,
+    fontSize: 16,
+    fontWeight: "600",
+    marginTop: 12,
+    marginBottom: 16,
+  },
+  progressBar: {
+    width: "80%",
+    height: 4,
+    backgroundColor: "rgba(255, 255, 255, 0.3)",
+    borderRadius: 2,
+  },
+  progressFill: {
+    height: "100%",
+    backgroundColor: COLORS.primary,
+    borderRadius: 2,
+  },
+  uploadSuccessIndicator: {
+    position: "absolute",
+    top: 8,
+    left: 8,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    borderRadius: 16,
+    padding: 4,
+  },
   removeImageButton: {
     position: "absolute",
     top: 8,
@@ -702,8 +864,8 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
-    paddingBottom: 30, // Extra padding for bottom safe area
-    maxHeight: "70%", // Limit modal height
+    paddingBottom: 30,
+    maxHeight: "70%",
   },
   modalHeader: {
     flexDirection: "row",

@@ -1,10 +1,9 @@
 // src/components/community/CommunityPostItem.tsx
-import React, { useState } from "react";
+import React from "react";
 import {
   View,
   Text,
   StyleSheet,
-  Image,
   TouchableOpacity,
   Dimensions,
   Share,
@@ -13,6 +12,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "../../common/constants/colors";
 import { Post } from "../../types";
+import FirebaseImage from "../common/FirebaseImage";
 
 // Get screen dimensions
 const { width } = Dimensions.get("window");
@@ -20,13 +20,14 @@ const MAX_IMAGE_HEIGHT = 300;
 const CONTAINER_HORIZONTAL_PADDING = 16;
 const SCREEN_HORIZONTAL_MARGIN = 16;
 
-type CommunityPostItemProps = {
+interface CommunityPostItemProps {
   post: Post;
   onLikePress: () => void;
   onCommentPress: () => void;
   onPostPress: () => void;
-  onSharePress?: (post: Post) => void; // Optional custom share handler
-};
+  onSharePress?: (post: Post) => void;
+  onUserPress?: (userId: string) => void;
+}
 
 const CommunityPostItem: React.FC<CommunityPostItemProps> = ({
   post,
@@ -34,9 +35,8 @@ const CommunityPostItem: React.FC<CommunityPostItemProps> = ({
   onCommentPress,
   onPostPress,
   onSharePress,
+  onUserPress,
 }) => {
-  const [imageError, setImageError] = useState(false);
-
   // Format the date for display
   const formatPostDate = (dateString: string) => {
     try {
@@ -55,19 +55,32 @@ const CommunityPostItem: React.FC<CommunityPostItemProps> = ({
         const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
         if (diffHours === 0) {
           const diffMinutes = Math.floor(diffTime / (1000 * 60));
-          return diffMinutes <= 0 ? "Just now" : `${diffMinutes} min ago`;
+          return diffMinutes <= 0 ? "Just now" : `${diffMinutes}m`;
         }
-        return `${diffHours} hour${diffHours !== 1 ? "s" : ""} ago`;
+        return `${diffHours}h`;
       } else if (diffDays === 1) {
-        return "Yesterday";
+        return "1d";
       } else if (diffDays < 7) {
-        return `${diffDays} day${diffDays !== 1 ? "s" : ""} ago`;
+        return `${diffDays}d`;
+      } else if (diffDays < 30) {
+        const diffWeeks = Math.floor(diffDays / 7);
+        return `${diffWeeks}w`;
       } else {
-        return postDate.toLocaleDateString();
+        return postDate.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+        });
       }
     } catch (error) {
       console.error("Error formatting date:", error);
       return "Recently";
+    }
+  };
+
+  // Handle user profile press
+  const handleUserPress = () => {
+    if (onUserPress && post.userId) {
+      onUserPress(post.userId);
     }
   };
 
@@ -80,9 +93,15 @@ const CommunityPostItem: React.FC<CommunityPostItemProps> = ({
       }
 
       // Default share behavior
+      const shareContent =
+        post.content.length > 100
+          ? `${post.content.substring(0, 100)}...`
+          : post.content;
+
       const shareOptions = {
-        message: `Check out this post by ${post.userName} in ${post.communityName}: ${post.content}`,
+        message: `Check out this post by ${post.userName} in ${post.communityName}:\n\n"${shareContent}"`,
         title: `Post from ${post.communityName}`,
+        ...(post.image && { url: post.image }),
       };
 
       const result = await Share.share(shareOptions);
@@ -108,39 +127,76 @@ const CommunityPostItem: React.FC<CommunityPostItemProps> = ({
     };
   };
 
+  // Format counts for display
+  const formatCount = (count: number) => {
+    if (count >= 1000000) {
+      return `${(count / 1000000).toFixed(1)}M`;
+    }
+    if (count >= 1000) {
+      return `${(count / 1000).toFixed(1)}K`;
+    }
+    return count.toString();
+  };
+
   return (
     <TouchableOpacity
       style={styles.container}
       onPress={onPostPress}
-      activeOpacity={0.9}
+      activeOpacity={0.95}
       accessible={true}
       accessibilityLabel={`Post by ${post.userName} in ${post.communityName}`}
       accessibilityHint="Tap to view full post details"
     >
       {/* Post Header */}
       <View style={styles.header}>
-        <Image
-          source={{ uri: post.userAvatar }}
-          style={styles.avatar}
-          defaultSource={require("../../assets/default-avatar.png")}
-          onError={() =>
-            console.log("Avatar failed to load for:", post.userName)
-          }
-        />
-        <View style={styles.headerInfo}>
-          <Text style={styles.userName} numberOfLines={1}>
-            {post.userName}
-          </Text>
-          <View style={styles.postContext}>
-            <Text style={styles.communityName} numberOfLines={1}>
-              in {post.communityName}
+        <TouchableOpacity
+          style={styles.userSection}
+          onPress={handleActionPress(handleUserPress)}
+          activeOpacity={0.7}
+          accessible={true}
+          accessibilityLabel={`View ${post.userName}'s profile`}
+          accessibilityRole="button"
+        >
+          <FirebaseImage
+            uri={post.userAvatar}
+            imageStyle={styles.avatar}
+            defaultSource={require("../../assets/default-avatar.png")}
+            optimizeSize={{ width: 80, height: 80 }}
+            showLoading={false}
+            showError={false}
+          />
+          <View style={styles.headerInfo}>
+            <Text style={styles.userName} numberOfLines={1}>
+              {post.userName}
             </Text>
-            <Text style={styles.timeAgo}>
-              {" "}
-              • {formatPostDate(post.createdAt)}
-            </Text>
+            <View style={styles.postContext}>
+              <Text style={styles.communityName} numberOfLines={1}>
+                {post.communityName}
+              </Text>
+              <Text style={styles.separator}>•</Text>
+              <Text style={styles.timeAgo}>
+                {formatPostDate(post.createdAt)}
+              </Text>
+            </View>
           </View>
-        </View>
+        </TouchableOpacity>
+
+        {/* More options button */}
+        <TouchableOpacity
+          style={styles.moreButton}
+          onPress={handleActionPress(() => {
+            console.log("More options for post:", post.id);
+          })}
+          accessible={true}
+          accessibilityLabel="More options"
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="ellipsis-horizontal"
+            size={20}
+            color={COLORS.textSecondary}
+          />
+        </TouchableOpacity>
       </View>
 
       {/* Post Content */}
@@ -148,89 +204,126 @@ const CommunityPostItem: React.FC<CommunityPostItemProps> = ({
         {post.content}
       </Text>
 
-      {/* Post Image (if any) */}
-      {post.image && !imageError && (
-        <Image
-          source={{ uri: post.image }}
-          style={[styles.image, { width: imageWidth }]}
-          resizeMode="cover"
-          onError={(error) => {
-            console.error(
-              "Post image failed to load:",
-              error.nativeEvent.error
-            );
-            setImageError(true);
-          }}
-          onLoad={() => setImageError(false)}
-        />
-      )}
-
-      {/* Show placeholder if image failed to load */}
-      {post.image && imageError && (
-        <View style={[styles.imagePlaceholder, { width: imageWidth }]}>
-          <Ionicons
-            name="image-outline"
-            size={40}
-            color={COLORS.textSecondary}
+      {/* Post Image using FirebaseImage */}
+      {post.image && (
+        <View style={styles.imageContainer}>
+          <FirebaseImage
+            uri={post.image}
+            imageStyle={[styles.image, { width: imageWidth }]}
+            containerStyle={styles.imageWrapper}
+            optimizeSize={{
+              width: Math.floor(imageWidth * 2),
+              height: MAX_IMAGE_HEIGHT * 2,
+            }}
+            resizeMode="cover"
+            showLoading={true}
+            showError={true}
+            placeholder={
+              <View style={[styles.imagePlaceholder, { width: imageWidth }]}>
+                <Ionicons
+                  name="image-outline"
+                  size={40}
+                  color={COLORS.textSecondary}
+                />
+                <Text style={styles.imagePlaceholderText}>
+                  Loading image...
+                </Text>
+              </View>
+            }
           />
-          <Text style={styles.imagePlaceholderText}>Image unavailable</Text>
         </View>
       )}
 
       {/* Post Actions */}
       <View style={styles.actions}>
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={handleActionPress(onLikePress)}
-          accessible={true}
-          accessibilityLabel={post.isLiked ? "Unlike post" : "Like post"}
-          accessibilityRole="button"
-        >
-          <Ionicons
-            name={post.isLiked ? "heart" : "heart-outline"}
-            size={22}
-            color={post.isLiked ? COLORS.primary : COLORS.textSecondary}
-          />
-          <Text
-            style={[
-              styles.actionText,
-              post.isLiked && { color: COLORS.primary },
-            ]}
+        <View style={styles.leftActions}>
+          {/* Like Button */}
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={handleActionPress(onLikePress)}
+            accessible={true}
+            accessibilityLabel={post.isLiked ? "Unlike post" : "Like post"}
+            accessibilityRole="button"
           >
-            {post.likes}
-          </Text>
-        </TouchableOpacity>
+            <Ionicons
+              name={post.isLiked ? "heart" : "heart-outline"}
+              size={22}
+              color={post.isLiked ? COLORS.primary : COLORS.textSecondary}
+            />
+            {post.likes > 0 && (
+              <Text
+                style={[
+                  styles.actionText,
+                  post.isLiked && { color: COLORS.primary },
+                ]}
+              >
+                {formatCount(post.likes)}
+              </Text>
+            )}
+          </TouchableOpacity>
 
+          {/* Comment Button */}
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={handleActionPress(onCommentPress)}
+            accessible={true}
+            accessibilityLabel={`View ${post.comments} comments`}
+            accessibilityRole="button"
+          >
+            <Ionicons
+              name="chatbubble-outline"
+              size={20}
+              color={COLORS.textSecondary}
+            />
+            {post.comments > 0 && (
+              <Text style={styles.actionText}>
+                {formatCount(post.comments)}
+              </Text>
+            )}
+          </TouchableOpacity>
+
+          {/* Share Button */}
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={handleActionPress(handleShare)}
+            accessible={true}
+            accessibilityLabel="Share post"
+            accessibilityRole="button"
+          >
+            <Ionicons
+              name="share-social-outline"
+              size={20}
+              color={COLORS.textSecondary}
+            />
+          </TouchableOpacity>
+        </View>
+
+        {/* Bookmark Button */}
         <TouchableOpacity
-          style={styles.actionButton}
-          onPress={handleActionPress(onCommentPress)}
+          style={styles.bookmarkButton}
+          onPress={handleActionPress(() => {
+            console.log("Bookmark post:", post.id);
+          })}
           accessible={true}
-          accessibilityLabel={`View ${post.comments} comments`}
+          accessibilityLabel="Bookmark post"
           accessibilityRole="button"
         >
           <Ionicons
-            name="chatbubble-outline"
+            name="bookmark-outline"
             size={20}
             color={COLORS.textSecondary}
           />
-          <Text style={styles.actionText}>{post.comments}</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={handleActionPress(handleShare)}
-          accessible={true}
-          accessibilityLabel="Share post"
-          accessibilityRole="button"
-        >
-          <Ionicons
-            name="share-social-outline"
-            size={20}
-            color={COLORS.textSecondary}
-          />
-          <Text style={styles.actionText}>Share</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Like summary (if there are likes) */}
+      {post.likes > 0 && (
+        <View style={styles.likeSummary}>
+          <Text style={styles.likeSummaryText}>
+            {post.likes === 1 ? "1 like" : `${formatCount(post.likes)} likes`}
+          </Text>
+        </View>
+      )}
     </TouchableOpacity>
   );
 };
@@ -240,30 +333,37 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardBackground,
     borderRadius: 12,
     marginBottom: 16,
-    padding: CONTAINER_HORIZONTAL_PADDING,
+    overflow: "hidden",
     elevation: 2,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    // Ensure the container is properly touchable
-    overflow: "hidden",
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 12,
+    justifyContent: "space-between",
+    paddingHorizontal: CONTAINER_HORIZONTAL_PADDING,
+    paddingTop: CONTAINER_HORIZONTAL_PADDING,
+    paddingBottom: 8,
+  },
+  userSection: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    marginRight: 12,
   },
   avatar: {
     width: 40,
     height: 40,
     borderRadius: 20,
     marginRight: 12,
-    backgroundColor: COLORS.border, // Fallback background
+    backgroundColor: COLORS.border,
   },
   headerInfo: {
     flex: 1,
-    minWidth: 0, // Allows text to truncate properly
+    minWidth: 0,
   },
   userName: {
     fontSize: 16,
@@ -274,35 +374,48 @@ const styles = StyleSheet.create({
   postContext: {
     flexDirection: "row",
     alignItems: "center",
-    flexWrap: "wrap", // Allow wrapping if needed
   },
   communityName: {
-    fontSize: 12,
+    fontSize: 14,
     color: COLORS.primary,
     fontWeight: "500",
-    flexShrink: 1, // Allow shrinking if needed
+    flexShrink: 1,
+  },
+  separator: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginHorizontal: 6,
   },
   timeAgo: {
-    fontSize: 12,
+    fontSize: 14,
     color: COLORS.textSecondary,
-    flexShrink: 0, // Don't shrink the time
+    flexShrink: 0,
+  },
+  moreButton: {
+    padding: 8,
+    borderRadius: 20,
   },
   content: {
-    fontSize: 15,
+    fontSize: 16,
     color: COLORS.text,
-    lineHeight: 22,
+    lineHeight: 24,
+    paddingHorizontal: CONTAINER_HORIZONTAL_PADDING,
     marginBottom: 12,
+  },
+  imageContainer: {
+    marginBottom: 12,
+  },
+  imageWrapper: {
+    paddingHorizontal: CONTAINER_HORIZONTAL_PADDING,
   },
   image: {
     height: MAX_IMAGE_HEIGHT,
-    borderRadius: 8,
-    marginBottom: 12,
-    backgroundColor: COLORS.border, // Fallback background while loading
+    borderRadius: 12,
+    backgroundColor: COLORS.border,
   },
   imagePlaceholder: {
     height: 120,
-    borderRadius: 8,
-    marginBottom: 12,
+    borderRadius: 12,
     backgroundColor: COLORS.background,
     justifyContent: "center",
     alignItems: "center",
@@ -317,27 +430,47 @@ const styles = StyleSheet.create({
   },
   actions: {
     flexDirection: "row",
-    justifyContent: "flex-start",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: CONTAINER_HORIZONTAL_PADDING,
+    paddingBottom: 12,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
     paddingTop: 12,
   },
+  leftActions: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
   actionButton: {
     flexDirection: "row",
     alignItems: "center",
-    marginRight: 24,
-    paddingVertical: 4, // Make touch target bigger
+    marginRight: 20,
+    paddingVertical: 8,
     paddingHorizontal: 4,
-    borderRadius: 4,
-    // Ensure buttons are properly touchable
-    minHeight: 32,
-    minWidth: 32,
+    borderRadius: 6,
+    minHeight: 36,
+  },
+  bookmarkButton: {
+    padding: 8,
+    borderRadius: 6,
   },
   actionText: {
     fontSize: 14,
     color: COLORS.textSecondary,
     marginLeft: 6,
+    fontWeight: "500",
+  },
+  likeSummary: {
+    paddingHorizontal: CONTAINER_HORIZONTAL_PADDING,
+    paddingBottom: CONTAINER_HORIZONTAL_PADDING,
+  },
+  likeSummaryText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: COLORS.text,
   },
 });
 
+// Export as default
 export default CommunityPostItem;
