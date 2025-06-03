@@ -4,9 +4,6 @@ import { Platform } from "react-native";
 import { auth } from "../config/firebase.js";
 import { fetchJoinedCommunities } from "./CommunityService";
 
-// Fallback user ID for development/testing
-const FALLBACK_USER_ID = "KbtY3t4Tatd0r5tCjnjlmJyNT5R2";
-
 // Get API base URL based on platform
 export const getApiBaseUrl = () => {
   if (Platform.OS === "android") {
@@ -31,7 +28,7 @@ const validateId = (id: string | number): string | null => {
   return stringId;
 };
 
-// Helper function to get current user ID from Firebase with fallback
+// Helper function to get current user ID from Firebase
 export const getCurrentUserId = async (): Promise<string> => {
   const currentUser = auth.currentUser;
   if (currentUser) {
@@ -39,8 +36,59 @@ export const getCurrentUserId = async (): Promise<string> => {
     return currentUser.uid;
   }
   
-  console.log(`No current user, using fallback ID: ${FALLBACK_USER_ID}`);
-  return FALLBACK_USER_ID; // Return fallback ID instead of throwing an error
+  console.log('No authenticated user found');
+  throw new Error('No authenticated user found');
+};
+
+// Enhanced helper function to clean and validate image URLs with Firebase Storage support
+const cleanImageUrl = (url: string | undefined | null): string | undefined => {
+  if (!url) return undefined;
+  
+  // Remove any extra whitespace
+  const cleanUrl = url.trim();
+  if (!cleanUrl) return undefined;
+
+  // Remove local file paths (they won't work after app restart)
+  if (cleanUrl.includes("/ImagePicker/") || cleanUrl.includes("file://") || cleanUrl.startsWith("ph://")) {
+    console.warn("🚫 Removing local image path:", cleanUrl);
+    return undefined;
+  }
+
+  // Enhanced Firebase Storage URL handling
+  if (cleanUrl.includes("firebasestorage.googleapis.com")) {
+    try {
+      // Parse the URL to ensure it's valid
+      const urlObj = new URL(cleanUrl);
+      
+      // Verify it's a valid Firebase Storage URL structure
+      if (!urlObj.pathname.includes('/v0/b/') || !urlObj.pathname.includes('/o/')) {
+        console.warn("❌ Invalid Firebase Storage URL structure:", cleanUrl);
+        return undefined;
+      }
+
+      // Ensure alt=media parameter is present for direct image access
+      if (!urlObj.searchParams.get('alt')) {
+        urlObj.searchParams.set('alt', 'media');
+        console.log("✅ Added alt=media parameter to Firebase URL");
+      }
+
+      const finalUrl = urlObj.toString();
+      console.log("✅ Valid Firebase Storage URL:", finalUrl);
+      return finalUrl;
+    } catch (error) {
+      console.warn("❌ Error processing Firebase Storage URL:", cleanUrl, error);
+      return undefined;
+    }
+  }
+
+  // For other valid URLs (https://...)
+  if (cleanUrl.startsWith("https://") || cleanUrl.startsWith("http://")) {
+    console.log("✅ Valid HTTP(S) URL:", cleanUrl);
+    return cleanUrl;
+  }
+
+  console.warn("🚫 Unrecognized URL format:", cleanUrl);
+  return undefined;
 };
 
 // Helper function to transform API response into Post object
@@ -58,16 +106,20 @@ const transformPost = (post: any): Post | null => {
   }
 
   try {
-    // Transform the post with sensible defaults
+    // Clean and validate image URLs
+    const cleanedImageUrl = cleanImageUrl(post.image_url || post.image);
+    const cleanedAvatarUrl = cleanImageUrl(post.user_avatar || post.userAvatar || post.profile_image || post.profileImage);
+
+    // Transform the post with sensible defaults and clean image URLs
     const transformedPost: Post = {
       id: String(post.post_id || post.id),
       communityId: String(post.community_id || post.communityId || ''),
       communityName: post.community_name || post.communityName || 'Unknown Community',
       userId: String(post.user_id || post.userId || ''),
       userName: post.user_name || post.userName || 'Anonymous User',
-      userAvatar: post.user_avatar || post.userAvatar || post.profile_image || post.profileImage || "https://via.placeholder.com/150",
+      userAvatar: cleanedAvatarUrl || "https://via.placeholder.com/150",
       content: post.content || post.text || '',
-      image: post.image_url || post.image || null,
+      image: cleanedImageUrl, // This can be undefined if no image
       createdAt: post.created_at || post.createdAt || new Date().toISOString(),
       likes: typeof post.likes_count === 'number' ? post.likes_count : 
              typeof post.likes === 'number' ? post.likes : 0,
@@ -75,6 +127,22 @@ const transformPost = (post: any): Post | null => {
                 typeof post.comments === 'number' ? post.comments : 0,
       isLiked: post.is_liked === 1 || post.isLiked === true,
     };
+
+    // Enhanced logging for image URLs
+    if (transformedPost.image) {
+      console.log("📷 Post image processed:", {
+        original: post.image_url || post.image,
+        cleaned: transformedPost.image,
+        postId: transformedPost.id
+      });
+    }
+    if (transformedPost.userAvatar && transformedPost.userAvatar !== "https://via.placeholder.com/150") {
+      console.log("👤 User avatar processed:", {
+        original: post.user_avatar || post.userAvatar || post.profile_image || post.profileImage,
+        cleaned: transformedPost.userAvatar,
+        postId: transformedPost.id
+      });
+    }
 
     return transformedPost;
   } catch (error) {
@@ -99,13 +167,16 @@ const transformComment = (comment: any): Comment | null => {
   }
 
   try {
-    // Transform the comment with sensible defaults
+    // Clean and validate image URLs
+    const cleanedAvatarUrl = cleanImageUrl(comment.user_avatar || comment.userAvatar || comment.profile_image || comment.profileImage);
+
+    // Transform the comment with sensible defaults and clean image URLs
     const transformedComment: Comment = {
       id: String(commentId),
       postId: String(comment.post_id || comment.postId || ''),
       userId: String(comment.user_id || comment.userId || ''),
       userName: comment.user_name || comment.userName || comment.username || 'Anonymous User',
-      userAvatar: comment.user_avatar || comment.userAvatar || comment.profile_image || comment.profileImage || "https://via.placeholder.com/150",
+      userAvatar: cleanedAvatarUrl || "https://via.placeholder.com/150",
       content: comment.content || comment.text || '',
       createdAt: comment.created_at || comment.createdAt || new Date().toISOString(),
       likes: typeof comment.likes_count === 'number' ? comment.likes_count : 
@@ -113,7 +184,15 @@ const transformComment = (comment: any): Comment | null => {
       isLiked: comment.is_liked === 1 || comment.isLiked === true,
     };
 
-    console.log('Transformed comment:', transformedComment);
+    // Log avatar processing
+    if (transformedComment.userAvatar && transformedComment.userAvatar !== "https://via.placeholder.com/150") {
+      console.log("👤 Comment avatar processed:", {
+        original: comment.user_avatar || comment.userAvatar || comment.profile_image || comment.profileImage,
+        cleaned: transformedComment.userAvatar,
+        commentId: transformedComment.id
+      });
+    }
+
     return transformedComment;
   } catch (error) {
     console.error('Error transforming comment data:', error);
@@ -181,15 +260,9 @@ const fetchPostsFromJoinedCommunities = async (userId: string): Promise<Post[]> 
 // Fetch all posts for a user's feed (includes joined communities)
 export const fetchFeedPosts = async (userId?: string): Promise<Post[]> => {
   try {
-    // Get current user ID if not provided, with fallback
+    // Get current user ID if not provided
     const currentUserId = userId || await getCurrentUserId();
     console.log(`Fetching feed posts for user: ${currentUserId}`);
-    
-    // If no auth.currentUser and using fallback ID, directly get posts from joined communities
-    if (currentUserId === FALLBACK_USER_ID && !auth.currentUser) {
-      console.log(`Using fallback ID, skipping API call and fetching from joined communities directly`);
-      return fetchPostsFromJoinedCommunities(currentUserId);
-    }
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
@@ -216,7 +289,12 @@ export const fetchFeedPosts = async (userId?: string): Promise<Post[]> => {
     if (Array.isArray(data) && data.length > 0) {
       // Transform posts and filter out any null values
       const validPosts = data.map(transformPost).filter(post => post !== null) as Post[];
-      console.log(`Fetched ${validPosts.length} valid posts from API`);
+      console.log(`✅ Fetched ${validPosts.length} valid posts from API`);
+      
+      // Log image statistics
+      const postsWithImages = validPosts.filter(post => post.image).length;
+      console.log(`📊 Feed posts statistics: ${postsWithImages}/${validPosts.length} have images`);
+      
       return validPosts;
     } else {
       console.log("No posts returned from API, falling back to joined communities");
@@ -224,7 +302,7 @@ export const fetchFeedPosts = async (userId?: string): Promise<Post[]> => {
     }
   } catch (err) {
     console.error('Error fetching feed posts:', err);
-    // Get current user ID with fallback
+    // If user ID was provided, use it; otherwise get current user ID
     const currentUserId = userId || await getCurrentUserId();
     return fetchPostsFromJoinedCommunities(currentUserId);
   }
@@ -239,7 +317,7 @@ export const fetchCommunityPosts = async (communityId: string | number): Promise
       return [];
     }
     
-    // Get user ID with fallback
+    // Get user ID
     const userId = await getCurrentUserId();
     console.log(`Fetching posts for community: ${validCommunityId} with userId: ${userId}`);
     
@@ -275,10 +353,13 @@ export const fetchCommunityPosts = async (communityId: string | number): Promise
       ? data.map(transformPost).filter(post => post !== null) as Post[]
       : [];
       
-    console.log(`Successfully fetched ${validPosts.length} posts for community ${validCommunityId}`);
+    // Log image statistics for community posts
+    const postsWithImages = validPosts.filter(post => post.image).length;
+    console.log(`✅ Successfully fetched ${validPosts.length} posts for community ${validCommunityId} (${postsWithImages} with images)`);
+    
     return validPosts;
   } catch (err) {
-    console.error(`Error fetching posts for community: ${communityId}`, err);
+    console.error(`❌ Error fetching posts for community: ${communityId}`, err);
     // Return empty array for better UX
     return [];
   }
@@ -334,21 +415,21 @@ export const fetchPost = async (postId: string | number): Promise<Post | null> =
       return null;
     }
     
-    console.log(`Successfully fetched post: ${validPostId}`);
+    console.log(`✅ Successfully fetched post: ${validPostId}${post.image ? ' (with image)' : ''}`);
     return post;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
     if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for post ${postId} timed out`);
     } else {
-      console.error(`Error fetching post by ID: ${postId}`, err);
+      console.error(`❌ Error fetching post by ID: ${postId}`, err);
     }
     
     return null;
   }
 };
 
-// Create a new post
+// Enhanced create post function with better Firebase URL handling
 export const createPost = async (
   communityId: string | number,
   content: string,
@@ -366,40 +447,54 @@ export const createPost = async (
       return null;
     }
     
-    console.log(`Creating new post in community: ${validCommunityId}`);
+    console.log(`📝 Creating new post in community: ${validCommunityId}`);
+    console.log(`📷 Image URI provided:`, imageUri || "None");
     
     // Get current user ID
     const currentUserId = await getCurrentUserId();
     
-    // In a real app, handle image upload first if imageUri exists
-    let finalImageUrl = imageUri;
+    // Clean the image URL - this will handle Firebase Storage URLs properly
+    const finalImageUrl = cleanImageUrl(imageUri);
+    
+    if (imageUri && !finalImageUrl) {
+      console.warn("⚠️ Image URL was provided but invalid/unsupported, proceeding without image");
+    }
+    
+    console.log("🔗 Final processed image URL for post:", finalImageUrl || "None");
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout (longer for uploads)
     
     const apiUrl = getApiBaseUrl();
+    const requestBody = {
+      user_id: currentUserId,
+      community_id: validCommunityId,
+      content: content.trim(),
+      image_url: finalImageUrl || null,
+    };
+    
+    console.log("📤 Sending post creation request:", requestBody);
+    
     const res = await fetch(`${apiUrl}/posts`, {
       method: 'POST',
       headers: await getAuthHeaders(),
-      body: JSON.stringify({
-        user_id: currentUserId,
-        community_id: validCommunityId,
-        content: content,
-        image_url: finalImageUrl || null,
-      }),
+      body: JSON.stringify(requestBody),
       signal: controller.signal
     });
     
     clearTimeout(timeoutId);
     
     if (!res.ok) {
-      console.warn(`Error creating post: ${res.status} ${res.statusText}`);
+      console.warn(`❌ Error creating post: ${res.status} ${res.statusText}`);
+      const errorText = await res.text();
+      console.error(`Server response:`, errorText);
       throw new Error(`Failed to create post: ${res.status} ${res.statusText}`);
     }
     
     try {
       const data = await res.json();
+      console.log("📥 Post creation response:", data);
       const postData = data.post || data;
       
       // Transform post data
@@ -409,6 +504,12 @@ export const createPost = async (
         console.warn('Invalid data returned from post creation');
         return null;
       }
+      
+      console.log("✅ Post created successfully:", {
+        id: post.id,
+        hasImage: !!post.image,
+        imageUrl: post.image
+      });
       
       return post;
     } catch (parseError) {
@@ -420,7 +521,7 @@ export const createPost = async (
     if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error('Fetch request for post creation timed out');
     } else {
-      console.error('Error creating post:', err);
+      console.error('❌ Error creating post:', err);
     }
     
     return null;
@@ -474,14 +575,14 @@ export const toggleLikePost = async (
       return false;
     }
     
-    console.log(`Successfully toggled like for post: ${validPostId}`);
+    console.log(`✅ Successfully toggled like for post: ${validPostId}`);
     return true;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
     if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for like toggle on post ${postId} timed out`);
     } else {
-      console.error(`Error toggling like for post: ${postId}`, err);
+      console.error(`❌ Error toggling like for post: ${postId}`, err);
     }
     
     // For network errors, still return success for optimistic UI update
@@ -524,30 +625,32 @@ export const fetchComments = async (postId: string | number): Promise<Comment[]>
     console.log(`Raw comments data for post ${validPostId}:`, data);
     
     // Handle different response formats
+    let commentsArray = [];
     if (Array.isArray(data)) {
-      // Transform comments and filter out any null values
-      const validComments = data.map(transformComment).filter(comment => comment !== null) as Comment[];
-      console.log(`Successfully fetched ${validComments.length} comments for post ${validPostId}`);
-      return validComments;
+      commentsArray = data;
+    } else if (data.comments && Array.isArray(data.comments)) {
+      commentsArray = data.comments;
+    } else {
+      console.warn('Invalid format for comments data:', data);
+      return [];
     }
     
-    // If it's in the { comments: [] } format
-    if (data.comments && Array.isArray(data.comments)) {
-      // Transform comments and filter out any null values
-      const validComments = data.comments.map(transformComment).filter(comment => comment !== null) as Comment[];
-      console.log(`Successfully fetched ${validComments.length} comments for post ${validPostId}`);
-      return validComments;
-    }
+    // Transform comments and filter out any null values
+    const validComments = commentsArray.map(transformComment).filter(comment => comment !== null) as Comment[];
     
-    // If no valid format is found
-    console.warn('Invalid format for comments data:', data);
-    return [];
+    // Log avatar statistics for comments
+    const commentsWithAvatars = validComments.filter(comment => 
+      comment.userAvatar && comment.userAvatar !== "https://via.placeholder.com/150"
+    ).length;
+    
+    console.log(`✅ Successfully fetched ${validComments.length} comments for post ${validPostId} (${commentsWithAvatars} with avatars)`);
+    return validComments;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
     if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for comments on post ${postId} timed out`);
     } else {
-      console.error(`Error fetching comments for post: ${postId}`, err);
+      console.error(`❌ Error fetching comments for post: ${postId}`, err);
     }
     
     // Return empty array instead of mock comments
@@ -623,7 +726,7 @@ export const createComment = async (
         return null;
       }
       
-      console.log('Successfully created comment:', comment);
+      console.log('✅ Successfully created comment:', comment);
       return comment;
     } catch (parseError) {
       console.error('Error parsing comment creation response:', parseError);
@@ -634,7 +737,7 @@ export const createComment = async (
     if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for comment on post ${postId} creation timed out`);
     } else {
-      console.error(`Error creating comment on post: ${postId}`, err);
+      console.error(`❌ Error creating comment on post: ${postId}`, err);
     }
     
     return null;
@@ -688,14 +791,14 @@ export const toggleLikeComment = async (
       return false;
     }
     
-    console.log(`Successfully toggled like for comment: ${validCommentId}`);
+    console.log(`✅ Successfully toggled like for comment: ${validCommentId}`);
     return true;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
     if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for comment like toggle ${commentId} timed out`);
     } else {
-      console.error(`Error toggling like for comment: ${commentId}`, err);
+      console.error(`❌ Error toggling like for comment: ${commentId}`, err);
     }
     
     // For network errors, still return success for optimistic UI update
@@ -743,14 +846,14 @@ export const deletePost = async (postId: string | number): Promise<boolean> => {
       return false;
     }
     
-    console.log(`Post deleted successfully: ${validPostId}`);
+    console.log(`✅ Post deleted successfully: ${validPostId}`);
     return true;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
     if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for post deletion ${postId} timed out`);
     } else {
-      console.error(`Error deleting post: ${postId}`, err);
+      console.error(`❌ Error deleting post: ${postId}`, err);
     }
     
     // For network errors, still return success for optimistic UI update
@@ -798,14 +901,14 @@ export const deleteComment = async (commentId: string | number): Promise<boolean
       return false;
     }
     
-    console.log(`Comment deleted successfully: ${validCommentId}`);
+    console.log(`✅ Comment deleted successfully: ${validCommentId}`);
     return true;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
     if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for comment deletion ${commentId} timed out`);
     } else {
-      console.error(`Error deleting comment: ${commentId}`, err);
+      console.error(`❌ Error deleting comment: ${commentId}`, err);
     }
     
     // For network errors, still return success for optimistic UI update
@@ -836,8 +939,8 @@ export const editPost = async (
     // Get user ID
     const currentUserId = await getCurrentUserId();
     
-    // In a real app, handle image upload first if imageUri changes
-    let finalImageUrl = imageUri;
+    // Clean the image URL
+    const finalImageUrl = cleanImageUrl(imageUri);
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
@@ -884,7 +987,7 @@ export const editPost = async (
     if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for post edit ${postId} timed out`);
     } else {
-      console.error(`Error editing post: ${postId}`, err);
+      console.error(`❌ Error editing post: ${postId}`, err);
     }
     
     return null;
@@ -957,7 +1060,7 @@ export const editComment = async (
     if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for comment edit ${commentId} timed out`);
     } else {
-      console.error(`Error editing comment: ${commentId}`, err);
+      console.error(`❌ Error editing comment: ${commentId}`, err);
     }
     
     return null;
@@ -1015,14 +1118,14 @@ export const reportPost = async (
       return false;
     }
     
-    console.log(`Post reported successfully: ${validPostId}`);
+    console.log(`✅ Post reported successfully: ${validPostId}`);
     return true;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
     if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for post report ${postId} timed out`);
     } else {
-      console.error(`Error reporting post: ${postId}`, err);
+      console.error(`❌ Error reporting post: ${postId}`, err);
     }
     
     // For network errors, still return success for optimistic UI update
@@ -1081,14 +1184,14 @@ export const reportComment = async (
       return false;
     }
     
-    console.log(`Comment reported successfully: ${validCommentId}`);
+    console.log(`✅ Comment reported successfully: ${validCommentId}`);
     return true;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
     if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error(`Fetch request for comment report ${commentId} timed out`);
     } else {
-      console.error(`Error reporting comment: ${commentId}`, err);
+      console.error(`❌ Error reporting comment: ${commentId}`, err);
     }
     
     // For network errors, still return success for optimistic UI update
@@ -1099,7 +1202,7 @@ export const reportComment = async (
 // Get trending posts across all communities
 export const getTrendingPosts = async (limit: number = 10): Promise<Post[]> => {
   try {
-    // Get user ID with fallback
+    // Get user ID
     const userId = await getCurrentUserId();
     
     // Add timeout to prevent hanging requests
@@ -1122,28 +1225,25 @@ export const getTrendingPosts = async (limit: number = 10): Promise<Post[]> => {
     const data = await res.json();
     
     // Handle different response formats
+    let postsArray = [];
     if (Array.isArray(data)) {
-      // Transform posts and filter out any null values
-      const validPosts = data.map(transformPost).filter(post => post !== null) as Post[];
-      return validPosts.slice(0, limit);
+      postsArray = data;
+    } else if (data.posts && Array.isArray(data.posts)) {
+      postsArray = data.posts;
+    } else {
+      console.warn('Invalid format for trending posts data:', data);
+      return [];
     }
     
-    // If it's in the { posts: [] } format
-    if (data.posts && Array.isArray(data.posts)) {
-      // Transform posts and filter out any null values
-      const validPosts = data.posts.map(transformPost).filter(post => post !== null) as Post[];
-      return validPosts.slice(0, limit);
-    }
-    
-    // If no valid format is found
-    console.warn('Invalid format for trending posts data:', data);
-    return [];
+    // Transform posts and filter out any null values
+    const validPosts = postsArray.map(transformPost).filter(post => post !== null) as Post[];
+    return validPosts.slice(0, limit);
   } catch (err) {
     // Handle fetch timeout/abort error specifically
     if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error('Fetch request for trending posts timed out');
     } else {
-      console.error('Error fetching trending posts:', err);
+      console.error('❌ Error fetching trending posts:', err);
     }
     
     return [];
@@ -1157,7 +1257,7 @@ export const searchPosts = async (query: string): Promise<Post[]> => {
       return [];
     }
     
-    // Get user ID with fallback
+    // Get user ID
     const userId = await getCurrentUserId();
     
     // Add timeout to prevent hanging requests
@@ -1180,28 +1280,25 @@ export const searchPosts = async (query: string): Promise<Post[]> => {
     const data = await res.json();
     
     // Handle different response formats
+    let postsArray = [];
     if (Array.isArray(data)) {
-      // Transform posts and filter out any null values
-      const validPosts = data.map(transformPost).filter(post => post !== null) as Post[];
-      return validPosts;
+      postsArray = data;
+    } else if (data.posts && Array.isArray(data.posts)) {
+      postsArray = data.posts;
+    } else {
+      console.warn('Invalid format for post search data:', data);
+      return [];
     }
     
-    // If it's in the { posts: [] } format
-    if (data.posts && Array.isArray(data.posts)) {
-      // Transform posts and filter out any null values
-      const validPosts = data.posts.map(transformPost).filter(post => post !== null) as Post[];
-      return validPosts;
-    }
-    
-    // If no valid format is found
-    console.warn('Invalid format for post search data:', data);
-    return [];
+    // Transform posts and filter out any null values
+    const validPosts = postsArray.map(transformPost).filter(post => post !== null) as Post[];
+    return validPosts;
   } catch (err) {
     // Handle fetch timeout/abort error specifically
     if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
       console.error('Fetch request for post search timed out');
     } else {
-      console.error('Error searching posts:', err);
+      console.error('❌ Error searching posts:', err);
     }
     
     return [];

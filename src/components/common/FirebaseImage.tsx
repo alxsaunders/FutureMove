@@ -1,203 +1,183 @@
 // src/components/common/FirebaseImage.tsx
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   Image,
   View,
   ActivityIndicator,
+  Text,
   StyleSheet,
-  ImageProps,
   ImageStyle,
   ViewStyle,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "../../common/constants/colors";
-import ImageService from "../../services/ImageService";
 
-interface FirebaseImageProps extends Omit<ImageProps, "source"> {
-  // Firebase Storage URL or regular URL
+interface FirebaseImageProps {
   uri?: string;
-  // Fallback image for when no URI is provided
-  defaultSource?: any;
-  // Placeholder to show while loading
-  placeholder?: React.ReactNode;
-  // Style for the container
-  containerStyle?: ViewStyle;
-  // Style for the image
   imageStyle?: ImageStyle;
-  // Optimize image size (requires Firebase Extensions)
+  containerStyle?: ViewStyle;
+  defaultSource?: any;
   optimizeSize?: { width: number; height: number };
-  // Show loading indicator
+  resizeMode?: "cover" | "contain" | "stretch" | "repeat" | "center";
   showLoading?: boolean;
-  // Show error state
   showError?: boolean;
-  // Callback for load events
-  onLoadStart?: () => void;
-  onLoadEnd?: () => void;
-  onError?: (error: any) => void;
+  placeholder?: React.ReactNode;
 }
 
 const FirebaseImage: React.FC<FirebaseImageProps> = ({
   uri,
-  defaultSource,
-  placeholder,
-  containerStyle,
   imageStyle,
+  containerStyle,
+  defaultSource,
   optimizeSize,
+  resizeMode = "cover",
   showLoading = true,
   showError = true,
-  onLoadStart,
-  onLoadEnd,
-  onError,
-  style,
-  ...imageProps
+  placeholder,
 }) => {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(false);
-  const [imageUri, setImageUri] = useState<string | undefined>(uri);
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
 
-  // Process URI when it changes
-  useEffect(() => {
-    if (uri) {
-      processImageUri(uri);
-    } else {
-      setImageUri(undefined);
-      setLoading(false);
-      setError(false);
+  // Clean and validate the URI
+  const cleanUri = uri?.trim();
+  const isValidUri =
+    cleanUri &&
+    (cleanUri.startsWith("https://") ||
+      cleanUri.startsWith("http://") ||
+      cleanUri.startsWith("file://"));
+
+  // Handle load start
+  const handleLoadStart = () => {
+    setIsLoading(true);
+    setHasError(false);
+  };
+
+  // Handle successful load
+  const handleLoad = () => {
+    setIsLoading(false);
+    setHasError(false);
+  };
+
+  // Handle load error
+  const handleError = (error: any) => {
+    console.warn("FirebaseImage load error:", error);
+    setIsLoading(false);
+    setHasError(true);
+  };
+
+  // Optimize Firebase Storage URL if possible
+  const getOptimizedUri = (originalUri: string) => {
+    if (
+      !originalUri ||
+      !originalUri.includes("firebasestorage.googleapis.com")
+    ) {
+      return originalUri;
     }
-  }, [uri, optimizeSize]);
 
-  const processImageUri = (originalUri: string) => {
     try {
-      // Reset states
-      setError(false);
-      setLoading(true);
+      const url = new URL(originalUri);
 
-      let processedUri = originalUri;
-
-      // Optimize Firebase Storage images if requested
-      if (optimizeSize && ImageService.isFirebaseStorageUrl(originalUri)) {
-        processedUri = ImageService.getOptimizedImageUrl(
-          originalUri,
-          optimizeSize.width,
-          optimizeSize.height
-        );
+      if (optimizeSize) {
+        // Add size parameters for Firebase Storage optimization
+        // Note: This is a basic implementation - Firebase may not support all parameters
+        url.searchParams.set("width", optimizeSize.width.toString());
+        url.searchParams.set("height", optimizeSize.height.toString());
       }
 
-      setImageUri(processedUri);
-    } catch (err) {
-      console.error("Error processing image URI:", err);
-      setError(true);
-      setLoading(false);
+      return url.toString();
+    } catch (error) {
+      console.warn("Failed to optimize Firebase image URL:", error);
+      return originalUri;
     }
   };
 
-  const handleLoadStart = () => {
-    setLoading(true);
-    setError(false);
-    onLoadStart?.();
-  };
-
-  const handleLoadEnd = () => {
-    setLoading(false);
-    onLoadEnd?.();
-  };
-
-  const handleError = (errorEvent: any) => {
-    console.error("Image load error:", errorEvent.nativeEvent?.error);
-    setLoading(false);
-    setError(true);
-    onError?.(errorEvent);
-  };
-
-  const renderPlaceholder = () => {
-    if (placeholder) {
-      return placeholder;
-    }
-
-    return (
-      <View style={[styles.defaultPlaceholder, imageStyle]}>
-        <Ionicons name="image-outline" size={24} color={COLORS.textSecondary} />
-      </View>
-    );
-  };
-
-  const renderLoadingIndicator = () => (
-    <View style={[styles.loadingContainer, imageStyle]}>
-      <ActivityIndicator size="small" color={COLORS.primary} />
-    </View>
-  );
-
-  const renderErrorState = () => (
-    <View style={[styles.errorContainer, imageStyle]}>
-      <Ionicons
-        name="alert-circle-outline"
-        size={24}
-        color={COLORS.textSecondary}
-      />
-    </View>
-  );
-
-  // If no URI provided, show placeholder or default source
-  if (!imageUri) {
+  // If no valid URI, show default or error
+  if (!isValidUri) {
     if (defaultSource) {
       return (
-        <View style={containerStyle}>
-          <Image
-            source={defaultSource}
-            style={[style, imageStyle]}
-            {...imageProps}
+        <Image
+          source={defaultSource}
+          style={[styles.image, imageStyle]}
+          resizeMode={resizeMode}
+        />
+      );
+    }
+
+    if (showError) {
+      return (
+        <View style={[styles.errorContainer, imageStyle, containerStyle]}>
+          <Ionicons
+            name="image-outline"
+            size={24}
+            color={COLORS.textSecondary}
           />
+          <Text style={styles.errorText}>No image</Text>
         </View>
       );
     }
 
-    return <View style={containerStyle}>{renderPlaceholder()}</View>;
+    return null;
   }
 
+  const optimizedUri = getOptimizedUri(cleanUri);
+
   return (
-    <View style={containerStyle}>
+    <View style={[styles.container, containerStyle]}>
       <Image
-        source={{ uri: imageUri }}
-        style={[style, imageStyle]}
+        source={{ uri: optimizedUri }}
+        style={[styles.image, imageStyle]}
+        resizeMode={resizeMode}
         onLoadStart={handleLoadStart}
-        onLoadEnd={handleLoadEnd}
+        onLoad={handleLoad}
         onError={handleError}
-        {...imageProps}
       />
 
-      {/* Loading overlay */}
-      {loading && showLoading && (
-        <View style={styles.overlay}>{renderLoadingIndicator()}</View>
+      {/* Loading indicator */}
+      {isLoading && showLoading && (
+        <View style={[styles.loadingContainer, imageStyle]}>
+          {placeholder || (
+            <>
+              <ActivityIndicator size="small" color={COLORS.primary} />
+              <Text style={styles.loadingText}>Loading...</Text>
+            </>
+          )}
+        </View>
       )}
 
-      {/* Error overlay */}
-      {error && showError && (
-        <View style={styles.overlay}>{renderErrorState()}</View>
+      {/* Error state */}
+      {hasError && showError && (
+        <View style={[styles.errorContainer, imageStyle]}>
+          {defaultSource ? (
+            <Image
+              source={defaultSource}
+              style={[styles.image, imageStyle]}
+              resizeMode={resizeMode}
+            />
+          ) : (
+            <>
+              <Ionicons
+                name="alert-circle-outline"
+                size={24}
+                color={COLORS.textSecondary}
+              />
+              <Text style={styles.errorText}>Failed to load</Text>
+            </>
+          )}
+        </View>
       )}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  defaultPlaceholder: {
-    backgroundColor: COLORS.border,
-    justifyContent: "center",
-    alignItems: "center",
-    borderRadius: 8,
+  container: {
+    position: "relative",
+  },
+  image: {
+    width: "100%",
+    height: "100%",
   },
   loadingContainer: {
-    backgroundColor: COLORS.border,
-    justifyContent: "center",
-    alignItems: "center",
-    borderRadius: 8,
-  },
-  errorContainer: {
-    backgroundColor: COLORS.border,
-    justifyContent: "center",
-    alignItems: "center",
-    borderRadius: 8,
-  },
-  overlay: {
     position: "absolute",
     top: 0,
     left: 0,
@@ -205,8 +185,27 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.1)",
-    borderRadius: 8,
+    backgroundColor: COLORS.background,
+  },
+  loadingText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+  errorContainer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: COLORS.background,
+  },
+  errorText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: COLORS.textSecondary,
   },
 });
 

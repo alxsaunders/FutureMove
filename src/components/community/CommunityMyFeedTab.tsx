@@ -25,9 +25,6 @@ import { fetchJoinedCommunities } from "../../services/CommunityService";
 import { adaptCommunity } from "../../screens/CreatePostScreen";
 import { auth } from "../../config/firebase";
 
-// Fixed user ID for development/testing
-const FALLBACK_USER_ID = "KbtY3t4Tatd0r5tCjnjlmJyoNT5R2";
-
 const CommunityMyFeedTab = () => {
   const { currentUser } = useAuth();
   const [posts, setPosts] = useState<Post[]>([]);
@@ -42,44 +39,102 @@ const CommunityMyFeedTab = () => {
   const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
   const navigation = useNavigation();
 
-  // Clean and validate post data to handle image errors
-  const cleanPostData = useCallback((posts: Post[]) => {
-    return posts.map((post) => ({
-      ...post,
-      // Clean up image URLs - remove local file paths and validate Firebase URLs
-      image: cleanImageUrl(post.image),
-      userAvatar: cleanImageUrl(post.userAvatar),
-    }));
-  }, []);
+  // Enhanced image URL validation and cleaning
+  const validateAndCleanImageUrl = useCallback(
+    (url: string | undefined): string | undefined => {
+      if (!url) return undefined;
 
-  // Clean and validate image URLs
-  const cleanImageUrl = (url: string | undefined): string | undefined => {
-    if (!url) return undefined;
-
-    // Remove local file paths (they won't work after app restart)
-    if (url.includes("/ImagePicker/") || url.includes("file://")) {
-      console.warn("Removing local image path:", url);
-      return undefined;
-    }
-
-    // Validate Firebase Storage URLs
-    if (url.includes("firebasestorage.googleapis.com")) {
-      // Remove any extra parameters that might cause 404s
-      try {
-        const urlObj = new URL(url);
-        // Remove the width/height parameters that might be causing issues
-        urlObj.searchParams.delete("width");
-        urlObj.searchParams.delete("height");
-        return urlObj.toString();
-      } catch (error) {
-        console.warn("Invalid Firebase Storage URL:", url);
+      // Remove local file paths completely - they won't work
+      if (
+        url.includes("/ImagePicker/") ||
+        url.includes("file://") ||
+        url.includes("/data/user/")
+      ) {
+        console.warn("🚫 Removing invalid local image path:", url);
         return undefined;
       }
-    }
 
-    // For other URLs, return as-is
-    return url;
-  };
+      // Handle Firebase Storage URLs
+      if (url.includes("firebasestorage.googleapis.com")) {
+        try {
+          // Validate that it's a proper Firebase Storage URL
+          const urlObj = new URL(url);
+
+          // Check if it has the correct Firebase Storage domain
+          if (!urlObj.hostname.includes("firebasestorage.googleapis.com")) {
+            console.warn("🚫 Invalid Firebase Storage domain:", url);
+            return undefined;
+          }
+
+          // Check if it has the required path structure
+          if (
+            !urlObj.pathname.includes("/v0/b/") ||
+            !urlObj.pathname.includes("/o/")
+          ) {
+            console.warn("🚫 Invalid Firebase Storage path structure:", url);
+            return undefined;
+          }
+
+          // Remove potentially problematic parameters but keep the auth token
+          const cleanUrl = new URL(url);
+          // Keep alt=media and token parameters, remove others that might cause issues
+          const allowedParams = ["alt", "token"];
+          for (const [key] of cleanUrl.searchParams) {
+            if (!allowedParams.includes(key)) {
+              cleanUrl.searchParams.delete(key);
+            }
+          }
+
+          // Ensure alt=media is present for direct image access
+          if (!cleanUrl.searchParams.get("alt")) {
+            cleanUrl.searchParams.set("alt", "media");
+          }
+
+          const finalUrl = cleanUrl.toString();
+          console.log("✅ Cleaned Firebase Storage URL:", finalUrl);
+          return finalUrl;
+        } catch (error) {
+          console.error("❌ Error processing Firebase Storage URL:", error);
+          return undefined;
+        }
+      }
+
+      // For other valid URLs (like https:// URLs), return as-is
+      if (url.startsWith("https://") || url.startsWith("http://")) {
+        return url;
+      }
+
+      // Invalid URL format
+      console.warn("🚫 Invalid URL format:", url);
+      return undefined;
+    },
+    []
+  );
+
+  // Enhanced post data cleaning with better image handling
+  const cleanPostData = useCallback(
+    (posts: Post[]) => {
+      return posts.map((post) => {
+        const cleanedPost = {
+          ...post,
+          // Clean image URLs with enhanced validation
+          image: validateAndCleanImageUrl(post.image),
+          userAvatar: validateAndCleanImageUrl(post.userAvatar),
+        };
+
+        // Log image cleaning results for debugging
+        if (post.image !== cleanedPost.image) {
+          console.log(`🧹 Post ${post.id} image cleaned:`, {
+            original: post.image,
+            cleaned: cleanedPost.image,
+          });
+        }
+
+        return cleanedPost;
+      });
+    },
+    [validateAndCleanImageUrl]
+  );
 
   // Check if user has joined any communities
   const checkJoinedCommunities = useCallback(async () => {
@@ -108,24 +163,24 @@ const CommunityMyFeedTab = () => {
     }
   }, [selectedCommunities.length]);
 
-  // Authentication check effect
+  // Authentication check effect - NO FALLBACK USER
   useEffect(() => {
     let resolvedUserId = null;
 
     // First try to get from context
     if (currentUser && currentUser.id) {
       resolvedUserId = currentUser.id;
-      console.log(`User found from AuthContext: ${resolvedUserId}`);
+      console.log(`✅ User found from AuthContext: ${resolvedUserId}`);
     }
     // Then try to get directly from Firebase
     else if (auth.currentUser) {
       resolvedUserId = auth.currentUser.uid;
-      console.log(`User found from Firebase: ${resolvedUserId}`);
+      console.log(`✅ User found from Firebase: ${resolvedUserId}`);
     }
-    // As a last resort, use the fallback ID
+    // NO FALLBACK USER - must be authenticated
     else {
-      resolvedUserId = FALLBACK_USER_ID;
-      console.log(`No user ID found, using fallback: ${FALLBACK_USER_ID}`);
+      console.log(`❌ No authenticated user found`);
+      resolvedUserId = null;
     }
 
     setUserId(resolvedUserId);
@@ -150,17 +205,19 @@ const CommunityMyFeedTab = () => {
     filterPosts();
   }, [filterPosts]);
 
-  // Fetch posts from joined communities
+  // Enhanced fetch posts with better error handling and image processing
   const fetchPosts = useCallback(async () => {
+    if (!userId) {
+      console.log("❌ No authenticated user, cannot fetch posts");
+      setPosts([]);
+      setAllPosts([]);
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     try {
-      if (!userId) {
-        console.log("No user ID resolved, skipping post fetch");
-        setPosts([]);
-        setAllPosts([]);
-        setIsLoading(false);
-        return;
-      }
+      console.log(`🔄 Fetching posts for authenticated user: ${userId}`);
 
       // First check if user has joined any communities
       const communities = await checkJoinedCommunities();
@@ -173,46 +230,82 @@ const CommunityMyFeedTab = () => {
         return;
       }
 
-      // Use fetchFeedPosts with the resolved user ID
-      console.log(`Fetching feed posts for user ${userId}`);
-      const feedPosts = await fetchFeedPosts(userId);
-      console.log(`Fetched ${feedPosts.length} feed posts`);
+      let rawPosts: Post[] = [];
 
-      if (feedPosts.length === 0) {
-        // If the backend feed API isn't working, try to fetch posts manually
+      try {
+        // Use fetchFeedPosts with the resolved user ID
+        console.log(`📡 Fetching feed posts for user ${userId}`);
+        const feedPosts = await fetchFeedPosts(userId);
+        console.log(`✅ Fetched ${feedPosts.length} feed posts`);
+        rawPosts = feedPosts;
+      } catch (feedError) {
+        console.warn(
+          "Feed API failed, trying alternative approach:",
+          feedError
+        );
+        rawPosts = [];
+      }
+
+      // If the backend feed API isn't working or returns no posts, try to fetch posts manually
+      if (rawPosts.length === 0) {
         console.log(
-          "No posts returned from feed API, trying alternative approach"
+          "No posts from feed API, fetching from individual communities"
         );
         let allPostsData: Post[] = [];
 
         for (const community of communities) {
           try {
+            console.log(
+              `📡 Fetching posts from community: ${community.name} (${community.id})`
+            );
             const communityPosts = await fetchCommunityPosts(
               String(community.id)
+            );
+            console.log(
+              `✅ Fetched ${communityPosts.length} posts from ${community.name}`
             );
             allPostsData = [...allPostsData, ...communityPosts];
           } catch (err) {
             console.error(
-              `Error fetching posts for community ${community.id}:`,
+              `❌ Error fetching posts for community ${community.id}:`,
               err
             );
           }
         }
 
         console.log(
-          `Fetched ${allPostsData.length} posts from individual communities`
+          `✅ Total posts fetched from individual communities: ${allPostsData.length}`
         );
-
-        // Clean the post data to handle image errors
-        const cleanedPosts = cleanPostData(allPostsData);
-        setAllPosts(cleanedPosts);
-      } else {
-        // Clean the post data to handle image errors
-        const cleanedPosts = cleanPostData(feedPosts);
-        setAllPosts(cleanedPosts);
+        rawPosts = allPostsData;
       }
+
+      // Clean and validate all post data, especially images
+      console.log(`🧹 Cleaning ${rawPosts.length} posts...`);
+      const cleanedPosts = cleanPostData(rawPosts);
+
+      // Log statistics about image cleaning
+      const postsWithImages = cleanedPosts.filter((post) => post.image).length;
+      const originalPostsWithImages = rawPosts.filter(
+        (post) => post.image
+      ).length;
+      console.log(`📊 Image cleaning stats:`, {
+        totalPosts: cleanedPosts.length,
+        originalImagesCount: originalPostsWithImages,
+        cleanedImagesCount: postsWithImages,
+        imagesRemoved: originalPostsWithImages - postsWithImages,
+      });
+
+      // Sort posts by creation date (newest first)
+      const sortedPosts = cleanedPosts.sort((a, b) => {
+        const dateA = new Date(a.createdAt || 0).getTime();
+        const dateB = new Date(b.createdAt || 0).getTime();
+        return dateB - dateA;
+      });
+
+      setAllPosts(sortedPosts);
+      console.log(`✅ Successfully processed ${sortedPosts.length} posts`);
     } catch (error) {
-      console.error("Error fetching posts:", error);
+      console.error("❌ Error fetching posts:", error);
       setPosts([]);
       setAllPosts([]);
     } finally {
@@ -467,17 +560,24 @@ const CommunityMyFeedTab = () => {
     </View>
   );
 
-  // Render post item with enhanced error handling
-  const renderPostItem = ({ item }: { item: Post }) => (
-    <CommunityPostItem
-      post={item}
-      onLikePress={() => toggleLikePost(item.id)}
-      onCommentPress={() => navigateToPostDetail(item.id)}
-      onPostPress={() => navigateToPostDetail(item.id)}
-      onUserPress={handleUserPress}
-      onSharePress={handleSharePost}
-    />
-  );
+  // Enhanced render post item with better error handling and debugging
+  const renderPostItem = ({ item }: { item: Post }) => {
+    // Log post image info for debugging
+    if (item.image) {
+      console.log(`🖼️ Rendering post ${item.id} with image:`, item.image);
+    }
+
+    return (
+      <CommunityPostItem
+        post={item}
+        onLikePress={() => toggleLikePost(item.id)}
+        onCommentPress={() => navigateToPostDetail(item.id)}
+        onPostPress={() => navigateToPostDetail(item.id)}
+        onUserPress={handleUserPress}
+        onSharePress={handleSharePost}
+      />
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -531,11 +631,7 @@ const CommunityMyFeedTab = () => {
           updateCellsBatchingPeriod={50}
           initialNumToRender={10}
           windowSize={10}
-          getItemLayout={(data, index) => ({
-            length: 200, // Approximate item height
-            offset: 200 * index,
-            index,
-          })}
+          // Remove getItemLayout as post heights vary with images
         />
       ) : (
         <EmptyFeedView />

@@ -12,6 +12,8 @@ import {
   ActivityIndicator,
   Keyboard,
   Alert,
+  Image,
+  Dimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -27,7 +29,182 @@ import {
   toggleLikeComment,
 } from "../services/CommunityPostService";
 import UserProfileModal from "../components/UserProfileModal";
-import FirebaseImage from "../components/common/FirebaseImage"; // Import our new component
+
+const { width } = Dimensions.get("window");
+
+// Enhanced Image Component with Firebase Storage support
+const EnhancedImage: React.FC<{
+  uri?: string;
+  style: any;
+  defaultIcon?: string;
+  showLoading?: boolean;
+}> = ({ uri, style, defaultIcon = "person", showLoading = true }) => {
+  const [imageLoading, setImageLoading] = useState(!!uri);
+  const [imageError, setImageError] = useState(false);
+
+  // Validate and clean Firebase Storage URL
+  const validateFirebaseUrl = (url: string): string => {
+    try {
+      if (!url.includes("firebasestorage.googleapis.com")) {
+        return url;
+      }
+
+      const urlObj = new URL(url);
+
+      // Ensure alt=media is present for direct image access
+      if (!urlObj.searchParams.get("alt")) {
+        urlObj.searchParams.set("alt", "media");
+      }
+
+      return urlObj.toString();
+    } catch (error) {
+      console.error("Error validating Firebase URL:", error);
+      return url;
+    }
+  };
+
+  const handleImageLoad = () => {
+    console.log("✅ Image loaded successfully:", uri);
+    setImageLoading(false);
+    setImageError(false);
+  };
+
+  const handleImageError = (error: any) => {
+    console.error("❌ Image failed to load:", uri, error);
+    setImageLoading(false);
+    setImageError(true);
+  };
+
+  const handleImageLoadStart = () => {
+    console.log("🔄 Starting to load image:", uri);
+    setImageLoading(true);
+    setImageError(false);
+  };
+
+  // If no URI or error, show default icon
+  if (!uri || imageError) {
+    return (
+      <View style={[style, styles.defaultImageContainer]}>
+        <Ionicons
+          name={defaultIcon as any}
+          size={style.width ? style.width * 0.5 : 20}
+          color={COLORS.textSecondary}
+        />
+      </View>
+    );
+  }
+
+  const validatedUri = validateFirebaseUrl(uri);
+
+  return (
+    <View style={{ position: "relative" }}>
+      <Image
+        source={{ uri: validatedUri }}
+        style={[style, imageError && { opacity: 0 }]}
+        onLoadStart={handleImageLoadStart}
+        onLoad={handleImageLoad}
+        onError={handleImageError}
+        resizeMode="cover"
+      />
+
+      {/* Loading Indicator */}
+      {imageLoading && showLoading && !imageError && (
+        <View style={[styles.imageLoadingOverlay, style]}>
+          <ActivityIndicator size="small" color={COLORS.primary} />
+        </View>
+      )}
+    </View>
+  );
+};
+
+// Enhanced Post Image Component
+const PostImage: React.FC<{
+  uri: string;
+  style: any;
+}> = ({ uri, style }) => {
+  const [imageLoading, setImageLoading] = useState(true);
+  const [imageError, setImageError] = useState(false);
+
+  const validateFirebaseUrl = (url: string): string => {
+    try {
+      if (!url.includes("firebasestorage.googleapis.com")) {
+        return url;
+      }
+
+      const urlObj = new URL(url);
+      if (!urlObj.searchParams.get("alt")) {
+        urlObj.searchParams.set("alt", "media");
+      }
+      return urlObj.toString();
+    } catch (error) {
+      console.error("Error validating Firebase URL:", error);
+      return url;
+    }
+  };
+
+  const handleImageLoad = () => {
+    console.log("✅ Post image loaded successfully:", uri);
+    setImageLoading(false);
+    setImageError(false);
+  };
+
+  const handleImageError = (error: any) => {
+    console.error("❌ Post image failed to load:", uri, error);
+    setImageLoading(false);
+    setImageError(true);
+  };
+
+  const handleImageLoadStart = () => {
+    console.log("🔄 Starting to load post image:", uri);
+    setImageLoading(true);
+    setImageError(false);
+  };
+
+  const validatedUri = validateFirebaseUrl(uri);
+
+  return (
+    <View style={{ position: "relative" }}>
+      {/* Main Image */}
+      <Image
+        source={{ uri: validatedUri }}
+        style={[style, imageError && { opacity: 0 }]}
+        onLoadStart={handleImageLoadStart}
+        onLoad={handleImageLoad}
+        onError={handleImageError}
+        resizeMode="cover"
+      />
+
+      {/* Loading State */}
+      {imageLoading && !imageError && (
+        <View style={[styles.postImageLoadingContainer, style]}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.postImageLoadingText}>Loading image...</Text>
+        </View>
+      )}
+
+      {/* Error State */}
+      {imageError && (
+        <View style={[styles.postImageErrorContainer, style]}>
+          <Ionicons
+            name="image-outline"
+            size={40}
+            color={COLORS.textSecondary}
+          />
+          <Text style={styles.postImageErrorText}>Failed to load image</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => {
+              setImageError(false);
+              setImageLoading(true);
+            }}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+};
 
 const PostDetailScreen = () => {
   const { currentUser } = useAuth();
@@ -66,8 +243,17 @@ const PostDetailScreen = () => {
       ]);
 
       if (postData) {
-        setPost(postData);
-        console.log(`Successfully fetched post: ${postData.id}`);
+        // Clean the post image URL
+        const cleanedPost = {
+          ...postData,
+          image: cleanImageUrl(postData.image),
+          userAvatar: cleanImageUrl(postData.userAvatar),
+        };
+        setPost(cleanedPost);
+        console.log(`Successfully fetched post: ${cleanedPost.id}`);
+        if (cleanedPost.image) {
+          console.log(`🖼️ Post has image: ${cleanedPost.image}`);
+        }
       } else {
         console.warn(`Post not found for ID: ${postId}`);
         Alert.alert(
@@ -82,8 +268,13 @@ const PostDetailScreen = () => {
         );
       }
 
-      setComments(commentsData);
-      console.log(`Successfully fetched ${commentsData.length} comments`);
+      // Clean comment image URLs
+      const cleanedComments = commentsData.map((comment) => ({
+        ...comment,
+        userAvatar: cleanImageUrl(comment.userAvatar),
+      }));
+      setComments(cleanedComments);
+      console.log(`Successfully fetched ${cleanedComments.length} comments`);
     } catch (error) {
       console.error("Error fetching post details:", error);
       Alert.alert("Error", "Failed to load post details. Please try again.", [
@@ -99,6 +290,37 @@ const PostDetailScreen = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Clean image URL function
+  const cleanImageUrl = (url: string | undefined): string | undefined => {
+    if (!url) return undefined;
+
+    // Remove local file paths
+    if (
+      url.includes("/ImagePicker/") ||
+      url.includes("file://") ||
+      url.includes("/data/user/")
+    ) {
+      console.warn("🚫 Removing invalid local image path:", url);
+      return undefined;
+    }
+
+    // Handle Firebase Storage URLs
+    if (url.includes("firebasestorage.googleapis.com")) {
+      try {
+        const urlObj = new URL(url);
+        if (!urlObj.searchParams.get("alt")) {
+          urlObj.searchParams.set("alt", "media");
+        }
+        return urlObj.toString();
+      } catch (error) {
+        console.warn("🚫 Invalid Firebase Storage URL:", url);
+        return undefined;
+      }
+    }
+
+    return url;
   };
 
   // Refresh data
@@ -200,8 +422,14 @@ const PostDetailScreen = () => {
       const comment = await createComment(post.id, newComment.trim());
 
       if (comment) {
+        // Clean the comment image URL
+        const cleanedComment = {
+          ...comment,
+          userAvatar: cleanImageUrl(comment.userAvatar),
+        };
+
         // Add new comment to the list
-        setComments((prevComments) => [...prevComments, comment]);
+        setComments((prevComments) => [...prevComments, cleanedComment]);
 
         // Update post comment count
         setPost((prevPost) =>
@@ -260,11 +488,11 @@ const PostDetailScreen = () => {
         onPress={() => handleUserProfileClick(item.userId)}
         activeOpacity={0.7}
       >
-        <FirebaseImage
+        <EnhancedImage
           uri={item.userAvatar}
-          imageStyle={styles.commentAvatar}
-          defaultSource={require("../assets/default-avatar.png")}
-          optimizeSize={{ width: 72, height: 72 }} // 2x for sharp display
+          style={styles.commentAvatar}
+          defaultIcon="person"
+          showLoading={false}
         />
       </TouchableOpacity>
       <View style={styles.commentContent}>
@@ -367,11 +595,11 @@ const PostDetailScreen = () => {
                   activeOpacity={0.7}
                   style={styles.postHeaderClickable}
                 >
-                  <FirebaseImage
+                  <EnhancedImage
                     uri={post.userAvatar}
-                    imageStyle={styles.avatar}
-                    defaultSource={require("../assets/default-avatar.png")}
-                    optimizeSize={{ width: 80, height: 80 }} // 2x for sharp display
+                    style={styles.avatar}
+                    defaultIcon="person"
+                    showLoading={false}
                   />
                   <View style={styles.postHeaderInfo}>
                     <Text style={styles.userName}>{post.userName}</Text>
@@ -385,16 +613,9 @@ const PostDetailScreen = () => {
               {/* Post Content */}
               <Text style={styles.postContent}>{post.content}</Text>
 
-              {/* Post Image (if exists) - Now using FirebaseImage */}
+              {/* Post Image with Enhanced Error Handling */}
               {post.image && (
-                <FirebaseImage
-                  uri={post.image}
-                  imageStyle={styles.postImage}
-                  optimizeSize={{ width: 600, height: 500 }} // Larger for post images
-                  resizeMode="cover"
-                  showLoading={true}
-                  showError={true}
-                />
+                <PostImage uri={post.image} style={styles.postImage} />
               )}
 
               {/* Post Actions */}
@@ -468,11 +689,11 @@ const PostDetailScreen = () => {
 
         {/* Comment Input */}
         <View style={styles.commentInputContainer}>
-          <FirebaseImage
+          <EnhancedImage
             uri={currentUser?.profileImage}
-            imageStyle={styles.currentUserAvatar}
-            defaultSource={require("../assets/default-avatar.png")}
-            optimizeSize={{ width: 72, height: 72 }} // 2x for sharp display
+            style={styles.currentUserAvatar}
+            defaultIcon="person"
+            showLoading={false}
           />
           <TextInput
             ref={commentInputRef}
@@ -581,6 +802,21 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     marginRight: 12,
   },
+  defaultImageContainer: {
+    backgroundColor: COLORS.border,
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: 20,
+  },
+  imageLoadingOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.1)",
+    borderRadius: 20,
+  },
   postHeaderInfo: {
     flex: 1,
   },
@@ -605,6 +841,51 @@ const styles = StyleSheet.create({
     height: 250,
     borderRadius: 8,
     marginBottom: 16,
+    backgroundColor: COLORS.border,
+  },
+  postImageLoadingContainer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+    borderRadius: 8,
+  },
+  postImageLoadingText: {
+    color: COLORS.white,
+    fontSize: 14,
+    marginTop: 8,
+    fontWeight: "500",
+  },
+  postImageErrorContainer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderStyle: "dashed",
+  },
+  postImageErrorText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  retryButton: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+  },
+  retryButtonText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: "500",
   },
   postActions: {
     flexDirection: "row",

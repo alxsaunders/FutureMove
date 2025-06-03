@@ -1,5 +1,5 @@
 // src/components/community/CommunityPostItem.tsx
-import React from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
@@ -8,11 +8,12 @@ import {
   Dimensions,
   Share,
   Alert,
+  Image,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "../../common/constants/colors";
 import { Post } from "../../types";
-import FirebaseImage from "../common/FirebaseImage";
 
 // Get screen dimensions
 const { width } = Dimensions.get("window");
@@ -28,6 +29,164 @@ interface CommunityPostItemProps {
   onSharePress?: (post: Post) => void;
   onUserPress?: (userId: string) => void;
 }
+
+// Enhanced Image Component with Firebase Storage support
+const PostImage: React.FC<{
+  uri: string;
+  width: number;
+  style?: any;
+}> = ({ uri, width, style }) => {
+  const [imageLoading, setImageLoading] = useState(true);
+  const [imageError, setImageError] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
+
+  // Validate and clean Firebase Storage URL
+  const validateFirebaseUrl = (url: string): string => {
+    try {
+      if (!url.includes("firebasestorage.googleapis.com")) {
+        return url;
+      }
+
+      const urlObj = new URL(url);
+
+      // Ensure alt=media is present for direct image access
+      if (!urlObj.searchParams.get("alt")) {
+        urlObj.searchParams.set("alt", "media");
+      }
+
+      return urlObj.toString();
+    } catch (error) {
+      console.error("Error validating Firebase URL:", error);
+      return url;
+    }
+  };
+
+  const validatedUri = validateFirebaseUrl(uri);
+
+  const handleImageLoad = () => {
+    console.log("✅ Image loaded successfully:", validatedUri);
+    setImageLoading(false);
+    setImageError(false);
+    setImageLoaded(true);
+  };
+
+  const handleImageError = (error: any) => {
+    console.error("❌ Image failed to load:", validatedUri, error);
+    setImageLoading(false);
+    setImageError(true);
+    setImageLoaded(false);
+  };
+
+  const handleImageLoadStart = () => {
+    console.log("🔄 Starting to load image:", validatedUri);
+    setImageLoading(true);
+    setImageError(false);
+  };
+
+  return (
+    <View style={[style, { position: "relative" }]}>
+      {/* Main Image */}
+      <Image
+        source={{ uri: validatedUri }}
+        style={[
+          {
+            width: width,
+            height: MAX_IMAGE_HEIGHT,
+            borderRadius: 12,
+            backgroundColor: COLORS.border,
+          },
+          imageError && { opacity: 0 },
+        ]}
+        onLoadStart={handleImageLoadStart}
+        onLoad={handleImageLoad}
+        onError={handleImageError}
+        resizeMode="cover"
+      />
+
+      {/* Loading Indicator */}
+      {imageLoading && !imageError && (
+        <View
+          style={[
+            styles.imageOverlay,
+            { width: width, height: MAX_IMAGE_HEIGHT },
+          ]}
+        >
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.loadingText}>Loading image...</Text>
+        </View>
+      )}
+
+      {/* Error State */}
+      {imageError && (
+        <View
+          style={[
+            styles.imageErrorContainer,
+            { width: width, height: MAX_IMAGE_HEIGHT },
+          ]}
+        >
+          <Ionicons
+            name="image-outline"
+            size={40}
+            color={COLORS.textSecondary}
+          />
+          <Text style={styles.imageErrorText}>Failed to load image</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => {
+              setImageError(false);
+              setImageLoading(true);
+              setImageLoaded(false);
+            }}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+};
+
+// Enhanced Avatar Component
+const UserAvatar: React.FC<{
+  uri?: string;
+  style?: any;
+}> = ({ uri, style }) => {
+  const [avatarError, setAvatarError] = useState(false);
+
+  const validateFirebaseUrl = (url: string): string => {
+    try {
+      if (!url.includes("firebasestorage.googleapis.com")) {
+        return url;
+      }
+
+      const urlObj = new URL(url);
+      if (!urlObj.searchParams.get("alt")) {
+        urlObj.searchParams.set("alt", "media");
+      }
+      return urlObj.toString();
+    } catch (error) {
+      return url;
+    }
+  };
+
+  if (!uri || avatarError) {
+    return (
+      <View style={[style, styles.defaultAvatar]}>
+        <Ionicons name="person" size={20} color={COLORS.textSecondary} />
+      </View>
+    );
+  }
+
+  const validatedUri = validateFirebaseUrl(uri);
+
+  return (
+    <Image
+      source={{ uri: validatedUri }}
+      style={style}
+      onError={() => setAvatarError(true)}
+    />
+  );
+};
 
 const CommunityPostItem: React.FC<CommunityPostItemProps> = ({
   post,
@@ -138,6 +297,14 @@ const CommunityPostItem: React.FC<CommunityPostItemProps> = ({
     return count.toString();
   };
 
+  // Log post image info for debugging
+  if (post.image) {
+    console.log(
+      `🖼️ CommunityPostItem rendering post ${post.id} with image:`,
+      post.image
+    );
+  }
+
   return (
     <TouchableOpacity
       style={styles.container}
@@ -157,14 +324,7 @@ const CommunityPostItem: React.FC<CommunityPostItemProps> = ({
           accessibilityLabel={`View ${post.userName}'s profile`}
           accessibilityRole="button"
         >
-          <FirebaseImage
-            uri={post.userAvatar}
-            imageStyle={styles.avatar}
-            defaultSource={require("../../assets/default-avatar.png")}
-            optimizeSize={{ width: 80, height: 80 }}
-            showLoading={false}
-            showError={false}
-          />
+          <UserAvatar uri={post.userAvatar} style={styles.avatar} />
           <View style={styles.headerInfo}>
             <Text style={styles.userName} numberOfLines={1}>
               {post.userName}
@@ -204,32 +364,13 @@ const CommunityPostItem: React.FC<CommunityPostItemProps> = ({
         {post.content}
       </Text>
 
-      {/* Post Image using FirebaseImage */}
+      {/* Post Image with Enhanced Error Handling */}
       {post.image && (
         <View style={styles.imageContainer}>
-          <FirebaseImage
+          <PostImage
             uri={post.image}
-            imageStyle={[styles.image, { width: imageWidth }]}
-            containerStyle={styles.imageWrapper}
-            optimizeSize={{
-              width: Math.floor(imageWidth * 2),
-              height: MAX_IMAGE_HEIGHT * 2,
-            }}
-            resizeMode="cover"
-            showLoading={true}
-            showError={true}
-            placeholder={
-              <View style={[styles.imagePlaceholder, { width: imageWidth }]}>
-                <Ionicons
-                  name="image-outline"
-                  size={40}
-                  color={COLORS.textSecondary}
-                />
-                <Text style={styles.imagePlaceholderText}>
-                  Loading image...
-                </Text>
-              </View>
-            }
+            width={imageWidth}
+            style={styles.imageWrapper}
           />
         </View>
       )}
@@ -361,6 +502,10 @@ const styles = StyleSheet.create({
     marginRight: 12,
     backgroundColor: COLORS.border,
   },
+  defaultAvatar: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
   headerInfo: {
     flex: 1,
     minWidth: 0,
@@ -413,20 +558,49 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: COLORS.border,
   },
-  imagePlaceholder: {
-    height: 120,
-    borderRadius: 12,
-    backgroundColor: COLORS.background,
+  imageOverlay: {
+    position: "absolute",
+    top: 0,
+    left: CONTAINER_HORIZONTAL_PADDING,
     justifyContent: "center",
     alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+    borderRadius: 12,
+  },
+  loadingText: {
+    color: COLORS.white,
+    fontSize: 14,
+    marginTop: 8,
+    fontWeight: "500",
+  },
+  imageErrorContainer: {
+    position: "absolute",
+    top: 0,
+    left: CONTAINER_HORIZONTAL_PADDING,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: COLORS.background,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: COLORS.border,
     borderStyle: "dashed",
   },
-  imagePlaceholderText: {
-    fontSize: 12,
+  imageErrorText: {
+    fontSize: 14,
     color: COLORS.textSecondary,
     marginTop: 8,
+    marginBottom: 12,
+  },
+  retryButton: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+  },
+  retryButtonText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: "500",
   },
   actions: {
     flexDirection: "row",

@@ -22,7 +22,13 @@ import { fetchJoinedCommunities } from "../services/CommunityService";
 import { createPost } from "../services/CommunityPostService";
 import { Community } from "../types";
 import { auth } from "../config/firebase";
-import ImageService from "../services/ImageService"; // Import our new service
+import {
+  getStorage,
+  ref,
+  uploadBytes,
+  getDownloadURL,
+  deleteObject,
+} from "firebase/storage";
 
 // Fixed user ID for development/testing
 const FALLBACK_USER_ID = "KbtY3t4Tatd0r5tCjnjlmJyoNT5R2";
@@ -33,7 +39,6 @@ interface RouteParams {
 }
 
 // Define adapter function to convert API Community to UI Community
-// Export this function so it can be used in other components
 export const adaptCommunity = (apiCommunity: any): Community => {
   return {
     id: apiCommunity.id || apiCommunity.community_id,
@@ -52,7 +57,6 @@ const CreatePostScreen = () => {
   const { currentUser } = useAuth();
   const navigation = useNavigation();
   const route = useRoute();
-  // Properly type the route params
   const { communityId: preselectedCommunityId } =
     (route.params as RouteParams) || {};
 
@@ -62,7 +66,7 @@ const CreatePostScreen = () => {
   );
   const [uploadedImageUrl, setUploadedImageUrl] = useState<string | undefined>(
     undefined
-  ); // Track uploaded URL
+  );
   const [isUploading, setIsUploading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showCommunityModal, setShowCommunityModal] = useState(false);
@@ -73,7 +77,7 @@ const CreatePostScreen = () => {
   const [isLoadingCommunities, setIsLoadingCommunities] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0); // Track upload progress
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   // Authentication check effect
   useEffect(() => {
@@ -161,121 +165,269 @@ const CreatePostScreen = () => {
     }
   }, [fetchUserCommunities, authChecked]);
 
-  // Handle image picking with Firebase upload
-  const pickImage = async () => {
-    const permissionResult =
-      await ImagePicker.requestMediaLibraryPermissionsAsync();
+  // Enhanced URI to Blob conversion with React Native compatible approach
+  const uriToBlob = async (uri: string): Promise<Blob> => {
+    console.log("🔄 Converting URI to blob:", uri);
 
-    if (permissionResult.granted === false) {
-      Alert.alert(
-        "Permission Required",
-        "You need to grant permission to access your photos"
-      );
-      return;
-    }
+    try {
+      // Use fetch API which works better with React Native file URIs
+      const response = await fetch(uri);
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.8,
-    });
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
-    if (!result.canceled && result.assets[0]) {
-      const imageUri = result.assets[0].uri;
-      setSelectedImage(imageUri);
+      const blob = await response.blob();
 
-      // Upload image to Firebase Storage
-      await uploadImageToFirebase(imageUri);
-    }
-  };
+      if (!blob || blob.size === 0) {
+        throw new Error("Received empty blob from image");
+      }
 
-  // Handle camera access with Firebase upload
-  const takePicture = async () => {
-    const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
+      console.log("✅ Blob conversion successful:", {
+        size: blob.size,
+        type: blob.type,
+      });
 
-    if (cameraPermission.granted === false) {
-      Alert.alert(
-        "Permission Required",
-        "You need to grant permission to access your camera"
-      );
-      return;
-    }
-
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.8,
-    });
-
-    if (!result.canceled && result.assets[0]) {
-      const imageUri = result.assets[0].uri;
-      setSelectedImage(imageUri);
-
-      // Upload image to Firebase Storage
-      await uploadImageToFirebase(imageUri);
+      return blob;
+    } catch (error) {
+      console.error("❌ Error converting URI to blob:", error);
+      throw new Error(`Failed to convert image: ${error.message}`);
     }
   };
 
-  // Upload image to Firebase Storage
+  // Enhanced Firebase upload with better error handling and progress tracking
   const uploadImageToFirebase = async (imageUri: string) => {
     if (!userId) {
       Alert.alert("Error", "You need to be logged in to upload images");
       return;
     }
 
+    console.log("🚀 Starting Firebase upload process");
+    console.log("📁 Image URI:", imageUri);
+    console.log("👤 User ID:", userId);
+
     setIsUploading(true);
     setUploadProgress(0);
 
     try {
-      console.log("🔄 Starting image upload to Firebase Storage");
+      // Step 1: Convert URI to blob
+      console.log("📤 Step 1: Converting image to blob...");
+      const blob = await uriToBlob(imageUri);
+      setUploadProgress(20);
 
-      // Validate image first
-      await ImageService.validateImage(imageUri);
+      // Step 2: Validate blob
+      if (!blob || blob.size === 0) {
+        throw new Error("Image blob is empty or invalid");
+      }
 
-      // Upload to Firebase Storage
-      const downloadURL = await ImageService.uploadImage(
-        imageUri,
-        "posts", // folder
-        userId,
-        ImageService.generateUniqueFileName("post")
-      );
+      if (blob.size > 5 * 1024 * 1024) {
+        throw new Error("Image is too large (maximum 5MB allowed)");
+      }
 
-      setUploadedImageUrl(downloadURL);
+      console.log("✅ Blob validation passed:", {
+        size: blob.size,
+        type: blob.type,
+      });
+      setUploadProgress(30);
+
+      // Step 3: Generate unique filename (matching current working format)
+      const timestamp = Date.now();
+      const randomSuffix = Math.random().toString(36).substring(2, 15);
+      const fileName = `post_${timestamp}_${randomSuffix}.jpg`;
+
+      console.log("📝 Generated filename:", fileName);
+      setUploadProgress(40);
+
+      // Step 4: Get Firebase Storage instance and create reference
+      // Structure: posts/userId/post_timestamp_random.jpg
+      const storage = getStorage();
+      const imagePath = `posts/${userId}/${fileName}`;
+      const imageRef = ref(storage, imagePath);
+
+      console.log("🗂️ Firebase reference created:", imagePath);
+      setUploadProgress(50);
+
+      // Step 5: Upload to Firebase Storage
+      console.log("⬆️ Starting upload to Firebase Storage...");
+      const uploadResult = await uploadBytes(imageRef, blob);
+
+      console.log("✅ Upload completed:", {
+        fullPath: uploadResult.metadata.fullPath,
+        size: uploadResult.metadata.size,
+        bucket: uploadResult.metadata.bucket,
+        storagePath: imagePath,
+      });
+      setUploadProgress(80);
+
+      // Step 6: Get download URL
+      console.log("🔗 Getting download URL...");
+      const downloadURL = await getDownloadURL(uploadResult.ref);
+
+      console.log("✅ Download URL obtained:", downloadURL);
       setUploadProgress(100);
 
-      console.log("✅ Image uploaded successfully:", downloadURL);
+      // Validate the download URL
+      if (
+        !downloadURL ||
+        !downloadURL.includes("firebasestorage.googleapis.com")
+      ) {
+        throw new Error("Invalid download URL received from Firebase");
+      }
+
+      // Step 7: Set the uploaded URL
+      setUploadedImageUrl(downloadURL);
+
+      console.log("🎉 Firebase upload process completed successfully!");
+      console.log("🔗 Final URL:", downloadURL);
     } catch (error) {
-      console.error("❌ Error uploading image:", error);
-      Alert.alert(
-        "Upload Failed",
-        error.message || "Failed to upload image. Please try again.",
-        [{ text: "OK", onPress: () => removeImage() }]
-      );
+      console.error("❌ Firebase upload failed:", error);
+
+      // Provide specific error messages
+      let errorMessage = "Failed to upload image. Please try again.";
+
+      if (error.message.includes("storage/unauthorized")) {
+        errorMessage =
+          "Permission denied. Please check your Firebase settings.";
+      } else if (error.message.includes("storage/canceled")) {
+        errorMessage = "Upload was canceled.";
+      } else if (error.message.includes("storage/unknown")) {
+        errorMessage = "Unknown storage error occurred.";
+      } else if (error.message.includes("Network")) {
+        errorMessage = "Network error. Please check your connection.";
+      } else if (error.message.includes("timeout")) {
+        errorMessage = "Upload timed out. Please try again.";
+      }
+
+      Alert.alert("Upload Failed", errorMessage, [
+        { text: "OK", onPress: () => removeImage() },
+      ]);
     } finally {
       setIsUploading(false);
     }
   };
 
+  // Enhanced Firebase deletion with better error handling
+  const deleteImageFromFirebase = async (imageUrl: string) => {
+    try {
+      if (!imageUrl || !imageUrl.includes("firebasestorage.googleapis.com")) {
+        console.log("❌ Invalid URL for deletion:", imageUrl);
+        return;
+      }
+
+      console.log("🗑️ Attempting to delete from Firebase:", imageUrl);
+
+      // Extract the path from Firebase Storage URL
+      const urlParts = imageUrl.split("/o/");
+      if (urlParts.length < 2) {
+        console.log("❌ Could not parse Firebase URL for deletion");
+        return;
+      }
+
+      const pathWithQuery = urlParts[1];
+      const path = decodeURIComponent(pathWithQuery.split("?")[0]);
+
+      console.log("📁 Extracted path for deletion:", path);
+
+      const storage = getStorage();
+      const imageRef = ref(storage, path);
+
+      await deleteObject(imageRef);
+      console.log("✅ Image successfully deleted from Firebase Storage");
+    } catch (error) {
+      console.error("❌ Error deleting image from Firebase:", error);
+      // Don't throw error - deletion failure shouldn't block the user
+    }
+  };
+
+  // Handle image picking with Firebase upload
+  const pickImage = async () => {
+    try {
+      const permissionResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (permissionResult.granted === false) {
+        Alert.alert(
+          "Permission Required",
+          "You need to grant permission to access your photos"
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8, // Good quality but reasonable file size
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const imageUri = result.assets[0].uri;
+        console.log("📷 Image selected from gallery:", imageUri);
+
+        setSelectedImage(imageUri);
+        await uploadImageToFirebase(imageUri);
+      }
+    } catch (error) {
+      console.error("❌ Error picking image:", error);
+      Alert.alert("Error", "Failed to pick image. Please try again.");
+    }
+  };
+
+  // Handle camera access with Firebase upload
+  const takePicture = async () => {
+    try {
+      const cameraPermission =
+        await ImagePicker.requestCameraPermissionsAsync();
+
+      if (cameraPermission.granted === false) {
+        Alert.alert(
+          "Permission Required",
+          "You need to grant permission to access your camera"
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8, // Good quality but reasonable file size
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const imageUri = result.assets[0].uri;
+        console.log("📷 Image captured from camera:", imageUri);
+
+        setSelectedImage(imageUri);
+        await uploadImageToFirebase(imageUri);
+      }
+    } catch (error) {
+      console.error("❌ Error taking picture:", error);
+      Alert.alert("Error", "Failed to take picture. Please try again.");
+    }
+  };
+
   // Remove selected image and delete from Firebase if uploaded
   const removeImage = async () => {
+    console.log("🗑️ Removing image...");
+
     // If image was uploaded to Firebase, delete it
     if (uploadedImageUrl) {
-      try {
-        await ImageService.deleteImage(uploadedImageUrl);
-        console.log("🗑️ Uploaded image deleted from Firebase Storage");
-      } catch (error) {
-        console.error("❌ Error deleting image from Firebase:", error);
-      }
+      console.log("🗑️ Deleting from Firebase:", uploadedImageUrl);
+      await deleteImageFromFirebase(uploadedImageUrl);
     }
 
     setSelectedImage(undefined);
     setUploadedImageUrl(undefined);
     setUploadProgress(0);
+
+    console.log("✅ Image removed successfully");
   };
 
-  // Submit post with Firebase Storage URL
+  // Enhanced post submission with better validation and error handling
   const handleSubmitPost = async () => {
+    console.log("📝 Starting post submission...");
+
+    // Validation
     if (!postContent.trim()) {
       Alert.alert("Error", "Please enter some content for your post");
       return;
@@ -303,21 +455,21 @@ const CreatePostScreen = () => {
     setIsSubmitting(true);
 
     try {
-      console.log(
-        `Creating post in community: ${selectedCommunity.id} as user: ${userId}`
-      );
-
-      // Use the uploaded Firebase Storage URL instead of local URI
-      const imageUrlToSubmit = uploadedImageUrl || undefined;
+      console.log("📤 Submitting post:", {
+        communityId: selectedCommunity.id,
+        userId: userId,
+        hasImage: !!uploadedImageUrl,
+        imageUrl: uploadedImageUrl,
+      });
 
       const response = await createPost(
         String(selectedCommunity.id),
-        postContent,
-        imageUrlToSubmit // This is now a Firebase Storage URL
+        postContent.trim(),
+        uploadedImageUrl
       );
 
       if (response) {
-        console.log("Post created successfully");
+        console.log("✅ Post created successfully:", response.id);
 
         // Clear form
         setPostContent("");
@@ -329,13 +481,21 @@ const CreatePostScreen = () => {
         navigation.goBack();
 
         // Show success message
-        Alert.alert("Success", "Your post has been published!");
+        Alert.alert(
+          "Success",
+          uploadedImageUrl
+            ? "Your post with image has been published!"
+            : "Your post has been published!"
+        );
       } else {
-        throw new Error("Failed to create post");
+        throw new Error("No response received from server");
       }
     } catch (error) {
-      console.error("Error submitting post:", error);
-      Alert.alert("Error", "Failed to publish your post. Please try again.");
+      console.error("❌ Error submitting post:", error);
+      Alert.alert(
+        "Error",
+        "Failed to publish your post. Please check your connection and try again."
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -346,8 +506,8 @@ const CreatePostScreen = () => {
     return () => {
       // Cleanup function when component unmounts
       if (uploadedImageUrl && !isSubmitting) {
-        // Only delete if we're not in the middle of submitting
-        ImageService.deleteImage(uploadedImageUrl).catch(console.error);
+        console.log("🧹 Cleaning up uploaded image on unmount");
+        deleteImageFromFirebase(uploadedImageUrl).catch(console.error);
       }
     };
   }, [uploadedImageUrl, isSubmitting]);
@@ -464,7 +624,7 @@ const CreatePostScreen = () => {
     </Modal>
   );
 
-  // Render image preview with upload status
+  // Enhanced image preview with upload status
   const renderImagePreview = () => {
     if (!selectedImage) return null;
 
@@ -476,12 +636,13 @@ const CreatePostScreen = () => {
         {isUploading && (
           <View style={styles.uploadOverlay}>
             <ActivityIndicator size="large" color={COLORS.white} />
-            <Text style={styles.uploadText}>Uploading...</Text>
+            <Text style={styles.uploadText}>Uploading to Firebase...</Text>
             <View style={styles.progressBar}>
               <View
                 style={[styles.progressFill, { width: `${uploadProgress}%` }]}
               />
             </View>
+            <Text style={styles.progressText}>{uploadProgress}%</Text>
           </View>
         )}
 
@@ -493,6 +654,7 @@ const CreatePostScreen = () => {
               size={24}
               color={COLORS.success}
             />
+            <Text style={styles.uploadSuccessText}>Uploaded to Firebase</Text>
           </View>
         )}
 
@@ -508,6 +670,15 @@ const CreatePostScreen = () => {
             color={isUploading ? COLORS.textSecondary : COLORS.white}
           />
         </TouchableOpacity>
+
+        {/* Debug info */}
+        {uploadedImageUrl && (
+          <View style={styles.debugInfo}>
+            <Text style={styles.debugText} numberOfLines={2}>
+              Firebase URL: {uploadedImageUrl}
+            </Text>
+          </View>
+        )}
       </View>
     );
   };
@@ -655,6 +826,16 @@ const CreatePostScreen = () => {
                 : COLORS.textSecondary
             }
           />
+          <Text
+            style={[
+              styles.actionText,
+              (!selectedCommunity || isUploading) && {
+                color: COLORS.textSecondary,
+              },
+            ]}
+          >
+            Gallery
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.actionButton}
@@ -670,33 +851,15 @@ const CreatePostScreen = () => {
                 : COLORS.textSecondary
             }
           />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.actionButton}
-          disabled={!selectedCommunity}
-        >
-          <Ionicons
-            name="attach"
-            size={24}
-            color={selectedCommunity ? COLORS.primary : COLORS.textSecondary}
-          />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.actionButton}
-          disabled={!selectedCommunity}
-        >
-          <Ionicons
-            name="flag"
-            size={24}
-            color={selectedCommunity ? COLORS.primary : COLORS.textSecondary}
-          />
           <Text
             style={[
-              styles.goalText,
-              !selectedCommunity && { color: COLORS.textSecondary },
+              styles.actionText,
+              (!selectedCommunity || isUploading) && {
+                color: COLORS.textSecondary,
+              },
             ]}
           >
-            Link Goal
+            Camera
           </Text>
         </TouchableOpacity>
       </View>
@@ -815,19 +978,33 @@ const styles = StyleSheet.create({
     height: 4,
     backgroundColor: "rgba(255, 255, 255, 0.3)",
     borderRadius: 2,
+    marginBottom: 8,
   },
   progressFill: {
     height: "100%",
     backgroundColor: COLORS.primary,
     borderRadius: 2,
   },
+  progressText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: "500",
+  },
   uploadSuccessIndicator: {
     position: "absolute",
     top: 8,
     left: 8,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
     borderRadius: 16,
-    padding: 4,
+    padding: 8,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  uploadSuccessText: {
+    color: COLORS.white,
+    fontSize: 12,
+    marginLeft: 4,
+    fontWeight: "500",
   },
   removeImageButton: {
     position: "absolute",
@@ -835,6 +1012,20 @@ const styles = StyleSheet.create({
     right: 8,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
     borderRadius: 12,
+  },
+  debugInfo: {
+    position: "absolute",
+    bottom: 8,
+    left: 8,
+    right: 8,
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    borderRadius: 4,
+    padding: 4,
+  },
+  debugText: {
+    color: COLORS.white,
+    fontSize: 10,
+    fontFamily: "monospace",
   },
   actionBar: {
     flexDirection: "row",
@@ -846,13 +1037,13 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardBackground,
   },
   actionButton: {
-    flexDirection: "row",
+    flexDirection: "column",
     alignItems: "center",
     padding: 8,
   },
-  goalText: {
-    marginLeft: 4,
-    fontSize: 14,
+  actionText: {
+    marginTop: 4,
+    fontSize: 12,
     color: COLORS.primary,
   },
   modalOverlay: {
