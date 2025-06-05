@@ -80,32 +80,43 @@ const CommunityRequestModal: React.FC<CommunityRequestModalProps> = ({
     }
   };
 
+  // Client-side validation
+  const validateForm = () => {
+    const validationErrors: string[] = [];
+
+    if (!formData.communityName.trim()) {
+      validationErrors.push("Community name is required");
+    }
+
+    if (!formData.description.trim()) {
+      validationErrors.push("Description is required");
+    }
+
+    if (!formData.reason.trim()) {
+      validationErrors.push("Reason is required");
+    }
+
+    if (!formData.category) {
+      validationErrors.push("Category is required");
+    }
+
+    return validationErrors;
+  };
+
   // Handle form submission
   const handleSubmit = async () => {
     try {
       setIsSubmitting(true);
       setErrors([]);
 
-      // Check rate limit first
-      const rateLimitCheck = await CommunityRequestService.checkRateLimit();
-      if (!rateLimitCheck.canSubmit) {
-        Alert.alert(
-          "Request Limit Reached",
-          rateLimitCheck.reason ||
-            "You have reached the daily request limit. Please try again tomorrow.",
-          [{ text: "OK" }]
-        );
+      // Client-side validation first
+      const validationErrors = validateForm();
+      if (validationErrors.length > 0) {
+        setErrors(validationErrors);
         return;
       }
 
-      // Validate form data
-      const validation = CommunityRequestService.validateRequestData(formData);
-      if (!validation.isValid) {
-        setErrors(validation.errors);
-        return;
-      }
-
-      // Submit the request
+      // Submit the request directly without fetching existing requests
       const result = await CommunityRequestService.submitCommunityRequest(
         formData
       );
@@ -133,9 +144,20 @@ const CommunityRequestModal: React.FC<CommunityRequestModalProps> = ({
       }
     } catch (error) {
       console.error("Error submitting community request:", error);
-      Alert.alert("Error", "An unexpected error occurred. Please try again.", [
-        { text: "OK" },
-      ]);
+
+      // More specific error handling
+      let errorMessage = "An unexpected error occurred. Please try again.";
+
+      if (error instanceof Error) {
+        if (error.message.includes("Network")) {
+          errorMessage =
+            "Network error. Please check your connection and try again.";
+        } else if (error.message.includes("timeout")) {
+          errorMessage = "Request timed out. Please try again.";
+        }
+      }
+
+      Alert.alert("Error", errorMessage, [{ text: "OK" }]);
     } finally {
       setIsSubmitting(false);
     }
