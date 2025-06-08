@@ -192,6 +192,106 @@ const deleteOldProfileImage = async (imageUrl: string): Promise<boolean> => {
 };
 
 /**
+ * Check if a username is available
+ * @param username - The username to check
+ * @param currentUserId - Current user's ID (to exclude from check)
+ * @returns Promise resolving to availability status and message
+ */
+export const checkUsernameAvailability = async (
+  username: string, 
+  currentUserId?: string
+): Promise<{
+  available: boolean;
+  message: string;
+  error?: string;
+}> => {
+  try {
+    logDebug(`Checking username availability: ${username}`);
+    const apiUrl = getApiBaseUrl();
+
+    let requestUrl = `${apiUrl}/profile/username/check/${encodeURIComponent(username)}`;
+    if (currentUserId) {
+      requestUrl += `?currentUserId=${currentUserId}`;
+    }
+
+    const response = await axios.get(requestUrl, {
+      timeout: 5000
+    });
+
+    logDebug(`Username check response:`, response.data);
+    return {
+      available: response.data.available,
+      message: response.data.message,
+    };
+  } catch (error) {
+    logDebug(`Error checking username availability: ${error instanceof Error ? error.message : String(error)}`);
+    
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+      
+      return {
+        available: false,
+        message: error.response.data.error || 'Error checking username',
+        error: error.response.data.error
+      };
+    }
+    
+    return {
+      available: false,
+      message: 'Network error while checking username',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+};
+
+/**
+ * Validate username format on client side
+ * @param username - The username to validate
+ * @returns Validation result with error message if invalid
+ */
+export const validateUsernameFormat = (username: string): {
+  isValid: boolean;
+  error?: string;
+} => {
+  if (!username || username.trim().length === 0) {
+    return { isValid: false, error: 'Username is required' };
+  }
+
+  const trimmedUsername = username.trim();
+
+  if (trimmedUsername.length < 3) {
+    return { isValid: false, error: 'Username must be at least 3 characters' };
+  }
+
+  if (trimmedUsername.length > 20) {
+    return { isValid: false, error: 'Username must be 20 characters or less' };
+  }
+
+  // Check for valid characters (alphanumeric, underscore, hyphen)
+  const usernameRegex = /^[a-zA-Z0-9_-]+$/;
+  if (!usernameRegex.test(trimmedUsername)) {
+    return { 
+      isValid: false, 
+      error: 'Username can only contain letters, numbers, underscores, and hyphens' 
+    };
+  }
+
+  // Check for reserved usernames
+  const reservedUsernames = [
+    'admin', 'administrator', 'root', 'system', 'api', 'www', 'mail', 'ftp',
+    'support', 'help', 'info', 'contact', 'about', 'terms', 'privacy',
+    'user', 'guest', 'test', 'demo', 'null', 'undefined'
+  ];
+
+  if (reservedUsernames.includes(trimmedUsername.toLowerCase())) {
+    return { isValid: false, error: 'This username is reserved and cannot be used' };
+  }
+
+  return { isValid: true };
+};
+
+/**
  * Fetch a user's profile data
  * @param userId - The ID of the user to fetch
  * @returns Promise resolving to extended user profile data

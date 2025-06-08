@@ -1,5 +1,5 @@
 // src/screens/EditProfileScreen.tsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -20,8 +20,10 @@ import { useAuth } from "../contexts/AuthContext";
 import {
   updateUserProfile,
   ExtendedUserProfile,
+  checkUsernameAvailability,
+  validateUsernameFormat,
 } from "../services/ProfileService";
-import { auth } from "../config/firebase"; // Import Firebase auth directly
+import { auth } from "../config/firebase";
 
 const EditProfileScreen = () => {
   const navigation = useNavigation();
@@ -34,12 +36,24 @@ const EditProfileScreen = () => {
   const { currentUser } = useAuth();
   const [firebaseUser, setFirebaseUser] = useState(auth.currentUser);
 
-  // Only name and username are saved in the database
+  // Form fields
   const [name, setName] = useState(profileData?.name || "");
   const [username, setUsername] = useState(profileData?.username || "");
+  const [originalUsername] = useState(profileData?.username || "");
 
+  // Validation states
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isCheckingUsername, setIsCheckingUsername] = useState(false);
+  const [usernameStatus, setUsernameStatus] = useState<{
+    isValid: boolean;
+    message: string;
+    checked: boolean;
+  }>({ isValid: true, message: "", checked: false });
+
+  // Debounced username validation
+  const [usernameCheckTimeout, setUsernameCheckTimeout] =
+    useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     // Check if the user is authenticated on mount
@@ -74,6 +88,93 @@ const EditProfileScreen = () => {
     return () => unsubscribe();
   }, [navigation]);
 
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (usernameCheckTimeout) {
+        clearTimeout(usernameCheckTimeout);
+      }
+    };
+  }, [usernameCheckTimeout]);
+
+  // Username validation with debouncing
+  const validateUsername = useCallback(
+    async (usernameToCheck: string) => {
+      // Clear any existing timeout
+      if (usernameCheckTimeout) {
+        clearTimeout(usernameCheckTimeout);
+      }
+
+      // If username hasn't changed from original, it's valid
+      if (usernameToCheck === originalUsername) {
+        setUsernameStatus({
+          isValid: true,
+          message: "",
+          checked: true,
+        });
+        return;
+      }
+
+      // Client-side format validation first
+      const formatValidation = validateUsernameFormat(usernameToCheck);
+      if (!formatValidation.isValid) {
+        setUsernameStatus({
+          isValid: false,
+          message: formatValidation.error || "Invalid username format",
+          checked: true,
+        });
+        return;
+      }
+
+      // Set up debounced server check
+      const timeout = setTimeout(async () => {
+        setIsCheckingUsername(true);
+        try {
+          const result = await checkUsernameAvailability(
+            usernameToCheck,
+            userId
+          );
+          setUsernameStatus({
+            isValid: result.available,
+            message: result.message,
+            checked: true,
+          });
+        } catch (error) {
+          setUsernameStatus({
+            isValid: false,
+            message: "Error checking username availability",
+            checked: true,
+          });
+        } finally {
+          setIsCheckingUsername(false);
+        }
+      }, 500); // 500ms debounce
+
+      setUsernameCheckTimeout(timeout);
+    },
+    [userId, originalUsername, usernameCheckTimeout]
+  );
+
+  // Handle username change
+  const handleUsernameChange = (newUsername: string) => {
+    setUsername(newUsername);
+
+    // Clear previous errors
+    setErrors((prev) => {
+      const newErrors = { ...prev };
+      delete newErrors.username;
+      return newErrors;
+    });
+
+    // Reset username status
+    setUsernameStatus({ isValid: true, message: "", checked: false });
+
+    // Only validate if username has content and is different from original
+    if (newUsername.trim().length > 0) {
+      validateUsername(newUsername.trim());
+    }
+  };
+
   const handleSave = async () => {
     // First check Firebase auth directly
     const user = auth.currentUser;
@@ -92,8 +193,21 @@ const EditProfileScreen = () => {
 
     if (!username.trim()) {
       newErrors.username = "Username is required";
-    } else if (username.length < 3) {
-      newErrors.username = "Username must be at least 3 characters";
+    } else {
+      // Check format validation
+      const formatValidation = validateUsernameFormat(username.trim());
+      if (!formatValidation.isValid) {
+        newErrors.username = formatValidation.error || "Invalid username";
+      }
+      // Check if username availability was checked and is valid
+      else if (
+        username.trim() !== originalUsername &&
+        (!usernameStatus.checked || !usernameStatus.isValid)
+      ) {
+        newErrors.username =
+          usernameStatus.message ||
+          "Please wait for username validation to complete";
+      }
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -101,20 +215,26 @@ const EditProfileScreen = () => {
       return;
     }
 
+    // If username changed but we're still checking, wait
+    if (username.trim() !== originalUsername && isCheckingUsername) {
+      Alert.alert("Please Wait", "Still checking username availability...");
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       console.log("[EDIT_PROFILE] Saving name and username to database");
-      const userIdToUse = user.uid; // Use direct Firebase auth ID
+      const userIdToUse = user.uid;
 
       // Update only name and username in the database
       await updateUserProfile(userIdToUse, {
-        name,
-        username,
+        name: name.trim(),
+        username: username.trim(),
       });
 
       console.log("[EDIT_PROFILE] Profile updated successfully");
 
-      // Important: Set isSubmitting to false BEFORE showing the alert
+      // Set isSubmitting to false BEFORE showing the alert
       setIsSubmitting(false);
 
       Alert.alert(
@@ -148,10 +268,21 @@ const EditProfileScreen = () => {
       );
     } catch (error) {
       console.error("[EDIT_PROFILE] Error updating profile:", error);
-      Alert.alert(
-        "Update Error",
-        "Failed to update your profile. Please try again."
-      );
+
+      // Check if it's a username taken error
+      if (error instanceof Error && error.message.includes("already taken")) {
+        setErrors({ username: "Username is already taken" });
+        setUsernameStatus({
+          isValid: false,
+          message: "Username is already taken",
+          checked: true,
+        });
+      } else {
+        Alert.alert(
+          "Update Error",
+          "Failed to update your profile. Please try again."
+        );
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -227,17 +358,72 @@ const EditProfileScreen = () => {
           {/* Username */}
           <View style={styles.inputContainer}>
             <Text style={styles.inputLabel}>Username</Text>
-            <TextInput
-              style={[styles.input, errors.username && styles.inputError]}
-              value={username}
-              onChangeText={setUsername}
-              placeholder="Your username"
-              placeholderTextColor={COLORS.textSecondary}
-              autoCapitalize="none"
-            />
+            <View style={styles.usernameInputContainer}>
+              <TextInput
+                style={[
+                  styles.input,
+                  errors.username && styles.inputError,
+                  !usernameStatus.isValid &&
+                    usernameStatus.checked &&
+                    styles.inputError,
+                  usernameStatus.isValid &&
+                    usernameStatus.checked &&
+                    username !== originalUsername &&
+                    styles.inputSuccess,
+                ]}
+                value={username}
+                onChangeText={handleUsernameChange}
+                placeholder="Your username"
+                placeholderTextColor={COLORS.textSecondary}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {isCheckingUsername && (
+                <View style={styles.usernameStatusIcon}>
+                  <ActivityIndicator size="small" color={COLORS.primary} />
+                </View>
+              )}
+              {!isCheckingUsername &&
+                usernameStatus.checked &&
+                username !== originalUsername && (
+                  <View style={styles.usernameStatusIcon}>
+                    <Ionicons
+                      name={
+                        usernameStatus.isValid
+                          ? "checkmark-circle"
+                          : "close-circle"
+                      }
+                      size={20}
+                      color={usernameStatus.isValid ? "#10B981" : "#EF4444"}
+                    />
+                  </View>
+                )}
+            </View>
+
+            {/* Username validation messages */}
             {errors.username && (
               <Text style={styles.errorText}>{errors.username}</Text>
             )}
+            {!errors.username &&
+              usernameStatus.message &&
+              usernameStatus.checked && (
+                <Text
+                  style={[
+                    styles.validationText,
+                    usernameStatus.isValid
+                      ? styles.successText
+                      : styles.errorText,
+                  ]}
+                >
+                  {usernameStatus.message}
+                </Text>
+              )}
+
+            {/* Username helper text */}
+            <Text style={styles.helperText}>
+              Username can contain letters, numbers, underscores, and hyphens
+              (3-20 characters)
+            </Text>
           </View>
 
           {/* Centered Save Button */}
@@ -245,23 +431,24 @@ const EditProfileScreen = () => {
             <TouchableOpacity
               style={[
                 styles.saveButton,
-                isSubmitting && styles.saveButtonDisabled,
+                (isSubmitting || isCheckingUsername) &&
+                  styles.saveButtonDisabled,
               ]}
               onPress={handleSave}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isCheckingUsername}
             >
               {isSubmitting ? (
                 <ActivityIndicator size="small" color={COLORS.white} />
               ) : (
                 <>
                   <Ionicons name="checkmark" size={20} color={COLORS.white} />
-                  <Text style={styles.saveButtonText}>Save Changes</Text>
+                  <Text style={styles.saveButtonText}>
+                    {isCheckingUsername ? "Checking..." : "Save Changes"}
+                  </Text>
                 </>
               )}
             </TouchableOpacity>
           </View>
-
-         
         </ScrollView>
       </SafeAreaView>
     </KeyboardAvoidingView>
@@ -335,11 +522,43 @@ const styles = StyleSheet.create({
     borderColor: "#EF4444",
     borderWidth: 2,
   },
+  inputSuccess: {
+    borderColor: "#10B981",
+    borderWidth: 2,
+  },
+  usernameInputContainer: {
+    position: "relative",
+  },
+  usernameStatusIcon: {
+    position: "absolute",
+    right: 16,
+    top: 16,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   errorText: {
     color: "#EF4444",
     fontSize: 12,
     marginTop: 4,
     marginLeft: 4,
+  },
+  successText: {
+    color: "#10B981",
+    fontSize: 12,
+    marginTop: 4,
+    marginLeft: 4,
+  },
+  validationText: {
+    fontSize: 12,
+    marginTop: 4,
+    marginLeft: 4,
+  },
+  helperText: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    marginTop: 4,
+    marginLeft: 4,
+    fontStyle: "italic",
   },
   saveButtonContainer: {
     alignItems: "center",
@@ -374,13 +593,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontSize: 16,
     marginLeft: 8,
-  },
-  noteText: {
-    fontSize: 14,
-    fontStyle: "italic",
-    color: COLORS.textSecondary,
-    textAlign: "center",
-    lineHeight: 20,
   },
   centeredContainer: {
     flex: 1,

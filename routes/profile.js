@@ -218,6 +218,69 @@ module.exports = (pool, authenticateFirebaseToken) => {
     }
   });
 
+  // Check if username is available
+router.get('/username/check/:username', authenticateFirebaseToken, async (req, res) => {
+  try {
+    const { username } = req.params;
+    const currentUserId = req.query.currentUserId; // Optional - to exclude current user
+
+    // Basic validation
+    if (!username) {
+      return res.status(400).json({ error: 'Username is required' });
+    }
+
+    if (username.length < 3) {
+      return res.status(400).json({ 
+        error: 'Username must be at least 3 characters',
+        available: false 
+      });
+    }
+
+    if (username.length > 20) {
+      return res.status(400).json({ 
+        error: 'Username must be 20 characters or less',
+        available: false 
+      });
+    }
+
+    // Check for valid characters (alphanumeric, underscore, hyphen)
+    const usernameRegex = /^[a-zA-Z0-9_-]+$/;
+    if (!usernameRegex.test(username)) {
+      return res.status(400).json({ 
+        error: 'Username can only contain letters, numbers, underscores, and hyphens',
+        available: false 
+      });
+    }
+
+    // Check if username exists in database
+    let query = 'SELECT user_id FROM users WHERE LOWER(username) = LOWER(?)';
+    let params = [username];
+
+    // If checking for current user, exclude their current username
+    if (currentUserId) {
+      query += ' AND user_id != ?';
+      params.push(currentUserId);
+    }
+
+    const [rows] = await pool.execute(query, params);
+
+    const isAvailable = rows.length === 0;
+
+    res.json({
+      available: isAvailable,
+      username: username,
+      message: isAvailable ? 'Username is available' : 'Username is already taken'
+    });
+
+  } catch (error) {
+    console.error('Error checking username availability:', error);
+    res.status(500).json({ 
+      error: 'Internal server error', 
+      available: false,
+      details: error.message 
+    });
+  }
+});
   
 
   // Get user stats
@@ -337,81 +400,92 @@ module.exports = (pool, authenticateFirebaseToken) => {
     }
   });
 
-  // Update profile info
-  router.put('/:userId', authenticateFirebaseToken, async (req, res) => {
-    try {
-      const userId = req.params.userId;
-      const { name, username, bio, location, website } = req.body;
+ // Update profile info with username validation
+router.put('/:userId', authenticateFirebaseToken, async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const { name, username } = req.body;
 
-      // Verify user is allowed to update this profile
-      if (req.user && req.user.uid !== userId) {
-        return res.status(403).json({ error: 'Unauthorized: Cannot update another user\'s profile' });
-      }
-
-      // Build update query based on provided fields
-      let updateFields = '';
-      const updateValues = [];
-
-      if (name) {
-        updateFields += 'name = ?';
-        updateValues.push(name);
-      }
-
-      if (username) {
-        if (updateFields) updateFields += ', ';
-        updateFields += 'username = ?';
-        updateValues.push(username);
-      }
-
-      // Add the new fields
-      if (bio) {
-        if (updateFields) updateFields += ', ';
-        updateFields += 'bio = ?';
-        updateValues.push(bio);
-      }
-
-      if (location) {
-        if (updateFields) updateFields += ', ';
-        updateFields += 'location = ?';
-        updateValues.push(location);
-      }
-
-      if (website) {
-        if (updateFields) updateFields += ', ';
-        updateFields += 'website = ?';
-        updateValues.push(website);
-      }
-
-      // If nothing to update, return early
-      if (!updateFields) {
-        return res.status(400).json({ error: 'No valid fields to update' });
-      }
-
-      // Add userId to values array
-      updateValues.push(userId);
-
-      // Execute update
-      await pool.execute(
-        `UPDATE users SET ${updateFields} WHERE user_id = ?`,
-        updateValues
-      );
-
-      // Get updated user data
-      const [rows] = await pool.execute(
-        `SELECT * FROM users WHERE user_id = ?`,
-        [userId]
-      );
-
-      if (rows.length === 0) {
-        return res.status(404).json({ error: 'User not found after update' });
-      }
-
-      res.json(rows[0]);
-    } catch (error) {
-      console.error('Error updating profile:', error);
-      res.status(500).json({ error: 'Internal server error', details: error.message });
+    // Verify user is allowed to update this profile
+    if (req.user && req.user.uid !== userId) {
+      return res.status(403).json({ error: 'Unauthorized: Cannot update another user\'s profile' });
     }
-  });
+
+    // If username is being updated, check if it's available
+    if (username) {
+      // Basic username validation
+      if (username.length < 3) {
+        return res.status(400).json({ error: 'Username must be at least 3 characters' });
+      }
+
+      if (username.length > 20) {
+        return res.status(400).json({ error: 'Username must be 20 characters or less' });
+      }
+
+      // Check for valid characters
+      const usernameRegex = /^[a-zA-Z0-9_-]+$/;
+      if (!usernameRegex.test(username)) {
+        return res.status(400).json({ 
+          error: 'Username can only contain letters, numbers, underscores, and hyphens' 
+        });
+      }
+
+      // Check if username is already taken (excluding current user)
+      const [existingUsers] = await pool.execute(
+        'SELECT user_id FROM users WHERE LOWER(username) = LOWER(?) AND user_id != ?',
+        [username, userId]
+      );
+
+      if (existingUsers.length > 0) {
+        return res.status(400).json({ error: 'Username is already taken' });
+      }
+    }
+
+    // Build update query based on provided fields
+    let updateFields = '';
+    const updateValues = [];
+
+    if (name) {
+      updateFields += 'name = ?';
+      updateValues.push(name);
+    }
+
+    if (username) {
+      if (updateFields) updateFields += ', ';
+      updateFields += 'username = ?';
+      updateValues.push(username);
+    }
+
+    // If nothing to update, return early
+    if (!updateFields) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
+    // Add userId to values array
+    updateValues.push(userId);
+
+    // Execute update
+    await pool.execute(
+      `UPDATE users SET ${updateFields} WHERE user_id = ?`,
+      updateValues
+    );
+
+    // Get updated user data
+    const [rows] = await pool.execute(
+      `SELECT * FROM users WHERE user_id = ?`,
+      [userId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'User not found after update' });
+    }
+
+    res.json(rows[0]);
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
 
   // Add commend to a user
   router.post('/:userId/commend', authenticateFirebaseToken, async (req, res) => {
