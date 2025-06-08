@@ -470,6 +470,17 @@ const ProfileScreen = () => {
 
           {/* Profile Header Content */}
           <View style={styles.profileHeader}>
+            {/* Edit Profile Image Button - Top Right */}
+            {isOwnProfile && (
+              <TouchableOpacity
+                onPress={handlePickImage}
+                style={styles.editImageButtonTopRight}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="camera" size={20} color={COLORS.white} />
+              </TouchableOpacity>
+            )}
+
             {/* Profile Image with Ring */}
             <TouchableOpacity
               onPress={isOwnProfile ? handlePickImage : undefined}
@@ -501,11 +512,6 @@ const ProfileScreen = () => {
                     }
                     style={styles.profileImage}
                   />
-                )}
-                {isOwnProfile && (
-                  <View style={styles.editImageButton}>
-                    <Ionicons name="camera" size={14} color={COLORS.white} />
-                  </View>
                 )}
               </View>
             </TouchableOpacity>
@@ -858,6 +864,19 @@ const styles = StyleSheet.create({
   profileHeader: {
     alignItems: "center",
     paddingVertical: 20,
+    position: "relative",
+  },
+  editImageButtonTopRight: {
+    position: "absolute",
+    top: 20,
+    right: 20,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 10,
   },
   profileImageWrapper: {
     position: "relative",
@@ -893,19 +912,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "rgba(0,0,0,0.3)",
-  },
-  editImageButton: {
-    position: "absolute",
-    right: -5,
-    bottom: -5,
-    backgroundColor: COLORS.primary,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: COLORS.background,
   },
   // Name and username
   nameContainer: {
