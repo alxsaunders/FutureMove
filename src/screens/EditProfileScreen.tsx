@@ -17,27 +17,26 @@ import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { COLORS } from "../common/constants/colors";
 import { useAuth } from "../contexts/AuthContext";
-import { updateUserProfile, ExtendedUserProfile } from "../services/ProfileService";
+import {
+  updateUserProfile,
+  ExtendedUserProfile,
+} from "../services/ProfileService";
 import { auth } from "../config/firebase"; // Import Firebase auth directly
 
 const EditProfileScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  // Remove the onUpdateProfile from params as we'll handle navigation differently
   const { profileData, userId } = route.params as {
-    profileData: ExtendedUserProfile,
-    userId: string
+    profileData: ExtendedUserProfile;
+    userId: string;
   };
 
   const { currentUser } = useAuth();
   const [firebaseUser, setFirebaseUser] = useState(auth.currentUser);
 
-  // We only allow editing certain fields in the profile
+  // Only name and username are saved in the database
   const [name, setName] = useState(profileData?.name || "");
   const [username, setUsername] = useState(profileData?.username || "");
-  const [bio, setBio] = useState(profileData?.bio || "");
-  const [location, setLocation] = useState(profileData?.location || "");
-  const [website, setWebsite] = useState(profileData?.website || "");
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -56,7 +55,7 @@ const EditProfileScreen = () => {
       );
     } else {
       console.log("[EDIT_PROFILE] Firebase user authenticated:", user.uid);
-      console.log("[EDIT_PROFILE] Editing profile data in both Firebase and MySQL");
+      console.log("[EDIT_PROFILE] Editing name and username in database");
     }
 
     // Set up an auth state change listener
@@ -97,10 +96,6 @@ const EditProfileScreen = () => {
       newErrors.username = "Username must be at least 3 characters";
     }
 
-    if (website.trim() && !isValidUrl(website)) {
-      newErrors.website = "Please enter a valid URL (e.g., https://example.com)";
-    }
-
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       return;
@@ -108,50 +103,48 @@ const EditProfileScreen = () => {
 
     setIsSubmitting(true);
     try {
-      console.log("[EDIT_PROFILE] Saving profile changes to both Firebase and MySQL");
+      console.log("[EDIT_PROFILE] Saving name and username to database");
       const userIdToUse = user.uid; // Use direct Firebase auth ID
 
-      // Update profile data in both Firebase and MySQL
+      // Update only name and username in the database
       await updateUserProfile(userIdToUse, {
         name,
         username,
-        bio,
-        location,
-        website,
       });
 
-      console.log("[EDIT_PROFILE] Profile updated successfully in all systems");
+      console.log("[EDIT_PROFILE] Profile updated successfully");
 
       // Important: Set isSubmitting to false BEFORE showing the alert
-      // This ensures the button is visible if the user cancels the alert
       setIsSubmitting(false);
 
       Alert.alert(
         "Profile Updated",
-        "Your profile has been updated successfully!",
-        [{
-          text: "OK",
-          onPress: () => {
-            // Use goBack instead of navigate to prevent navigation stack issues
-            navigation.goBack();
+        "Your name and username have been updated successfully!",
+        [
+          {
+            text: "OK",
+            onPress: () => {
+              navigation.goBack();
 
-            // After a slight delay, pass refresh info to the previous screen via params
-            // This approach preserves state better than navigate()
-            setTimeout(() => {
-              if (navigation.canGoBack()) {
-                // If we can directly set params on the parent screen
-                try {
-                  navigation.getParent()?.setParams({
-                    profileUpdated: true,
-                    lastUpdated: Date.now()
-                  });
-                } catch (e) {
-                  console.log("[EDIT_PROFILE] Could not set parent params:", e);
+              // After a slight delay, pass refresh info to the previous screen
+              setTimeout(() => {
+                if (navigation.canGoBack()) {
+                  try {
+                    navigation.getParent()?.setParams({
+                      profileUpdated: true,
+                      lastUpdated: Date.now(),
+                    });
+                  } catch (e) {
+                    console.log(
+                      "[EDIT_PROFILE] Could not set parent params:",
+                      e
+                    );
+                  }
                 }
-              }
-            }, 300);
-          }
-        }]
+              }, 300);
+            },
+          },
+        ]
       );
     } catch (error) {
       console.error("[EDIT_PROFILE] Error updating profile:", error);
@@ -164,16 +157,6 @@ const EditProfileScreen = () => {
     }
   };
 
-  // Helper function to validate URLs
-  const isValidUrl = (urlString: string): boolean => {
-    try {
-      const url = new URL(urlString);
-      return url.protocol === "http:" || url.protocol === "https:";
-    } catch {
-      return false;
-    }
-  };
-
   // If no Firebase user, don't render the form content
   if (!firebaseUser) {
     return (
@@ -183,10 +166,12 @@ const EditProfileScreen = () => {
             <Ionicons name="close" size={24} color={COLORS.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Edit Profile</Text>
-          <View style={{ width: 70 }} />
+          <View style={{ width: 24 }} />
         </View>
         <View style={styles.centeredContainer}>
-          <Text style={styles.errorMessage}>Authentication required to edit profile.</Text>
+          <Text style={styles.errorMessage}>
+            Authentication required to edit profile.
+          </Text>
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => navigation.goBack()}
@@ -211,17 +196,7 @@ const EditProfileScreen = () => {
             <Ionicons name="close" size={24} color={COLORS.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Edit Profile</Text>
-          <TouchableOpacity
-            style={styles.saveButton}
-            onPress={handleSave}
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? (
-              <ActivityIndicator size="small" color={COLORS.white} />
-            ) : (
-              <Text style={styles.saveButtonText}>Save</Text>
-            )}
-          </TouchableOpacity>
+          <View style={{ width: 24 }} />
         </View>
 
         <ScrollView
@@ -231,8 +206,8 @@ const EditProfileScreen = () => {
         >
           {/* Data indicator */}
           <View style={styles.dataIndicator}>
-            <Ionicons name="server" size={16} color={COLORS.primary} />
-            <Text style={styles.dataText}>Updating All Profile Data</Text>
+            <Ionicons name="person" size={16} color={COLORS.primary} />
+            <Text style={styles.dataText}>Edit Profile Info</Text>
           </View>
 
           {/* Name */}
@@ -246,9 +221,7 @@ const EditProfileScreen = () => {
               placeholderTextColor={COLORS.textSecondary}
               autoCapitalize="words"
             />
-            {errors.name && (
-              <Text style={styles.errorText}>{errors.name}</Text>
-            )}
+            {errors.name && <Text style={styles.errorText}>{errors.name}</Text>}
           </View>
 
           {/* Username */}
@@ -267,60 +240,28 @@ const EditProfileScreen = () => {
             )}
           </View>
 
-          {/* Bio */}
-          <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>Bio</Text>
-            <TextInput
-              style={[styles.textArea, errors.bio && styles.inputError]}
-              value={bio}
-              onChangeText={setBio}
-              placeholder="Write a little about yourself"
-              placeholderTextColor={COLORS.textSecondary}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
-            {errors.bio && (
-              <Text style={styles.errorText}>{errors.bio}</Text>
-            )}
+          {/* Centered Save Button */}
+          <View style={styles.saveButtonContainer}>
+            <TouchableOpacity
+              style={[
+                styles.saveButton,
+                isSubmitting && styles.saveButtonDisabled,
+              ]}
+              onPress={handleSave}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? (
+                <ActivityIndicator size="small" color={COLORS.white} />
+              ) : (
+                <>
+                  <Ionicons name="checkmark" size={20} color={COLORS.white} />
+                  <Text style={styles.saveButtonText}>Save Changes</Text>
+                </>
+              )}
+            </TouchableOpacity>
           </View>
 
-          {/* Location */}
-          <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>Location</Text>
-            <TextInput
-              style={[styles.input, errors.location && styles.inputError]}
-              value={location}
-              onChangeText={setLocation}
-              placeholder="Your location (e.g., New York, NY)"
-              placeholderTextColor={COLORS.textSecondary}
-            />
-            {errors.location && (
-              <Text style={styles.errorText}>{errors.location}</Text>
-            )}
-          </View>
-
-          {/* Website */}
-          <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>Website</Text>
-            <TextInput
-              style={[styles.input, errors.website && styles.inputError]}
-              value={website}
-              onChangeText={setWebsite}
-              placeholder="Your website (e.g., https://example.com)"
-              placeholderTextColor={COLORS.textSecondary}
-              autoCapitalize="none"
-              keyboardType="url"
-              autoCorrect={false}
-            />
-            {errors.website && (
-              <Text style={styles.errorText}>{errors.website}</Text>
-            )}
-          </View>
-
-          <Text style={styles.noteText}>
-            Note: Profile information is stored in both Firebase and MySQL databases.
-          </Text>
+         
         </ScrollView>
       </SafeAreaView>
     </KeyboardAvoidingView>
@@ -350,30 +291,21 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: COLORS.text,
   },
-  saveButton: {
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  saveButtonText: {
-    color: COLORS.white,
-    fontWeight: "600",
-  },
   scrollView: {
     flex: 1,
   },
   contentContainer: {
-    padding: 16,
+    padding: 20,
   },
   dataIndicator: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-    paddingVertical: 8,
-    borderRadius: 8,
-    marginBottom: 16,
+    backgroundColor: "rgba(59, 130, 246, 0.1)",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    marginBottom: 24,
   },
   dataText: {
     marginLeft: 8,
@@ -394,46 +326,72 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardBackground,
     borderWidth: 1,
     borderColor: COLORS.border,
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: 12,
+    padding: 16,
     fontSize: 16,
     color: COLORS.text,
-  },
-  textArea: {
-    backgroundColor: COLORS.cardBackground,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    color: COLORS.text,
-    height: 100,
   },
   inputError: {
-    borderColor: 'red',
+    borderColor: "#EF4444",
+    borderWidth: 2,
   },
   errorText: {
-    color: 'red',
+    color: "#EF4444",
     fontSize: 12,
     marginTop: 4,
+    marginLeft: 4,
+  },
+  saveButtonContainer: {
+    alignItems: "center",
+    marginTop: 20,
+    marginBottom: 20,
+  },
+  saveButton: {
+    backgroundColor: COLORS.primary,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 25,
+    minWidth: 180,
+    shadowColor: COLORS.primary,
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  saveButtonDisabled: {
+    backgroundColor: COLORS.textSecondary,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  saveButtonText: {
+    color: COLORS.white,
+    fontWeight: "600",
+    fontSize: 16,
+    marginLeft: 8,
   },
   noteText: {
-    marginTop: 20,
     fontSize: 14,
-    fontStyle: 'italic',
+    fontStyle: "italic",
     color: COLORS.textSecondary,
-    textAlign: 'center',
+    textAlign: "center",
+    lineHeight: 20,
   },
   centeredContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     padding: 20,
   },
   errorMessage: {
     fontSize: 16,
     color: COLORS.text,
-    textAlign: 'center',
+    textAlign: "center",
     marginBottom: 20,
   },
   backButton: {
@@ -444,7 +402,7 @@ const styles = StyleSheet.create({
   },
   backButtonText: {
     color: COLORS.white,
-    fontWeight: '600',
+    fontWeight: "600",
   },
 });
 

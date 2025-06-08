@@ -218,6 +218,8 @@ module.exports = (pool, authenticateFirebaseToken) => {
     }
   });
 
+  
+
   // Get user stats
   router.get('/:userId/stats', authenticateFirebaseToken, verifyOrCreateUser, async (req, res) => {
     try {

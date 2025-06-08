@@ -30,6 +30,7 @@ export interface Achievement {
   coverImage: any;
   badgeImage: any;
   unlockedAt?: Date;
+  unlockedFromDatabase?: boolean; // Flag to indicate if unlocked from DB vs current progress
 }
 
 // Achievement stats interface
@@ -292,6 +293,184 @@ export const testAchievementConnection = async (): Promise<boolean> => {
   }
 };
 
+// ✅ NEW: Check if user has a specific achievement
+export const checkIfUserHasAchievement = async (
+  category: string,
+  milestone: number,
+  userId?: string
+): Promise<boolean> => {
+  try {
+    const validUserId = userId || await getCurrentUserId();
+    
+    if (!category || !milestone) {
+      logDebug('Invalid category or milestone for achievement check');
+      return false;
+    }
+    
+    logDebug(`Checking if user ${validUserId} already has achievement: ${category} ${milestone}`);
+    
+    const headers = await getAuthHeaders();
+    const response = await axios.get(`${getApiBaseUrl()}/achievements/users/${validUserId}/achievements/has`, {
+      params: {
+        category: category,
+        milestone: milestone
+      },
+      headers,
+      timeout: 5000,
+    });
+
+    logDebug(`✅ Has achievement response:`, response.data);
+    return response.data.hasAchievement === true;
+  } catch (error) {
+    console.error(`Error checking if user has achievement ${category} ${milestone}:`, error);
+    logDebug(`❌ Error checking achievement: ${error instanceof Error ? error.message : String(error)}`);
+    
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    
+    return false; // Default to false if check fails
+  }
+};
+
+// ✅ NEW: Unlock a specific achievement for a user
+export const unlockAchievement = async (
+  category: string,
+  milestone: number,
+  userId?: string
+): Promise<{ success: boolean; achievement?: Achievement; alreadyUnlocked?: boolean }> => {
+  try {
+    const validUserId = userId || await getCurrentUserId();
+    
+    if (!category || !milestone) {
+      logDebug('Invalid category or milestone for achievement unlock');
+      return { success: false };
+    }
+    
+    logDebug(`Unlocking achievement for user ${validUserId}: ${category} ${milestone}`);
+    
+    const headers = await getAuthHeaders();
+    const response = await axios.post(`${getApiBaseUrl()}/achievements/users/${validUserId}/achievements/unlock`, {
+      category: category,
+      milestone: milestone
+    }, {
+      headers,
+      timeout: 10000,
+    });
+
+    logDebug(`✅ Unlock achievement response:`, response.data);
+    
+    if (response.data.success) {
+      if (response.data.alreadyUnlocked) {
+        return { success: true, alreadyUnlocked: true };
+      } else {
+        const achievement = response.data.achievement;
+        if (achievement) {
+          // Add image data to achievement
+          const images = getAchievementImages(achievement.category, achievement.milestone);
+          achievement.coverImage = images.cover;
+          achievement.badgeImage = images.badge;
+        }
+        return { success: true, achievement };
+      }
+    }
+    
+    return { success: false };
+  } catch (error) {
+    console.error(`Error unlocking achievement ${category} ${milestone}:`, error);
+    logDebug(`❌ Error unlocking achievement: ${error instanceof Error ? error.message : String(error)}`);
+    
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    
+    return { success: false };
+  }
+};
+
+// ✅ NEW: Sync achievement status (useful after goal resets)
+export const syncAchievementStatus = async (userId?: string): Promise<void> => {
+  try {
+    const validUserId = userId || await getCurrentUserId();
+    logDebug(`Syncing achievement status for user: ${validUserId}`);
+    
+    const headers = await getAuthHeaders();
+    const response = await axios.post(`${getApiBaseUrl()}/achievements/users/${validUserId}/achievements/sync`, {}, {
+      headers,
+      timeout: 10000,
+    });
+
+    logDebug(`✅ Achievement sync response:`, response.data);
+  } catch (error) {
+    console.error("Error syncing achievement status:", error);
+    logDebug(`❌ Error syncing achievements: ${error instanceof Error ? error.message : String(error)}`);
+  }
+};
+
+// ✅ UPDATED: Check for new achievements with improved badge checking
+export const checkForNewAchievements = async (
+  goalCategory: string,
+  userId?: string
+): Promise<Achievement[]> => {
+  try {
+    const validUserId = userId || await getCurrentUserId();
+    
+    if (!goalCategory || goalCategory.trim() === '') {
+      logDebug('Empty goal category provided');
+      return [];
+    }
+    
+    logDebug(`Checking for new achievements in category: ${goalCategory} for user: ${validUserId}`);
+    
+    // First, get current progress for the category
+    const categoryProgress = await getCategoryProgress(goalCategory, validUserId);
+    logDebug(`Current progress for ${goalCategory}: ${categoryProgress.completed} completed`);
+    
+    // Check each milestone to see if it should be unlocked
+    const newAchievements: Achievement[] = [];
+    
+    for (const milestone of ACHIEVEMENT_MILESTONES) {
+      // Check if user qualifies for this milestone
+      const qualifies = categoryProgress.completed >= milestone;
+      
+      if (qualifies) {
+        // Check if user already has this achievement
+        const alreadyHas = await checkIfUserHasAchievement(goalCategory, milestone, validUserId);
+        
+        if (!alreadyHas) {
+          // User qualifies but doesn't have it yet - it's a new achievement!
+          logDebug(`🏆 New achievement detected: ${goalCategory} ${milestone}`);
+          
+          // Call the backend to unlock the achievement
+          const unlockResult = await unlockAchievement(goalCategory, milestone, validUserId);
+          
+          if (unlockResult.success && unlockResult.achievement) {
+            newAchievements.push(unlockResult.achievement);
+            logDebug(`✅ Successfully unlocked achievement: ${unlockResult.achievement.title}`);
+          }
+        } else {
+          logDebug(`User already has achievement: ${goalCategory} ${milestone}`);
+        }
+      }
+    }
+    
+    logDebug(`Found ${newAchievements.length} new achievements to unlock`);
+    return newAchievements;
+  } catch (error) {
+    console.error("Error checking for new achievements:", error);
+    logDebug(`❌ Error checking achievements: ${error instanceof Error ? error.message : String(error)}`);
+    
+    if (axios.isAxiosError(error) && error.response) {
+      logDebug(`Response status: ${error.response.status}`);
+      logDebug(`Response data:`, error.response.data);
+    }
+    
+    return [];
+  }
+};
+
 // Fetch user's achievement statistics
 export const fetchUserAchievements = async (userId?: string): Promise<AchievementStats> => {
   try {
@@ -299,7 +478,6 @@ export const fetchUserAchievements = async (userId?: string): Promise<Achievemen
     logDebug(`Fetching achievements for user: ${validUserId}`);
     
     const headers = await getAuthHeaders();
-    // ✅ FIXED: Now using correct endpoint
     const response = await axios.get(`${getApiBaseUrl()}/achievements/users/${validUserId}/achievements`, {
       headers,
       timeout: 10000,
@@ -331,45 +509,6 @@ export const fetchUserAchievements = async (userId?: string): Promise<Achievemen
   }
 };
 
-// Check for new achievements when a goal is completed
-export const checkForNewAchievements = async (
-  goalCategory: string,
-  userId?: string
-): Promise<Achievement[]> => {
-  try {
-    const validUserId = userId || await getCurrentUserId();
-    
-    if (!goalCategory || goalCategory.trim() === '') {
-      logDebug('Empty goal category provided');
-      return [];
-    }
-    
-    logDebug(`Checking for new achievements in category: ${goalCategory} for user: ${validUserId}`);
-    
-    const headers = await getAuthHeaders();
-    // ✅ FIXED: Now using correct endpoint
-    const response = await axios.post(`${getApiBaseUrl()}/achievements/users/${validUserId}/achievements/check`, {
-      category: goalCategory
-    }, {
-      headers,
-      timeout: 10000,
-    });
-
-    logDebug(`✅ Achievement check response:`, response.data);
-    return response.data.newAchievements || [];
-  } catch (error) {
-    console.error("Error checking for new achievements:", error);
-    logDebug(`❌ Error checking achievements: ${error instanceof Error ? error.message : String(error)}`);
-    
-    if (axios.isAxiosError(error) && error.response) {
-      logDebug(`Response status: ${error.response.status}`);
-      logDebug(`Response data:`, error.response.data);
-    }
-    
-    return [];
-  }
-};
-
 // Get achievement summary for dashboard
 export const getAchievementSummary = async (userId?: string): Promise<{
   unlockedAchievements: number;
@@ -382,7 +521,6 @@ export const getAchievementSummary = async (userId?: string): Promise<{
     logDebug(`Fetching achievement summary for user: ${validUserId}`);
     
     const headers = await getAuthHeaders();
-    // ✅ FIXED: Now using correct endpoint
     const response = await axios.get(`${getApiBaseUrl()}/achievements/users/${validUserId}/achievements/summary`, {
       headers,
       timeout: 5000,
@@ -444,7 +582,6 @@ export const getCategoryProgress = async (
     logDebug(`Fetching progress for category: ${category}, user: ${validUserId}`);
     
     const headers = await getAuthHeaders();
-    // ✅ FIXED: Now using correct endpoint
     const response = await axios.get(`${getApiBaseUrl()}/achievements/users/${validUserId}/achievements/category/${category}`, {
       headers,
       timeout: 5000,
@@ -484,7 +621,6 @@ export const getCategoryAchievements = async (
     logDebug(`Fetching achievements for category: ${category}, user: ${validUserId}`);
     
     const headers = await getAuthHeaders();
-    // ✅ FIXED: Now using correct endpoint
     const response = await axios.get(`${getApiBaseUrl()}/achievements/users/${validUserId}/achievements/category/${category}`, {
       headers,
       timeout: 5000,
@@ -504,6 +640,7 @@ export const getCategoryAchievements = async (
       coverImage: getAchievementImages(category, achievement.milestone).cover,
       badgeImage: getAchievementImages(category, achievement.milestone).badge,
       unlockedAt: achievement.unlockedAt ? new Date(achievement.unlockedAt) : undefined,
+      unlockedFromDatabase: achievement.unlockedFromDatabase || false,
     }));
 
     return achievements;
@@ -533,7 +670,6 @@ export const getAchievementStructure = async (): Promise<{
   try {
     logDebug(`Fetching achievement system structure`);
     
-    // ✅ FIXED: Now using correct endpoint
     const response = await axios.get(`${getApiBaseUrl()}/achievements/structure`, {
       timeout: 5000,
     });
@@ -554,7 +690,7 @@ export const getAchievementStructure = async (): Promise<{
   }
 };
 
-// Get all achievements for a user (used by AchievementsScreen)
+// ✅ UPDATED: Get all achievements for a user with preserved unlock status
 export const getAllUserAchievements = async (userId?: string): Promise<Achievement[]> => {
   try {
     const validUserId = userId || await getCurrentUserId();
@@ -568,45 +704,53 @@ export const getAllUserAchievements = async (userId?: string): Promise<Achieveme
 
     logDebug(`✅ User achievements response:`, response.data);
     
-    // ✅ NEW: Backend now returns ALL achievements with their status
+    // ✅ NEW: Backend now returns ALL achievements with their status preserved
     if (response.data.achievements && Array.isArray(response.data.achievements)) {
       const achievements = response.data.achievements.map((achievement: any) => ({
         id: achievement.id || `${achievement.category.toLowerCase()}_${achievement.milestone}`,
         category: achievement.category,
         milestone: achievement.milestone,
-        isUnlocked: achievement.isUnlocked === true, // Ensure boolean
+        isUnlocked: achievement.isUnlocked === true, // Preserve unlock status from backend
         completedGoals: achievement.completedGoals || 0,
         title: achievement.title || getAchievementTitle(achievement.category, achievement.milestone),
         description: achievement.description || getAchievementDescription(achievement.category, achievement.milestone),
         coverImage: getAchievementImages(achievement.category, achievement.milestone).cover,
         badgeImage: getAchievementImages(achievement.category, achievement.milestone).badge,
         unlockedAt: achievement.unlockedAt ? new Date(achievement.unlockedAt) : undefined,
+        unlockedFromDatabase: achievement.unlockedFromDatabase || false,
       }));
       
       logDebug(`Transformed ${achievements.length} achievements (${achievements.filter(a => a.isUnlocked).length} unlocked)`);
       return achievements;
     }
     
-    // Fallback: build ALL achievements from category stats
+    // Fallback: build ALL achievements from category stats with preserved unlock status
     const stats = response.data;
     const achievements: Achievement[] = [];
 
-    ACHIEVEMENT_CATEGORIES.forEach((category) => {
+    for (const category of ACHIEVEMENT_CATEGORIES) {
       const categoryStats = stats.categories[category] || { completed: 0, total: 0 };
       
-      ACHIEVEMENT_MILESTONES.forEach((milestone) => {
-        const isUnlocked = categoryStats.completed >= milestone;
+      for (const milestone of ACHIEVEMENT_MILESTONES) {
+        // Check if user already has this achievement (preserves unlocked status)
+        const alreadyHas = await checkIfUserHasAchievement(category, milestone, validUserId);
+        
+        // If they already have it, mark as unlocked regardless of current progress
+        // If they don't have it, check if they qualify based on current progress
+        const isUnlocked = alreadyHas || (categoryStats.completed >= milestone);
+        
         const achievement = createAchievement(
           category,
           milestone,
           isUnlocked,
           categoryStats.completed
         );
+        achievement.unlockedFromDatabase = alreadyHas;
         achievements.push(achievement);
-      });
-    });
+      }
+    }
 
-    logDebug(`Created ${achievements.length} achievement objects from stats (${achievements.filter(a => a.isUnlocked).length} unlocked)`);
+    logDebug(`Created ${achievements.length} achievement objects (${achievements.filter(a => a.isUnlocked).length} unlocked)`);
     return achievements;
   } catch (error) {
     console.error("Error getting all user achievements:", error);
@@ -629,6 +773,31 @@ export const getAllUserAchievements = async (userId?: string): Promise<Achieveme
 
     logDebug(`Returning ${defaultAchievements.length} default locked achievements`);
     return defaultAchievements;
+  }
+};
+
+// ✅ NEW: Handle goal completion with achievements (replaces old function)
+export const handleGoalCompletionWithAchievements = async (
+  goalId: string,
+  goalCategory: string,
+  userId?: string
+): Promise<Achievement[]> => {
+  try {
+    const validUserId = userId || await getCurrentUserId();
+    logDebug(`Handling goal completion for goal ${goalId} in category ${goalCategory}`);
+    
+    // Use the improved achievement check that preserves unlocked status
+    const newAchievements = await checkForNewAchievements(goalCategory, validUserId);
+    
+    if (newAchievements.length > 0) {
+      logDebug(`🎉 ${newAchievements.length} new achievements unlocked!`);
+      processNewAchievements(newAchievements);
+    }
+    
+    return newAchievements;
+  } catch (error) {
+    console.error("Error handling goal completion with achievements:", error);
+    return [];
   }
 };
 

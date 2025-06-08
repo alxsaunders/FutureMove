@@ -1,4 +1,4 @@
-// routes/achievements.js - Fixed SQL queries and proper achievement status handling
+// routes/achievements.js - Complete updated version with badge check functionality
 const express = require('express');
 const router = express.Router();
 
@@ -81,6 +81,256 @@ module.exports = (pool, authenticateFirebaseToken) => {
     });
   });
 
+  // ✅ NEW ENDPOINT: Check if user has a specific achievement
+  router.get('/users/:userId/achievements/has', async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { category, milestone } = req.query;
+
+      // Check authorization
+      if (req.user && req.user.uid !== userId) {
+        return res.status(403).json({ error: 'Unauthorized access', success: false });
+      }
+
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID is required', success: false });
+      }
+
+      if (!category || !milestone) {
+        return res.status(400).json({ error: 'Category and milestone are required', success: false });
+      }
+
+      console.log(`[HAS ACHIEVEMENT] Checking if user ${userId} has achievement: ${category} ${milestone}`);
+
+      // Check if user already has this specific achievement in the database
+      const hasAchievementQuery = `
+        SELECT COUNT(*) as count 
+        FROM user_achievements 
+        WHERE user_id = ? 
+          AND category = ? 
+          AND milestone = ?
+          AND unlocked_at IS NOT NULL
+      `;
+
+      const [result] = await pool.execute(hasAchievementQuery, [userId, category, parseInt(milestone)]);
+      const hasAchievement = result[0].count > 0;
+
+      console.log(`[HAS ACHIEVEMENT] User ${userId} ${hasAchievement ? 'HAS' : 'DOES NOT HAVE'} achievement: ${category} ${milestone}`);
+
+      res.json({
+        hasAchievement,
+        userId,
+        category,
+        milestone: parseInt(milestone),
+        success: true
+      });
+
+    } catch (error) {
+      handleError(res, error, 'Error checking if user has achievement');
+    }
+  });
+
+  // ✅ NEW ENDPOINT: Unlock a specific achievement for a user
+  router.post('/users/:userId/achievements/unlock', async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { category, milestone } = req.body;
+
+      // Check authorization
+      if (req.user && req.user.uid !== userId) {
+        return res.status(403).json({ error: 'Unauthorized access', success: false });
+      }
+
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID is required', success: false });
+      }
+
+      if (!category || !milestone) {
+        return res.status(400).json({ error: 'Category and milestone are required', success: false });
+      }
+
+      if (!ACHIEVEMENT_CATEGORIES.includes(category)) {
+        return res.status(400).json({ error: 'Invalid category', success: false });
+      }
+
+      if (!ACHIEVEMENT_MILESTONES.includes(milestone)) {
+        return res.status(400).json({ error: 'Invalid milestone', success: false });
+      }
+
+      console.log(`[UNLOCK ACHIEVEMENT] Unlocking achievement for user ${userId}: ${category} ${milestone}`);
+
+      // Check if user already has this achievement
+      const existingQuery = `
+        SELECT id FROM user_achievements 
+        WHERE user_id = ? AND category = ? AND milestone = ?
+      `;
+
+      const [existing] = await pool.execute(existingQuery, [userId, category, milestone]);
+
+      if (existing.length > 0) {
+        console.log(`[UNLOCK ACHIEVEMENT] User ${userId} already has achievement: ${category} ${milestone}`);
+        return res.json({
+          success: true,
+          message: 'Achievement already unlocked',
+          alreadyUnlocked: true
+        });
+      }
+
+      // Verify user qualifies for this achievement
+      const completedGoalsQuery = `
+        SELECT COUNT(*) as count 
+        FROM goals 
+        WHERE user_id = ? 
+          AND category = ? 
+          AND progress = 100
+      `;
+
+      const [completedResult] = await pool.execute(completedGoalsQuery, [userId, category]);
+      const completedGoals = completedResult[0].count;
+
+      if (completedGoals < milestone) {
+        console.log(`[UNLOCK ACHIEVEMENT] User ${userId} does not qualify for ${category} ${milestone} (${completedGoals} < ${milestone})`);
+        return res.status(400).json({
+          error: 'User does not qualify for this achievement',
+          completedGoals,
+          requiredGoals: milestone,
+          success: false
+        });
+      }
+
+      // Get achievement info
+      const achievementInfo = getAchievementInfo(category, milestone);
+
+      // Insert the achievement
+      const insertQuery = `
+        INSERT INTO user_achievements (user_id, category, milestone, achievement_id, title, unlocked_at)
+        VALUES (?, ?, ?, ?, ?, NOW())
+      `;
+
+      await pool.execute(insertQuery, [
+        userId,
+        category,
+        milestone,
+        achievementInfo.id,
+        achievementInfo.title
+      ]);
+
+      console.log(`[UNLOCK ACHIEVEMENT] ✅ Successfully unlocked achievement: ${achievementInfo.title} for user ${userId}`);
+
+      res.json({
+        success: true,
+        message: 'Achievement unlocked successfully',
+        achievement: {
+          ...achievementInfo,
+          isUnlocked: true,
+          completedGoals,
+          unlockedAt: new Date()
+        }
+      });
+
+    } catch (error) {
+      handleError(res, error, 'Error unlocking achievement');
+    }
+  });
+
+  // ✅ NEW ENDPOINT: Sync achievement status after goal resets
+  router.post('/users/:userId/achievements/sync', async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      // Check authorization
+      if (req.user && req.user.uid !== userId) {
+        return res.status(403).json({ error: 'Unauthorized access', success: false });
+      }
+
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID is required', success: false });
+      }
+
+      console.log(`[SYNC ACHIEVEMENTS] Syncing achievement status for user: ${userId}`);
+
+      // Get current completed goals by category
+      const completedGoalsQuery = `
+        SELECT 
+          category,
+          COUNT(*) as completed_goals
+        FROM goals 
+        WHERE user_id = ? 
+          AND progress = 100
+        GROUP BY category
+      `;
+
+      const [categoryStats] = await pool.execute(completedGoalsQuery, [userId]);
+
+      // Get user's existing achievements
+      const existingAchievementsQuery = `
+        SELECT category, milestone FROM user_achievements 
+        WHERE user_id = ?
+      `;
+
+      const [existingAchievements] = await pool.execute(existingAchievementsQuery, [userId]);
+
+      let syncedCount = 0;
+      let newAchievements = [];
+
+      // Check each category for missing achievements
+      for (const category of ACHIEVEMENT_CATEGORIES) {
+        const stats = categoryStats.find(stat => stat.category === category);
+        const completedGoals = stats ? stats.completed_goals : 0;
+
+        console.log(`[SYNC] ${category}: ${completedGoals} completed goals`);
+
+        for (const milestone of ACHIEVEMENT_MILESTONES) {
+          if (completedGoals >= milestone) {
+            // User qualifies for this achievement
+            const hasAchievement = existingAchievements.some(
+              a => a.category === category && a.milestone === milestone
+            );
+
+            if (!hasAchievement) {
+              // User qualifies but doesn't have it - add it
+              const achievementInfo = getAchievementInfo(category, milestone);
+              
+              try {
+                const insertQuery = `
+                  INSERT INTO user_achievements (user_id, category, milestone, achievement_id, title, unlocked_at)
+                  VALUES (?, ?, ?, ?, ?, NOW())
+                `;
+
+                await pool.execute(insertQuery, [
+                  userId,
+                  category,
+                  milestone,
+                  achievementInfo.id,
+                  achievementInfo.title
+                ]);
+
+                newAchievements.push(achievementInfo);
+                syncedCount++;
+
+                console.log(`[SYNC] ✅ Added missing achievement: ${achievementInfo.title}`);
+              } catch (insertError) {
+                console.error(`[SYNC] ❌ Error adding achievement ${category} ${milestone}:`, insertError);
+              }
+            }
+          }
+        }
+      }
+
+      console.log(`[SYNC] Completed sync for user ${userId}. Added ${syncedCount} missing achievements.`);
+
+      res.json({
+        success: true,
+        message: `Sync completed. Added ${syncedCount} missing achievements.`,
+        addedAchievements: newAchievements,
+        syncedCount
+      });
+
+    } catch (error) {
+      handleError(res, error, 'Error syncing achievement status');
+    }
+  });
+
   // GET /api/achievements/users/:userId/achievements - Get ALL user's achievements (locked and unlocked)
   router.get('/users/:userId/achievements', async (req, res) => {
     try {
@@ -146,15 +396,16 @@ module.exports = (pool, authenticateFirebaseToken) => {
         ACHIEVEMENT_MILESTONES.forEach(milestone => {
           const achievementInfo = getAchievementInfo(category, milestone);
           
-          // Check if this achievement is unlocked based on completed goals
-          const isUnlocked = categoryCompletedGoals >= milestone;
-          
-          // Check if this achievement exists in user_achievements table
+          // Check if this achievement exists in user_achievements table (permanently unlocked)
           const unlockedAchievement = userAchievements.find(
             a => a.category === category && a.milestone === milestone
           );
           
-          console.log(`[ACHIEVEMENTS API] ${category} ${milestone}: ${categoryCompletedGoals} >= ${milestone} = ${isUnlocked}`);
+          // ✅ FIXED: Achievement is unlocked if it exists in DB OR if user currently qualifies
+          // This preserves unlocked status even after goal resets
+          const isUnlocked = !!unlockedAchievement || (categoryCompletedGoals >= milestone);
+          
+          console.log(`[ACHIEVEMENTS API] ${category} ${milestone}: DB=${!!unlockedAchievement}, Current=${categoryCompletedGoals >= milestone}, Final=${isUnlocked}`);
           
           allAchievements.push({
             ...achievementInfo,
@@ -163,7 +414,9 @@ module.exports = (pool, authenticateFirebaseToken) => {
             progress: Math.min(Math.round((categoryCompletedGoals / milestone) * 100), 100),
             unlockedAt: unlockedAchievement ? unlockedAchievement.unlocked_at : null,
             // Add database ID if it exists
-            dbId: unlockedAchievement ? unlockedAchievement.id : null
+            dbId: unlockedAchievement ? unlockedAchievement.id : null,
+            // Flag to indicate if this was unlocked from database vs current progress
+            unlockedFromDatabase: !!unlockedAchievement
           });
         });
       });
@@ -317,21 +570,18 @@ module.exports = (pool, authenticateFirebaseToken) => {
         GROUP BY category
       `;
 
+      // Get unlocked achievements count from database
+      const unlockedCountQuery = `
+        SELECT COUNT(*) as count
+        FROM user_achievements
+        WHERE user_id = ?
+      `;
+
       const [categoryStats] = await pool.execute(categoryStatsQuery, [userId]);
+      const [unlockedResult] = await pool.execute(unlockedCountQuery, [userId]);
 
-      // Calculate unlocked achievements based on completion counts
-      let unlockedCount = 0;
-      ACHIEVEMENT_CATEGORIES.forEach(category => {
-        const stats = categoryStats.find(stat => stat.category === category);
-        const completedGoals = stats ? stats.completed_goals : 0;
-        
-        ACHIEVEMENT_MILESTONES.forEach(milestone => {
-          if (completedGoals >= milestone) {
-            unlockedCount++;
-          }
-        });
-      });
-
+      // ✅ Use database count for unlocked achievements (preserves achievements after resets)
+      const unlockedCount = unlockedResult[0].count;
       const totalPossible = ACHIEVEMENT_CATEGORIES.length * ACHIEVEMENT_MILESTONES.length;
       const progressPercentage = Math.round((unlockedCount / totalPossible) * 100);
 
@@ -419,15 +669,18 @@ module.exports = (pool, authenticateFirebaseToken) => {
       // Build complete achievement list for this category
       const categoryAchievements = ACHIEVEMENT_MILESTONES.map(milestone => {
         const achievementInfo = getAchievementInfo(category, milestone);
-        const isUnlocked = completedGoals >= milestone;
         const achievement = achievements.find(a => a.milestone === milestone);
+        
+        // ✅ FIXED: Achievement is unlocked if it exists in DB OR if user currently qualifies
+        const isUnlocked = !!achievement || (completedGoals >= milestone);
 
         return {
           ...achievementInfo,
           isUnlocked,
           completedGoals,
           progress: completedGoals >= milestone ? 100 : Math.round((completedGoals / milestone) * 100),
-          unlockedAt: achievement ? achievement.unlocked_at : null
+          unlockedAt: achievement ? achievement.unlocked_at : null,
+          unlockedFromDatabase: !!achievement
         };
       });
 

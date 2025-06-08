@@ -1,6 +1,7 @@
-// src/services/RoutineResetService.ts
+// src/services/RoutineResetService.ts - Updated with achievement sync
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchUserGoals, updateGoalProgress, isGoalActiveToday } from './GoalService';
+import { syncAchievementStatus } from './AchievementService'; // ✅ NEW: Import sync function
 import { Goal } from '../types';
 
 // Key for storing the last reset date
@@ -38,6 +39,16 @@ export const checkAndResetDailyGoals = async (userId: string): Promise<void> => 
     if (!lastResetDate || lastResetDate !== today) {
       console.log(`New day detected, resetting daily goals...`);
       await resetDailyGoals(userId);
+      
+      // ✅ NEW: Sync achievement status after goal reset
+      console.log(`Syncing achievement status after goal reset for user: ${userId}`);
+      try {
+        await syncAchievementStatus(userId);
+        console.log(`✅ Achievement status synced successfully for user: ${userId}`);
+      } catch (syncError) {
+        console.warn("Error syncing achievement status after reset:", syncError);
+        // Not critical, continue
+      }
       
       // Update the last reset date to today
       try {
