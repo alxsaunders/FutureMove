@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
   Image,
   ImageBackground,
+  Platform,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { GoalsScreenProps } from "../types/navigaton";
@@ -33,6 +34,12 @@ import {
   updateUserXP,
   deleteGoal,
 } from "../services/GoalService";
+// ADDED: Achievement service import
+import {
+  checkForNewAchievements,
+  processNewAchievements,
+} from "../services/AchievementService";
+import { auth } from "../config/firebase"; // Import Firebase auth
 
 // Define types for filters and sorting
 type GoalFilterType = "all" | "active" | "routine" | "completed";
@@ -55,7 +62,7 @@ const GOAL_COMPLETION_COINS = 5;
 
 const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
   const { currentUser } = useAuth();
-  const userId = currentUser?.id || "default_user";
+  const userId = auth.currentUser?.uid || currentUser?.id || "default_user";
 
   const [goals, setGoals] = useState<Goal[]>([]);
   const [filteredGoals, setFilteredGoals] = useState<Goal[]>([]);
@@ -137,54 +144,129 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
     return { newLevel, finalXP };
   };
 
-  // Check if goal rewards can be claimed
-  const canClaimRewardsForGoal = (goal: Goal): boolean => {
-    // For one-time goals, check if they're completed on or before the assigned day
-    if (!goal.isDaily) {
-      const today = new Date();
-      const goalDate = new Date(
-        goal.targetDate || goal.startDate || Date.now()
-      );
+  // Check if goal rewards can be claimed (REMOVED - not used anymore)
+  // const canClaimRewardsForGoal = (goal: Goal): boolean => {
+  //   return true; // Always allow rewards
+  // };
 
-      // If the goal was due in the past, don't allow claiming rewards
-      if (
-        goalDate < today &&
-        goalDate.toDateString() !== today.toDateString()
-      ) {
-        return false;
-      }
-    }
-
-    // All daily goals can claim rewards when completed
-    return true;
-  };
-
-  // Process goal rewards
-  const processGoalRewards = async (goal: Goal) => {
+  // FIXED: Process goal rewards using the updateUserCoins and updateUserXP functions
+  const handleGoalRewards = async (goal: Goal) => {
     try {
-      // Add XP and coins
-      const newXP = userExp + GOAL_COMPLETION_XP;
-      const levelUpResult = handleLevelUp(newXP, userLevel);
-
-      // Update XP in database
-      await updateUserXP(userId, GOAL_COMPLETION_XP, levelUpResult.newLevel);
-
-      // Update coins in database
-      await updateUserCoins(userId, GOAL_COMPLETION_COINS);
-
-      // Update local state
-      setUserLevel(levelUpResult.newLevel);
-      setUserExp(levelUpResult.finalXP);
-      setFutureCoins(futureCoins + GOAL_COMPLETION_COINS);
-
-      // Show completion message
-      Alert.alert(
-        "Goal Completed!",
-        `Great job! You've earned ${GOAL_COMPLETION_XP} XP and ${GOAL_COMPLETION_COINS} coins.`,
-        [{ text: "Nice!", style: "default" }]
+      console.log(
+        `[GOALS SCREEN] Processing rewards for goal: ${goal.title}, Category: ${goal.category}`
       );
+
+      // Ensure we have the latest Firebase user ID
+      const firebaseUserId = auth.currentUser?.uid;
+      const effectiveUserId = firebaseUserId || userId;
+
+      console.log(
+        `[GOALS SCREEN] Updating user stats for user: ${effectiveUserId}`
+      );
+
+      try {
+        // Add XP and handle level up
+        const newXP = userExp + GOAL_COMPLETION_XP;
+        const levelUpResult = handleLevelUp(newXP, userLevel);
+
+        // Update XP in database
+        await updateUserXP(
+          effectiveUserId,
+          GOAL_COMPLETION_XP,
+          levelUpResult.newLevel
+        );
+
+        // Update coins in database
+        await updateUserCoins(effectiveUserId, GOAL_COMPLETION_COINS);
+
+        // Update local state
+        setUserLevel(levelUpResult.newLevel);
+        setUserExp(levelUpResult.finalXP);
+        setFutureCoins(futureCoins + GOAL_COMPLETION_COINS);
+        setStreakCount(streakCount + 1);
+
+        // Check for new achievements
+        console.log(
+          `[GOALS SCREEN] Checking for achievements in category: ${goal.category}`
+        );
+        const newAchievements = await checkForNewAchievements(
+          goal.category,
+          effectiveUserId
+        );
+
+        // Show completion message first
+        Alert.alert(
+          "Goal Completed!",
+          `Great job! You've earned ${GOAL_COMPLETION_XP} XP and ${GOAL_COMPLETION_COINS} coins.`,
+          [
+            {
+              text: "Nice!",
+              style: "default",
+              onPress: () => {
+                // After the completion alert is dismissed, show achievement notifications
+                if (newAchievements.length > 0) {
+                  console.log(
+                    `[GOALS SCREEN] Found ${newAchievements.length} new achievements!`
+                  );
+                  processNewAchievements(newAchievements);
+                }
+              },
+            },
+          ]
+        );
+      } catch (rewardError) {
+        console.error("Error updating rewards in database:", rewardError);
+
+        // Fall back to local state updates if database update fails
+        const newXP = userExp + GOAL_COMPLETION_XP;
+        const levelUpResult = handleLevelUp(newXP, userLevel);
+
+        setUserLevel(levelUpResult.newLevel);
+        setUserExp(levelUpResult.finalXP);
+        setFutureCoins(futureCoins + GOAL_COMPLETION_COINS);
+        setStreakCount(streakCount + 1);
+
+        // Still try to check achievements even if stats update failed
+        try {
+          const newAchievements = await checkForNewAchievements(
+            goal.category,
+            effectiveUserId
+          );
+
+          // Show completion message
+          Alert.alert(
+            "Goal Completed!",
+            `Great job! You've earned ${GOAL_COMPLETION_XP} XP and ${GOAL_COMPLETION_COINS} coins.`,
+            [
+              {
+                text: "Nice!",
+                style: "default",
+                onPress: () => {
+                  if (newAchievements.length > 0) {
+                    processNewAchievements(newAchievements);
+                  }
+                },
+              },
+            ]
+          );
+        } catch (achievementError) {
+          console.error("Error checking achievements:", achievementError);
+
+          // Show basic completion message if achievement check also fails
+          Alert.alert(
+            "Goal Completed!",
+            `Great job! You've earned ${GOAL_COMPLETION_XP} XP and ${GOAL_COMPLETION_COINS} coins.`,
+            [{ text: "Nice!", style: "default" }]
+          );
+        }
+      }
     } catch (error) {
       console.error("Error processing rewards:", error);
+
+      // Show basic completion message if everything fails
+      Alert.alert("Goal Completed!", "Great job completing your goal!", [
+        { text: "Nice!", style: "default" },
+      ]);
     }
   };
 
@@ -192,6 +274,12 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
   const loadUserData = async () => {
     try {
       setIsLoading(true);
+
+      // Ensure we have the latest Firebase user ID
+      const firebaseUserId = auth.currentUser?.uid;
+      const effectiveUserId = firebaseUserId || userId;
+
+      console.log(`[GOALS SCREEN] Fetching data for user: ${effectiveUserId}`);
 
       // Fetch goals
       const goalsData = await fetchUserGoals();
@@ -222,10 +310,23 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
       const coins = await getUserFutureCoins();
       setFutureCoins(coins);
 
-      // Fetch user level and XP
+      // Fetch user level and XP from database
       try {
-        const apiUrl = "http://10.0.2.2:3001/api";
-        const response = await fetch(`${apiUrl}/users/${userId}`);
+        // Use the same approach as HomeScreen but without duplicating the helper function
+        const firebaseUserId = auth.currentUser?.uid;
+        const effectiveUserId = firebaseUserId || userId;
+
+        // Simple fetch without custom API URL function
+        const response = await fetch(
+          `http://10.0.2.2:3001/api/users/${effectiveUserId}`,
+          {
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${await auth.currentUser?.getIdToken()}`,
+            },
+          }
+        );
+
         if (response.ok) {
           const userData = await response.json();
           setUserLevel(userData.level || 1);
@@ -369,12 +470,24 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
     setFilteredGoals(result);
   };
 
+  // FIXED: Toggle goal completion with proper reward processing
   const toggleGoalCompletion = async (goalId: number) => {
     try {
+      console.log(
+        `[GOALS SCREEN] Toggling goal completion for goal ID: ${goalId}`
+      );
+
       // Find the goal to toggle
       const goalToToggle = goals.find((g) => g.id === goalId);
 
-      if (!goalToToggle) return;
+      if (!goalToToggle) {
+        console.log(`[GOALS SCREEN] Goal not found with ID: ${goalId}`);
+        return;
+      }
+
+      console.log(
+        `[GOALS SCREEN] Found goal: ${goalToToggle.title}, Type: ${goalToToggle.type}, Category: ${goalToToggle.category}`
+      );
 
       const wasCompleted = goalToToggle.isCompleted;
 
@@ -390,6 +503,10 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
         newProgress = 0;
       }
 
+      console.log(
+        `[GOALS SCREEN] Current progress: ${goalToToggle.progress}, New progress: ${newProgress}`
+      );
+
       // Update goal progress in the database
       const updatedGoal = await updateGoalProgress(goalId, newProgress);
 
@@ -398,11 +515,12 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
       }
 
       // If this is a completion (not unchecking) and goal wasn't previously completed,
-      // process rewards only if eligible
+      // always process rewards
       if (!wasCompleted && newProgress === 100) {
-        if (canClaimRewardsForGoal(goalToToggle)) {
-          await processGoalRewards(goalToToggle);
-        }
+        console.log(
+          `[GOALS SCREEN] Goal is being completed, processing rewards`
+        );
+        await handleGoalRewards(goalToToggle);
       }
 
       // Reload all data to get updated streaks, coins, and goals

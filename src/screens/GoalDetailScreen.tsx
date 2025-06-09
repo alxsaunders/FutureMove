@@ -22,10 +22,15 @@ import {
   deleteGoal,
   getCategoryColor,
   updateGoalProgress,
-  toggleGoalCompletion,
-  canClaimRewardsForGoal,
+  updateUserCoins,
+  updateUserXP,
   isGoalActiveToday,
 } from "../services/GoalService";
+// ADDED: Achievement service import
+import {
+  checkForNewAchievements,
+  processNewAchievements,
+} from "../services/AchievementService";
 import { GoalDetailScreenProps } from "../types/navigaton";
 import { auth } from "../config/firebase.js";
 
@@ -39,6 +44,10 @@ const DAYS_OF_WEEK = [
   { id: 5, name: "Fri", fullName: "Friday" },
   { id: 6, name: "Sat", fullName: "Saturday" },
 ];
+
+// Define reward constants
+const GOAL_COMPLETION_XP = 10;
+const GOAL_COMPLETION_COINS = 5;
 
 const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
   navigation,
@@ -73,6 +82,138 @@ const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
     { name: "Repair", color: "#56C3B6" },
     { name: "Finance", color: "#FF9800" },
   ];
+
+  // Function to handle level up logic
+  const handleLevelUp = (newXP: number, currentLevel: number) => {
+    let newLevel = currentLevel;
+    let finalXP = newXP;
+
+    // Check if user leveled up (every 100 XP)
+    if (newXP >= 100) {
+      const levelsGained = Math.floor(newXP / 100);
+      newLevel += levelsGained;
+      finalXP = newXP % 100;
+
+      // Show level up alert
+      Alert.alert(
+        "Level Up!",
+        `Congratulations! You've reached level ${newLevel}!`,
+        [{ text: "Awesome!", style: "default" }]
+      );
+    }
+
+    return { newLevel, finalXP };
+  };
+
+  // ADDED: Process goal rewards with proper database updates
+  const handleGoalRewards = async (
+    goal: Goal,
+    currentXP: number,
+    currentLevel: number
+  ) => {
+    try {
+      console.log(
+        `[GOAL DETAIL] Processing rewards for goal: ${goal.title}, Category: ${goal.category}`
+      );
+
+      // Ensure we have the latest Firebase user ID
+      const firebaseUserId = auth.currentUser?.uid;
+      const effectiveUserId = firebaseUserId || goal.userId || "default_user";
+
+      console.log(
+        `[GOAL DETAIL] Updating user stats for user: ${effectiveUserId}`
+      );
+
+      try {
+        // Add XP and handle level up
+        const newXP = currentXP + GOAL_COMPLETION_XP;
+        const levelUpResult = handleLevelUp(newXP, currentLevel);
+
+        // Update XP in database
+        await updateUserXP(
+          effectiveUserId,
+          GOAL_COMPLETION_XP,
+          levelUpResult.newLevel
+        );
+
+        // Update coins in database
+        await updateUserCoins(effectiveUserId, GOAL_COMPLETION_COINS);
+
+        // Check for new achievements
+        console.log(
+          `[GOAL DETAIL] Checking for achievements in category: ${goal.category}`
+        );
+        const newAchievements = await checkForNewAchievements(
+          goal.category,
+          effectiveUserId
+        );
+
+        // Show completion message first
+        Alert.alert(
+          "Goal Completed!",
+          `Great job! You've earned ${GOAL_COMPLETION_XP} XP and ${GOAL_COMPLETION_COINS} coins.`,
+          [
+            {
+              text: "Nice!",
+              style: "default",
+              onPress: () => {
+                // After the completion alert is dismissed, show achievement notifications
+                if (newAchievements.length > 0) {
+                  console.log(
+                    `[GOAL DETAIL] Found ${newAchievements.length} new achievements!`
+                  );
+                  processNewAchievements(newAchievements);
+                }
+              },
+            },
+          ]
+        );
+      } catch (rewardError) {
+        console.error("Error updating rewards in database:", rewardError);
+
+        // Still try to check achievements even if stats update failed
+        try {
+          const newAchievements = await checkForNewAchievements(
+            goal.category,
+            effectiveUserId
+          );
+
+          // Show completion message
+          Alert.alert(
+            "Goal Completed!",
+            `Great job! You've earned ${GOAL_COMPLETION_XP} XP and ${GOAL_COMPLETION_COINS} coins.`,
+            [
+              {
+                text: "Nice!",
+                style: "default",
+                onPress: () => {
+                  if (newAchievements.length > 0) {
+                    processNewAchievements(newAchievements);
+                  }
+                },
+              },
+            ]
+          );
+        } catch (achievementError) {
+          console.error("Error checking achievements:", achievementError);
+
+          // Show basic completion message if achievement check also fails
+          Alert.alert(
+            "Goal Completed!",
+            `Great job! You've earned ${GOAL_COMPLETION_XP} XP and ${GOAL_COMPLETION_COINS} coins.`,
+            [{ text: "Nice!", style: "default" }]
+          );
+        }
+      }
+    } catch (error) {
+      console.error("Error processing rewards:", error);
+
+      // Show basic completion message if everything fails
+      Alert.alert("Goal Completed!", "Great job completing your goal!", [
+        { text: "Nice!", style: "default" },
+      ]);
+    }
+  };
 
   // Load goal data
   useEffect(() => {
@@ -189,10 +330,13 @@ const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
     }
   };
 
-  // Handle progress update
+  // FIXED: Handle progress update with rewards for completion
   const handleProgressUpdate = async (newProgress: number) => {
     try {
       if (!goal) return;
+
+      const wasCompleted = goal.isCompleted;
+      const isNowCompleted = newProgress === 100;
 
       const updatedGoal = await updateGoalProgress(goalId, newProgress);
 
@@ -200,6 +344,48 @@ const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
         // Update local state
         setGoal(updatedGoal);
         setProgress(updatedGoal.progress);
+
+        // If this is a completion (not unchecking) and goal wasn't previously completed,
+        // process rewards
+        if (!wasCompleted && isNowCompleted) {
+          console.log(
+            `[GOAL DETAIL] Goal is being completed, processing rewards`
+          );
+
+          // Get current user stats for level calculation
+          try {
+            const response = await fetch(
+              `http://10.0.2.2:3001/api/users/${
+                auth.currentUser?.uid || goal.userId
+              }`,
+              {
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${await auth.currentUser?.getIdToken()}`,
+                },
+              }
+            );
+
+            if (response.ok) {
+              const userData = await response.json();
+              await handleGoalRewards(
+                updatedGoal,
+                userData.xp_points || 0,
+                userData.level || 1
+              );
+            } else {
+              // Fallback with default values
+              await handleGoalRewards(updatedGoal, 0, 1);
+            }
+          } catch (userFetchError) {
+            console.error(
+              "Error fetching user data for rewards:",
+              userFetchError
+            );
+            // Fallback with default values
+            await handleGoalRewards(updatedGoal, 0, 1);
+          }
+        }
       } else {
         // If it fails, show error but still update UI optimistically
         console.warn("Backend update failed, updating UI optimistically");
@@ -209,6 +395,14 @@ const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
           progress: newProgress,
           isCompleted: newProgress === 100,
         });
+
+        // Still process rewards if this was a completion
+        if (!wasCompleted && isNowCompleted) {
+          console.log(
+            `[GOAL DETAIL] Goal completed (optimistic), processing rewards`
+          );
+          await handleGoalRewards(goal, 0, 1); // Use default values since backend failed
+        }
       }
     } catch (error) {
       console.error("Error updating progress:", error);
@@ -216,27 +410,16 @@ const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
     }
   };
 
-  // Handle toggle completion
+  // FIXED: Handle toggle completion with rewards
   const handleToggleCompletion = async () => {
     try {
       if (!goal) return;
 
-      // Try to toggle with the server
-      const success = await toggleGoalCompletion(goalId, allGoals);
+      const wasCompleted = goal.isCompleted;
+      const newProgress = wasCompleted ? 0 : 100;
 
-      if (success) {
-        // Reload goal data
-        loadGoalData();
-      } else {
-        // If it fails, update UI optimistically
-        const newProgress = goal.isCompleted ? 0 : 100;
-        setGoal({
-          ...goal,
-          progress: newProgress,
-          isCompleted: !goal.isCompleted,
-        });
-        setProgress(newProgress);
-      }
+      // Update progress (which will trigger rewards if completing)
+      await handleProgressUpdate(newProgress);
     } catch (error) {
       console.error("Error toggling completion:", error);
       Alert.alert("Error", "Failed to update goal. Please try again.");
@@ -706,35 +889,22 @@ const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
                 </Text>
               </TouchableOpacity>
 
-              {/* Reward eligibility */}
+              {/* REMOVED: Reward eligibility check - now all goals give rewards */}
               {!goal.isCompleted && (
                 <View style={styles.rewardEligibilityContainer}>
                   <Ionicons
-                    name={
-                      canClaimRewardsForGoal(goal)
-                        ? "information-circle"
-                        : "alert-circle"
-                    }
+                    name="information-circle"
                     size={18}
-                    color={
-                      canClaimRewardsForGoal(goal)
-                        ? COLORS.primary
-                        : COLORS.textSecondary
-                    }
+                    color={COLORS.primary}
                   />
                   <Text
                     style={[
                       styles.rewardEligibilityText,
-                      {
-                        color: canClaimRewardsForGoal(goal)
-                          ? COLORS.primary
-                          : COLORS.textSecondary,
-                      },
+                      { color: COLORS.primary },
                     ]}
                   >
-                    {canClaimRewardsForGoal(goal)
-                      ? "Completing this goal will earn rewards"
-                      : "This goal is not currently eligible for rewards"}
+                    Completing this goal will earn {GOAL_COMPLETION_XP} XP and{" "}
+                    {GOAL_COMPLETION_COINS} coins
                   </Text>
                 </View>
               )}
