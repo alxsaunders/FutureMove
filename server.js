@@ -725,7 +725,7 @@ app.post('/api/goals', async (req, res) => {
             null,
             1, // Default level
             0, // Default XP
-            100, // Default coins
+            0, // Default coins
             new Date() // Current timestamp
           ]
         );
@@ -1276,7 +1276,7 @@ app.put('/api/users/:id/xp', async (req, res) => {
             null,
             1, // Default level
             amount > 0 ? amount : 0, // Start with the amount if positive
-            100, // Default coins
+            0, // Default coins
             new Date() // Current timestamp
           ]
         );
