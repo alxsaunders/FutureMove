@@ -43,6 +43,52 @@ const getApiBaseUrl = () => {
   }
 };
 
+// Check if username is available
+export const checkUsernameAvailable = async (username: string): Promise<boolean> => {
+  const apiUrl = `${getApiBaseUrl()}/check-username`;
+  
+  try {
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Username check failed with status: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    return data.available;
+  } catch (error) {
+    console.error('Error checking username availability:', error);
+    throw error;
+  }
+};
+
+// Check if email is available
+export const checkEmailAvailable = async (email: string): Promise<boolean> => {
+  const apiUrl = `${getApiBaseUrl()}/check-email`;
+  
+  try {
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Email check failed with status: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    return data.available;
+  } catch (error) {
+    console.error('Error checking email availability:', error);
+    throw error;
+  }
+};
+
 // Register a new user to MySQL
 export const registerUserToMySQL = async ({
   user_id,

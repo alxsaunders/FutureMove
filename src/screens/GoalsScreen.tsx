@@ -1106,7 +1106,7 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
             </View>
 
             <View style={styles.switchContainer}>
-              <Text style={styles.switchLabel}>Daily Goal</Text>
+              <Text style={styles.switchLabel}>Create Routine</Text>
               <Switch
                 value={newGoalIsDaily}
                 onValueChange={setNewGoalIsDaily}

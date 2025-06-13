@@ -592,7 +592,7 @@ const GoalDetailScreen: React.FC<GoalDetailScreenProps> = ({
                 </View>
 
                 <View style={styles.switchContainer}>
-                  <Text style={styles.switchLabel}>Daily Goal</Text>
+                  <Text style={styles.switchLabel}>Routine</Text>
                   <Switch
                     value={isDaily}
                     onValueChange={setIsDaily}

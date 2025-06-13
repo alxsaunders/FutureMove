@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -19,7 +19,11 @@ import {
 } from "firebase/auth";
 import { doc, setDoc, deleteDoc } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
-import { registerUserToMySQL } from "../services/authService";
+import {
+  registerUserToMySQL,
+  checkUsernameAvailable,
+  checkEmailAvailable,
+} from "../services/authService";
 import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
 import { RootStackParamList } from "../types/navigaton";
@@ -35,65 +39,141 @@ const SignUpScreen = () => {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  // Helper function to delete MySQL user if needed
-  const deleteUserFromMySQL = async (userId: string) => {
-    try {
-      const apiUrl = `${getApiBaseUrl()}/users/${userId}`;
-      await fetch(apiUrl, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-      });
-    } catch (error) {
-      console.error("Error deleting user from MySQL:", error);
+  // Validation states
+  const [usernameError, setUsernameError] = useState("");
+  const [emailError, setEmailError] = useState("");
+  const [isCheckingUsername, setIsCheckingUsername] = useState(false);
+  const [isCheckingEmail, setIsCheckingEmail] = useState(false);
+  const [usernameValid, setUsernameValid] = useState(false);
+  const [emailValid, setEmailValid] = useState(false);
+
+  // Debounced validation functions
+  const debounce = (func, delay) => {
+    let timeoutId;
+    return (...args) => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => func.apply(null, args), delay);
+    };
+  };
+
+  const checkUsernameValidation = useCallback(
+    debounce(async (usernameToCheck) => {
+      if (!usernameToCheck || usernameToCheck.length < 3) {
+        setUsernameError("Username must be at least 3 characters");
+        setUsernameValid(false);
+        setIsCheckingUsername(false);
+        return;
+      }
+
+      // Check for valid characters (alphanumeric and underscore only)
+      if (!/^[a-zA-Z0-9_]+$/.test(usernameToCheck)) {
+        setUsernameError(
+          "Username can only contain letters, numbers, and underscores"
+        );
+        setUsernameValid(false);
+        setIsCheckingUsername(false);
+        return;
+      }
+
+      try {
+        setIsCheckingUsername(true);
+        const isAvailable = await checkUsernameAvailable(usernameToCheck);
+
+        if (isAvailable) {
+          setUsernameError("");
+          setUsernameValid(true);
+        } else {
+          setUsernameError("Username is already taken");
+          setUsernameValid(false);
+        }
+      } catch (error) {
+        console.error("Error checking username:", error);
+        setUsernameError("Error checking username availability");
+        setUsernameValid(false);
+      } finally {
+        setIsCheckingUsername(false);
+      }
+    }, 500),
+    []
+  );
+
+  const checkEmailValidation = useCallback(
+    debounce(async (emailToCheck) => {
+      // Basic email validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailToCheck || !emailRegex.test(emailToCheck)) {
+        setEmailError("Please enter a valid email address");
+        setEmailValid(false);
+        setIsCheckingEmail(false);
+        return;
+      }
+
+      try {
+        setIsCheckingEmail(true);
+        const isAvailable = await checkEmailAvailable(emailToCheck);
+
+        if (isAvailable) {
+          setEmailError("");
+          setEmailValid(true);
+        } else {
+          setEmailError("Email is already registered");
+          setEmailValid(false);
+        }
+      } catch (error) {
+        console.error("Error checking email:", error);
+        setEmailError("Error checking email availability");
+        setEmailValid(false);
+      } finally {
+        setIsCheckingEmail(false);
+      }
+    }, 500),
+    []
+  );
+
+  const handleUsernameChange = (text) => {
+    setUsername(text);
+    setUsernameValid(false);
+    if (text.length > 0) {
+      checkUsernameValidation(text);
+    } else {
+      setUsernameError("");
     }
   };
 
-  // Helper function to get API base URL (you might need to import this from authService)
-  const getApiBaseUrl = () => {
-    if (Platform.OS === "android") {
-      return "http://10.0.2.2:3001/api";
+  const handleEmailChange = (text) => {
+    setEmail(text);
+    setEmailValid(false);
+    if (text.length > 0) {
+      checkEmailValidation(text);
     } else {
-      return "http://192.168.1.207:3001/api";
+      setEmailError("");
     }
+  };
+
+  const isFormValid = () => {
+    return (
+      username.length >= 3 &&
+      name.length > 0 &&
+      email.length > 0 &&
+      password.length >= 6 &&
+      usernameValid &&
+      emailValid &&
+      !isCheckingUsername &&
+      !isCheckingEmail
+    );
   };
 
   const handleSignUp = async () => {
     try {
-      // Validate input
-      if (!username || !name || !email || !password) {
-        Alert.alert("Error", "Please fill out all fields");
-        return;
-      }
-
-      if (password.length < 6) {
-        Alert.alert("Error", "Password must be at least 6 characters long");
+      // Final validation before signup
+      if (!isFormValid()) {
+        Alert.alert("Error", "Please fix all errors before continuing");
         return;
       }
 
       setIsLoading(true);
 
-      // Step 1: Create MySQL user first
-      console.log("Creating MySQL user...");
-      let mysqlResponse;
-      let tempUserId = `temp_${Date.now()}`; // Temporary ID for MySQL
-
-      try {
-        mysqlResponse = await registerUserToMySQL({
-          user_id: tempUserId,
-          username,
-          name,
-          email,
-        });
-      } catch (mysqlError) {
-        console.error("MySQL registration failed:", mysqlError);
-        Alert.alert(
-          "Account Creation Failed",
-          "Unable to create account. Please try again."
-        );
-        return;
-      }
-
-      // Step 2: Create Firebase user
+      // Step 1: Create Firebase user FIRST
       console.log("Creating Firebase user...");
       let userCredential;
       let firebaseUser;
@@ -119,11 +199,13 @@ const SignUpScreen = () => {
           futureCoins: 0,
           createdAt: new Date(),
         });
+
+        console.log(
+          "Firebase user created successfully with UID:",
+          firebaseUser.uid
+        );
       } catch (firebaseError) {
         console.error("Firebase registration failed:", firebaseError);
-
-        // Cleanup: Delete the MySQL user we just created
-        await deleteUserFromMySQL(tempUserId);
 
         // Show appropriate error message
         let errorMessage = "Unable to create account. Please try again.";
@@ -140,32 +222,31 @@ const SignUpScreen = () => {
         return;
       }
 
-      // Step 3: Update MySQL user with the real Firebase UID
-      console.log("Updating MySQL user with Firebase UID...");
+      // Step 2: Create MySQL user with the real Firebase UID
+      console.log("Creating MySQL user with Firebase UID:", firebaseUser.uid);
       try {
-        // Delete the temporary MySQL record
-        await deleteUserFromMySQL(tempUserId);
-
-        // Create new MySQL record with the real Firebase UID
         await registerUserToMySQL({
-          user_id: firebaseUser.uid,
+          user_id: firebaseUser.uid, // Use the real Firebase UID
           username,
           name,
           email,
         });
-      } catch (updateError) {
-        console.error("MySQL update failed:", updateError);
 
-        // Cleanup: Delete Firebase user and Firestore document
+        console.log(
+          "MySQL user created successfully with UID:",
+          firebaseUser.uid
+        );
+      } catch (mysqlError) {
+        console.error("MySQL registration failed:", mysqlError);
+
+        // Cleanup: Delete Firebase user and Firestore document since MySQL failed
         try {
           await deleteDoc(doc(db, "users", firebaseUser.uid));
           await deleteUser(firebaseUser);
+          console.log("Firebase cleanup completed after MySQL failure");
         } catch (cleanupError) {
-          console.error("Cleanup failed:", cleanupError);
+          console.error("Firebase cleanup failed:", cleanupError);
         }
-
-        // Also cleanup the temporary MySQL record
-        await deleteUserFromMySQL(tempUserId);
 
         Alert.alert(
           "Account Creation Failed",
@@ -175,14 +256,14 @@ const SignUpScreen = () => {
       }
 
       // Success!
-      console.log("Account created successfully");
+      console.log("Account created successfully for UID:", firebaseUser.uid);
       Alert.alert(
         "Account Successfully Created",
         "Your account has been created successfully. Please sign in to continue.",
         [
           {
             text: "OK",
-            onPress: () => navigation.navigate("Splash"), // Navigate to login screen
+            onPress: () => navigation.navigate("Splash"),
           },
         ]
       );
@@ -195,6 +276,19 @@ const SignUpScreen = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const getInputStyle = (hasError, isValid, isChecking) => {
+    if (isChecking) {
+      return [styles.input, styles.inputChecking];
+    }
+    if (hasError) {
+      return [styles.input, styles.inputError];
+    }
+    if (isValid) {
+      return [styles.input, styles.inputValid];
+    }
+    return styles.input;
   };
 
   return (
@@ -213,13 +307,38 @@ const SignUpScreen = () => {
           <View style={styles.formContainer}>
             <Text style={styles.formTitle}>Create Your Account</Text>
 
-            <TextInput
-              style={[styles.input, isLoading && styles.inputDisabled]}
-              placeholder="Username"
-              value={username}
-              onChangeText={setUsername}
-              editable={!isLoading}
-            />
+            {/* Username Input */}
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={[
+                  getInputStyle(
+                    usernameError,
+                    usernameValid,
+                    isCheckingUsername
+                  ),
+                  isLoading && styles.inputDisabled,
+                ]}
+                placeholder="Username"
+                value={username}
+                onChangeText={handleUsernameChange}
+                editable={!isLoading}
+                autoCapitalize="none"
+              />
+              {isCheckingUsername && (
+                <ActivityIndicator
+                  size="small"
+                  color="#4A90E2"
+                  style={styles.inputIcon}
+                />
+              )}
+              {!isCheckingUsername && usernameValid && (
+                <Text style={styles.checkIcon}>✓</Text>
+              )}
+              {usernameError ? (
+                <Text style={styles.errorText}>{usernameError}</Text>
+              ) : null}
+            </View>
+
             <TextInput
               style={[styles.input, isLoading && styles.inputDisabled]}
               placeholder="Full Name"
@@ -227,18 +346,39 @@ const SignUpScreen = () => {
               onChangeText={setName}
               editable={!isLoading}
             />
+
+            {/* Email Input */}
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={[
+                  getInputStyle(emailError, emailValid, isCheckingEmail),
+                  isLoading && styles.inputDisabled,
+                ]}
+                placeholder="Email"
+                value={email}
+                onChangeText={handleEmailChange}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                editable={!isLoading}
+              />
+              {isCheckingEmail && (
+                <ActivityIndicator
+                  size="small"
+                  color="#4A90E2"
+                  style={styles.inputIcon}
+                />
+              )}
+              {!isCheckingEmail && emailValid && (
+                <Text style={styles.checkIcon}>✓</Text>
+              )}
+              {emailError ? (
+                <Text style={styles.errorText}>{emailError}</Text>
+              ) : null}
+            </View>
+
             <TextInput
               style={[styles.input, isLoading && styles.inputDisabled]}
-              placeholder="Email"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              editable={!isLoading}
-            />
-            <TextInput
-              style={[styles.input, isLoading && styles.inputDisabled]}
-              placeholder="Password"
+              placeholder="Password (minimum 6 characters)"
               value={password}
               onChangeText={setPassword}
               secureTextEntry
@@ -247,9 +387,12 @@ const SignUpScreen = () => {
           </View>
 
           <TouchableOpacity
-            style={[styles.signUpButton, isLoading && styles.buttonDisabled]}
+            style={[
+              styles.signUpButton,
+              (isLoading || !isFormValid()) && styles.buttonDisabled,
+            ]}
             onPress={handleSignUp}
-            disabled={isLoading}
+            disabled={isLoading || !isFormValid()}
           >
             {isLoading ? (
               <View style={styles.loadingContainer}>
@@ -268,7 +411,7 @@ const SignUpScreen = () => {
               <Text
                 style={[
                   styles.buttonText,
-                  isLoading && styles.buttonTextDisabled,
+                  !isFormValid() && styles.buttonTextDisabled,
                 ]}
               >
                 Sign Up
@@ -321,6 +464,10 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     textAlign: "center",
   },
+  inputContainer: {
+    position: "relative",
+    marginBottom: 12,
+  },
   input: {
     backgroundColor: "white",
     borderWidth: 1,
@@ -334,6 +481,37 @@ const styles = StyleSheet.create({
   inputDisabled: {
     backgroundColor: "#f8f8f8",
     color: "#999",
+  },
+  inputError: {
+    borderColor: "#ff4444",
+    marginBottom: 4,
+  },
+  inputValid: {
+    borderColor: "#4CAF50",
+    marginBottom: 4,
+  },
+  inputChecking: {
+    borderColor: "#4A90E2",
+    marginBottom: 4,
+  },
+  inputIcon: {
+    position: "absolute",
+    right: 15,
+    top: 15,
+  },
+  checkIcon: {
+    position: "absolute",
+    right: 15,
+    top: 15,
+    color: "#4CAF50",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  errorText: {
+    color: "#ff4444",
+    fontSize: 12,
+    marginBottom: 8,
+    paddingHorizontal: 4,
   },
   signUpButton: {
     backgroundColor: "#4A90E2",

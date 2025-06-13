@@ -470,23 +470,8 @@ const ProfileScreen = () => {
 
           {/* Profile Header Content */}
           <View style={styles.profileHeader}>
-            {/* Edit Profile Image Button - Top Right */}
-            {isOwnProfile && (
-              <TouchableOpacity
-                onPress={handlePickImage}
-                style={styles.editImageButtonTopRight}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="camera" size={20} color={COLORS.white} />
-              </TouchableOpacity>
-            )}
-
             {/* Profile Image with Ring */}
-            <TouchableOpacity
-              onPress={isOwnProfile ? handlePickImage : undefined}
-              activeOpacity={isOwnProfile ? 0.6 : 1}
-              style={styles.profileImageWrapper}
-            >
+            <View style={styles.profileImageWrapper}>
               {/* Profile Ring */}
               {equippedItems.profile_ring &&
                 hasItemImage(equippedItems.profile_ring.image_url) && (
@@ -514,7 +499,18 @@ const ProfileScreen = () => {
                   />
                 )}
               </View>
-            </TouchableOpacity>
+
+              {/* Camera button positioned near the profile circle */}
+              {isOwnProfile && (
+                <TouchableOpacity
+                  onPress={handlePickImage}
+                  style={styles.editImageButtonNearProfile}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="camera" size={18} color={COLORS.white} />
+                </TouchableOpacity>
+              )}
+            </View>
 
             {/* Profile Name with Edit and Logout Buttons */}
             <View style={styles.nameContainer}>
@@ -866,18 +862,6 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
     position: "relative",
   },
-  editImageButtonTopRight: {
-    position: "absolute",
-    top: 20,
-    right: 20,
-    backgroundColor: "rgba(0, 0, 0, 0.6)",
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 10,
-  },
   profileImageWrapper: {
     position: "relative",
     width: 120,
@@ -912,6 +896,26 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "rgba(0,0,0,0.3)",
+  },
+  // New camera button style positioned near profile circle
+  editImageButtonNearProfile: {
+    position: "absolute",
+    bottom: -5,
+    right: -5,
+    backgroundColor: COLORS.primary,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: COLORS.white,
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    zIndex: 10,
   },
   // Name and username
   nameContainer: {

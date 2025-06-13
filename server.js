@@ -64,23 +64,23 @@ app.get('/api/test', (req, res) => {
 });
 
 // Import route modules
-// Import route modules
 const communityRoutes = require('./routes/community')(pool, authenticateFirebaseToken);
 const postsRoutes = require('./routes/posts')(pool, authenticateFirebaseToken);
 const commentsRoutes = require('./routes/comments')(pool, authenticateFirebaseToken);
 const itemShopRouter = require('./routes/itemshop')(pool, authenticateFirebaseToken);
 const profileRoutes = require('./routes/profile')(pool, authenticateFirebaseToken);
-const achievementRoutes = require('./routes/achievements')(pool, authenticateFirebaseToken); // Add this line
+const achievementRoutes = require('./routes/achievements')(pool, authenticateFirebaseToken);
 const communityRequestsRoutes = require('./routes/communityRequests')(pool, authenticateFirebaseToken);
 
 // Use route modules
 app.use('/api/communities', communityRoutes);
 app.use('/api/posts', postsRoutes);
 app.use('/api/comments', commentsRoutes);
-app.use('/api/items', itemShopRouter);  // Mount at /api/items instead of /api
+app.use('/api/items', itemShopRouter);
 app.use('/api/profile', profileRoutes); 
-app.use('/api/achievements', achievementRoutes); // Add this line // Mount at /api/items instead of /api
+app.use('/api/achievements', achievementRoutes);
 app.use('/api/community-requests', communityRequestsRoutes);
+
 // ==== USER ROUTES ====
 
 app.get('/api/users', async (req, res) => {
@@ -128,7 +128,7 @@ app.post('/api/users', async (req, res) => {
     password = null,
     level = 1,
     xp_points = 0,
-    future_coins = 0,
+    future_coins = 0, // This will be ignored, always start with 0
     profile_image = null,
     created_at = new Date(),
     last_login = null
@@ -147,12 +147,148 @@ app.post('/api/users', async (req, res) => {
     await pool.query(
       `INSERT INTO users (user_id, username, name, email, password, level, xp_points, future_coins, profile_image, created_at, last_login)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [user_id, username, name, email, password, level, xp_points, future_coins, profile_image, created_at, last_login]
+      [user_id, username, name, email, password, level, xp_points, 0, profile_image, created_at, last_login] // Force 0 coins
     );
     res.status(201).json({ message: 'User created successfully' });
   } catch (error) {
     console.error('MySQL insert error:', error);
     res.status(500).json({ error: 'Database insert failed', details: error.message });
+  }
+});
+
+// Add these endpoints to your existing server.js file
+// Place them after the existing user routes (around line 150-200)
+
+// ==== VALIDATION ROUTES ====
+
+// Check if username is available
+app.post('/api/check-username', async (req, res) => {
+  try {
+    const { username } = req.body;
+    
+    if (!username) {
+      return res.status(400).json({ error: 'Username is required' });
+    }
+    
+    // Validate username format
+    if (username.length < 3) {
+      return res.json({ available: false, reason: 'Username must be at least 3 characters' });
+    }
+    
+    // Check for valid characters (alphanumeric and underscore only)
+    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+      return res.json({ 
+        available: false, 
+        reason: 'Username can only contain letters, numbers, and underscores' 
+      });
+    }
+    
+    // Check if username exists in database
+    const [rows] = await pool.query(
+      'SELECT COUNT(*) as count FROM users WHERE username = ?',
+      [username]
+    );
+    
+    const isAvailable = rows[0].count === 0;
+    
+    res.json({ 
+      available: isAvailable,
+      reason: isAvailable ? null : 'Username is already taken'
+    });
+  } catch (error) {
+    console.error('Error checking username:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+// Check if email is available
+app.post('/api/check-email', async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+    
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.json({ 
+        available: false, 
+        reason: 'Please enter a valid email address' 
+      });
+    }
+    
+    // Check if email exists in database
+    const [rows] = await pool.query(
+      'SELECT COUNT(*) as count FROM users WHERE email = ?',
+      [email]
+    );
+    
+    const isAvailable = rows[0].count === 0;
+    
+    res.json({ 
+      available: isAvailable,
+      reason: isAvailable ? null : 'Email is already registered'
+    });
+  } catch (error) {
+    console.error('Error checking email:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+// Batch validation endpoint (optional - for checking both at once)
+app.post('/api/validate-signup', async (req, res) => {
+  try {
+    const { username, email } = req.body;
+    
+    if (!username || !email) {
+      return res.status(400).json({ error: 'Username and email are required' });
+    }
+    
+    const results = {};
+    
+    // Check username
+    if (username.length < 3) {
+      results.username = { available: false, reason: 'Username must be at least 3 characters' };
+    } else if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+      results.username = { 
+        available: false, 
+        reason: 'Username can only contain letters, numbers, and underscores' 
+      };
+    } else {
+      const [usernameRows] = await pool.query(
+        'SELECT COUNT(*) as count FROM users WHERE username = ?',
+        [username]
+      );
+      results.username = {
+        available: usernameRows[0].count === 0,
+        reason: usernameRows[0].count === 0 ? null : 'Username is already taken'
+      };
+    }
+    
+    // Check email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      results.email = { 
+        available: false, 
+        reason: 'Please enter a valid email address' 
+      };
+    } else {
+      const [emailRows] = await pool.query(
+        'SELECT COUNT(*) as count FROM users WHERE email = ?',
+        [email]
+      );
+      results.email = {
+        available: emailRows[0].count === 0,
+        reason: emailRows[0].count === 0 ? null : 'Email is already registered'
+      };
+    }
+    
+    res.json(results);
+  } catch (error) {
+    console.error('Error validating signup data:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
@@ -179,7 +315,7 @@ app.put('/api/users/:userId/stats', async (req, res) => {
     if (checkUser[0].count === 0) {
       // User doesn't exist, create a new user
       try {
-        // Create user in database
+        // Create user in database - START WITH 0 COINS
         await connection.query(
           `INSERT INTO users (user_id, username, name, email, profile_image, level, xp_points, future_coins, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -191,10 +327,19 @@ app.put('/api/users/:userId/stats', async (req, res) => {
             null,
             1,
             xp_points_to_add || 0,
-            future_coins_to_add || 0,
+            0, // Always start with 0 coins
             new Date()
           ]
         );
+        
+        // Now add the coins if any
+        const finalCoins = (future_coins_to_add || 0);
+        if (finalCoins > 0) {
+          await connection.query(
+            'UPDATE users SET future_coins = ? WHERE user_id = ?',
+            [finalCoins, userId]
+          );
+        }
         
         await connection.commit();
         
@@ -202,7 +347,7 @@ app.put('/api/users/:userId/stats', async (req, res) => {
           user_id: userId,
           level: 1,
           xp_points: xp_points_to_add || 0,
-          future_coins: future_coins_to_add || 0,
+          future_coins: finalCoins,
           leveledUp: false
         });
       } catch (createError) {
@@ -221,7 +366,7 @@ app.put('/api/users/:userId/stats', async (req, res) => {
     const currentUser = userData[0];
     
     // Calculate new XP and level
-    let newXpPoints = currentUser.xp_points + xp_points_to_add;
+    let newXpPoints = currentUser.xp_points + (xp_points_to_add || 0);
     let newLevel = currentUser.level;
     
     // Check for level up (every 100 XP)
@@ -232,7 +377,7 @@ app.put('/api/users/:userId/stats', async (req, res) => {
     }
     
     // Calculate new coins
-    const newCoins = currentUser.future_coins + future_coins_to_add;
+    const newCoins = currentUser.future_coins + (future_coins_to_add || 0);
     
     // Update user in database
     await connection.query(
@@ -341,7 +486,7 @@ app.get('/api/users/:userId/streak', async (req, res) => {
     `, [userId]);
     
     if (userCheck[0].count === 0) {
-      // User doesn't exist, create them
+      // User doesn't exist, create them with 0 coins
       try {
         await pool.execute(`
           INSERT INTO users (user_id, username, name, email, profile_image, level, xp_points, future_coins, created_at)
@@ -352,7 +497,10 @@ app.get('/api/users/:userId/streak', async (req, res) => {
           'User',
           `${userId}@example.com`,
           null,
-          1, 0, 0, new Date()
+          1, 
+          0, 
+          0, // Start with 0 coins
+          new Date()
         ]);
         
         console.log(`Created user: ${userId}`);
@@ -421,7 +569,7 @@ app.put('/api/users/:userId/streak', async (req, res) => {
     `, [userId]);
     
     if (userCheck[0].count === 0) {
-      // User doesn't exist, create a new user
+      // User doesn't exist, create a new user with 0 coins
       try {
         await connection.execute(`
           INSERT INTO users (user_id, username, name, email, profile_image, level, xp_points, future_coins, created_at)
@@ -432,7 +580,10 @@ app.put('/api/users/:userId/streak', async (req, res) => {
           'User',
           `${userId}@example.com`,
           null,
-          1, 0, 0, new Date()
+          1, 
+          0, 
+          0, // Start with 0 coins
+          new Date()
         ]);
         
         console.log(`Created user: ${userId}`);
@@ -709,7 +860,7 @@ app.post('/api/goals', async (req, res) => {
       [userId]
     );
     
-    // If user doesn't exist, create user
+    // If user doesn't exist, create user with 0 coins
     if (userRows[0].count === 0) {
       console.log(`User ${userId} doesn't exist, creating user...`);
       
@@ -725,7 +876,7 @@ app.post('/api/goals', async (req, res) => {
             null,
             1, // Default level
             0, // Default XP
-            0, // Default coins
+            0, // Always start with 0 coins
             new Date() // Current timestamp
           ]
         );
@@ -1214,7 +1365,7 @@ app.put('/api/users/:id/futurecoins', async (req, res) => {
     const [userCheck] = await pool.execute(`SELECT COUNT(*) as count FROM users WHERE user_id = ?`, [userId]);
     
     if (userCheck[0].count === 0) {
-      // User doesn't exist, create them
+      // User doesn't exist, create them starting with 0 coins
       try {
         await pool.execute(
           `INSERT INTO users (user_id, username, name, email, profile_image, level, xp_points, future_coins, created_at)
@@ -1225,14 +1376,23 @@ app.put('/api/users/:id/futurecoins', async (req, res) => {
             'User',
             `${userId}@example.com`,
             null,
-            1, // Default level
-            0, // Default XP
-            amount > 0 ? amount : 0, // Start with the amount if positive
-            new Date() // Current timestamp
+            1,
+            0,
+            0, // Start with 0, then add the amount
+            new Date()
           ]
         );
         
-        return res.json({ futureCoins: amount > 0 ? amount : 0 });
+        // Now add the coins if positive
+        if (amount > 0) {
+          await pool.execute(
+            `UPDATE users SET future_coins = ? WHERE user_id = ?`,
+            [amount, userId]
+          );
+          return res.json({ futureCoins: amount });
+        } else {
+          return res.json({ futureCoins: 0 });
+        }
       } catch (createError) {
         console.error('Error creating user:', createError);
         return res.status(500).json({ error: 'Failed to create user' });
@@ -1263,7 +1423,7 @@ app.put('/api/users/:id/xp', async (req, res) => {
     const [userCheck] = await pool.execute(`SELECT COUNT(*) as count FROM users WHERE user_id = ?`, [userId]);
     
     if (userCheck[0].count === 0) {
-      // User doesn't exist, create them
+      // User doesn't exist, create them with 0 coins
       try {
         await pool.execute(
           `INSERT INTO users (user_id, username, name, email, profile_image, level, xp_points, future_coins, created_at)
@@ -1274,10 +1434,10 @@ app.put('/api/users/:id/xp', async (req, res) => {
             'User',
             `${userId}@example.com`,
             null,
-            1, // Default level
-            amount > 0 ? amount : 0, // Start with the amount if positive
-            0, // Default coins
-            new Date() // Current timestamp
+            1,
+            amount > 0 ? amount : 0,
+            0, // Always start with 0 coins
+            new Date()
           ]
         );
         
@@ -1798,11 +1958,12 @@ app.delete('/api/admin/clear-goals', async (req, res) => {
     connection.release();
 
     app.listen(3001, '0.0.0.0', () => {
-      console.log(`\u2705 Server running on port 3001`);
-      console.log(`\u2705 Shop initialized and ready`);
+      console.log(`✅ Server running on port 3001`);
+      console.log(`✅ Shop initialized and ready`);
+      console.log(`✅ All users will start with 0 future coins`);
     });
   } catch (error) {
-    console.error('\u274C Unable to connect to database:', error);
+    console.error('❌ Unable to connect to database:', error);
     process.exit(1);
   }
 })();
