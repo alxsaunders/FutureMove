@@ -88,7 +88,7 @@ module.exports = (pool, authenticateFirebaseToken) => {
               `${userId}@example.com`,
               1, // Default level
               0, // Default XP
-              100, // Default coins
+              0, // Default coins
               new Date(), // Current timestamp
               0 // Default commends
             ]

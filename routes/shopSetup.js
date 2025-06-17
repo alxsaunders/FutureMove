@@ -120,7 +120,7 @@ async function initializeShopItems(pool) {
  * @param {string} userId - User ID
  * @param {number} coins - Amount of coins to ensure the user has (minimum)
  */
-async function ensureUserHasCoins(pool, userId, coins = 100) {
+async function ensureUserHasCoins(pool, userId, coins = 0) {
   console.log(`[SHOP DEBUG] Ensuring user ${userId} has at least ${coins} coins`);
   
   if (!userId) {
@@ -210,7 +210,7 @@ async function setupUserWithDefaultCoins(pool, userId) {
   
   try {
     // Default amount of FutureCoins for new users
-    const DEFAULT_COINS = 200;
+    const DEFAULT_COINS = 0;
     
     await ensureUserHasCoins(pool, userId, DEFAULT_COINS);
     console.log(`[SHOP DEBUG] User ${userId} set up with ${DEFAULT_COINS} FutureCoins`);
