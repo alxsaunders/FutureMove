@@ -197,7 +197,8 @@ const CommunityHubTab = () => {
         description: community.description || "",
         category: community.category || "General",
         members: community.memberCount || 0,
-        posts: 0,
+        // FIXED: Use the actual posts_count from the API response instead of hardcoded 0
+        posts: community.posts_count || community.postsCount || 0,
         image: community.imageUrl || "https://via.placeholder.com/150",
         isJoined: Boolean(community.isJoined),
       }));

@@ -13,6 +13,7 @@ export interface Community {
   createdAt: string;
   updatedAt: string;
   memberCount?: number;
+  postsCount?: number; // Added posts count property
   isJoined?: boolean;
 }
 
@@ -63,13 +64,17 @@ const transformCommunity = (community: any): Community | null => {
       memberCount: typeof community.member_count === 'number' ? community.member_count : 
                   typeof community.memberCount === 'number' ? community.memberCount : 
                   typeof community.members_count === 'number' ? community.members_count : 0,
+      // FIXED: Properly map posts count from all possible API response formats
+      postsCount: typeof community.posts_count === 'number' ? community.posts_count :
+                 typeof community.postsCount === 'number' ? community.postsCount :
+                 typeof community.post_count === 'number' ? community.post_count : 0,
       // FIXED: Ensure isJoined is properly interpreted from all possible formats
       isJoined: community.is_joined === true || community.is_joined === 1 || 
                 community.is_joined === "1" || community.isJoined === true ||
                 community.isJoined === 1 || community.isJoined === "1" || false
     };
 
-    console.log(`Transformed community ${transformedCommunity.id} with isJoined=${transformedCommunity.isJoined}`);
+    console.log(`Transformed community ${transformedCommunity.id} with isJoined=${transformedCommunity.isJoined}, postsCount=${transformedCommunity.postsCount}`);
     return transformedCommunity;
   } catch (error) {
     console.error('Error transforming community data:', error);
