@@ -26,8 +26,9 @@ interface CommunityPostItemProps {
   onLikePress: () => void;
   onCommentPress: () => void;
   onPostPress: () => void;
-  onSharePress?: (post: Post) => void;
   onUserPress?: (userId: string) => void;
+  onSharePress?: (post: Post) => void;
+  showShareButton?: boolean; // Optional prop to show/hide share button
 }
 
 // Enhanced Image Component with Firebase Storage support
@@ -193,8 +194,9 @@ const CommunityPostItem: React.FC<CommunityPostItemProps> = ({
   onLikePress,
   onCommentPress,
   onPostPress,
-  onSharePress,
   onUserPress,
+  onSharePress,
+  showShareButton = true, // DEFAULT: Show share button on all views
 }) => {
   // Format the date for display
   const formatPostDate = (dateString: string) => {
@@ -377,53 +379,51 @@ const CommunityPostItem: React.FC<CommunityPostItemProps> = ({
 
       {/* Post Actions */}
       <View style={styles.actions}>
-        <View style={styles.leftActions}>
-          {/* Like Button */}
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={handleActionPress(onLikePress)}
-            accessible={true}
-            accessibilityLabel={post.isLiked ? "Unlike post" : "Like post"}
-            accessibilityRole="button"
-          >
-            <Ionicons
-              name={post.isLiked ? "heart" : "heart-outline"}
-              size={22}
-              color={post.isLiked ? COLORS.primary : COLORS.textSecondary}
-            />
-            {post.likes > 0 && (
-              <Text
-                style={[
-                  styles.actionText,
-                  post.isLiked && { color: COLORS.primary },
-                ]}
-              >
-                {formatCount(post.likes)}
-              </Text>
-            )}
-          </TouchableOpacity>
+        {/* Like Button */}
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={handleActionPress(onLikePress)}
+          accessible={true}
+          accessibilityLabel={post.isLiked ? "Unlike post" : "Like post"}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name={post.isLiked ? "heart" : "heart-outline"}
+            size={22}
+            color={post.isLiked ? COLORS.primary : COLORS.textSecondary}
+          />
+          {post.likes > 0 && (
+            <Text
+              style={[
+                styles.actionText,
+                post.isLiked && { color: COLORS.primary },
+              ]}
+            >
+              {formatCount(post.likes)}
+            </Text>
+          )}
+        </TouchableOpacity>
 
-          {/* Comment Button */}
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={handleActionPress(onCommentPress)}
-            accessible={true}
-            accessibilityLabel={`View ${post.comments} comments`}
-            accessibilityRole="button"
-          >
-            <Ionicons
-              name="chatbubble-outline"
-              size={20}
-              color={COLORS.textSecondary}
-            />
-            {post.comments > 0 && (
-              <Text style={styles.actionText}>
-                {formatCount(post.comments)}
-              </Text>
-            )}
-          </TouchableOpacity>
+        {/* Comment Button */}
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={handleActionPress(onCommentPress)}
+          accessible={true}
+          accessibilityLabel={`View ${post.comments} comments`}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="chatbubble-outline"
+            size={20}
+            color={COLORS.textSecondary}
+          />
+          {post.comments > 0 && (
+            <Text style={styles.actionText}>{formatCount(post.comments)}</Text>
+          )}
+        </TouchableOpacity>
 
-          {/* Share Button */}
+        {/* Share Button - CONDITIONALLY RENDERED */}
+        {showShareButton && (
           <TouchableOpacity
             style={styles.actionButton}
             onPress={handleActionPress(handleShare)}
@@ -437,24 +437,9 @@ const CommunityPostItem: React.FC<CommunityPostItemProps> = ({
               color={COLORS.textSecondary}
             />
           </TouchableOpacity>
-        </View>
+        )}
 
-        {/* Bookmark Button */}
-        <TouchableOpacity
-          style={styles.bookmarkButton}
-          onPress={handleActionPress(() => {
-            console.log("Bookmark post:", post.id);
-          })}
-          accessible={true}
-          accessibilityLabel="Bookmark post"
-          accessibilityRole="button"
-        >
-          <Ionicons
-            name="bookmark-outline"
-            size={20}
-            color={COLORS.textSecondary}
-          />
-        </TouchableOpacity>
+        {/* BOOKMARK BUTTON COMPLETELY REMOVED */}
       </View>
 
       {/* Like summary (if there are likes) */}
@@ -604,17 +589,12 @@ const styles = StyleSheet.create({
   },
   actions: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: CONTAINER_HORIZONTAL_PADDING,
     paddingBottom: 12,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
     paddingTop: 12,
-  },
-  leftActions: {
-    flexDirection: "row",
-    alignItems: "center",
   },
   actionButton: {
     flexDirection: "row",
@@ -624,10 +604,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     borderRadius: 6,
     minHeight: 36,
-  },
-  bookmarkButton: {
-    padding: 8,
-    borderRadius: 6,
   },
   actionText: {
     fontSize: 14,

@@ -21,7 +21,10 @@ import {
   joinCommunity,
   leaveCommunity,
 } from "../services/CommunityService";
-import { fetchCommunityPosts } from "../services/CommunityPostService";
+import {
+  fetchCommunityPosts,
+  toggleLikePost as toggleLikePostAPI,
+} from "../services/CommunityPostService";
 import { Community, Post } from "../types";
 import CommunityPostItem from "../components/community/CommunityPostItem";
 
@@ -187,20 +190,77 @@ const CommunityDetailScreen = () => {
     }
   };
 
-  // Toggle like on a post
-  const handleLikePost = (postId: string) => {
-    setPosts((prevPosts) =>
-      prevPosts.map((post) =>
-        post.id === postId
-          ? {
-              ...post,
-              isLiked: !post.isLiked,
-              likes: post.isLiked ? post.likes - 1 : post.likes + 1,
-            }
-          : post
-      )
-    );
-  };
+  // FIXED: Toggle like on a post with proper API integration
+  const handleLikePost = useCallback(
+    async (postId: string) => {
+      console.log(`🔄 Toggling like for post: ${postId}`);
+
+      // Find the current post to get its like status
+      const currentPost = posts.find((post) => post.id === postId);
+      if (!currentPost) {
+        console.warn(`⚠️ Post ${postId} not found in current posts`);
+        return;
+      }
+
+      const isCurrentlyLiked = currentPost.isLiked;
+      console.log(`📝 Post ${postId} currently liked: ${isCurrentlyLiked}`);
+
+      // Optimistic update - update UI immediately
+      setPosts((prevPosts) =>
+        prevPosts.map((post) =>
+          post.id === postId
+            ? {
+                ...post,
+                isLiked: !post.isLiked,
+                likes: post.isLiked ? post.likes - 1 : post.likes + 1,
+              }
+            : post
+        )
+      );
+
+      try {
+        // Call the API to toggle like
+        const success = await toggleLikePostAPI(postId, isCurrentlyLiked);
+
+        if (success) {
+          console.log(`✅ Successfully toggled like for post: ${postId}`);
+        } else {
+          console.warn(
+            `⚠️ Failed to toggle like for post: ${postId}, reverting changes`
+          );
+
+          // Revert the optimistic update if API call failed
+          setPosts((prevPosts) =>
+            prevPosts.map((post) =>
+              post.id === postId
+                ? {
+                    ...post,
+                    isLiked: isCurrentlyLiked,
+                    likes: isCurrentlyLiked ? post.likes + 1 : post.likes - 1,
+                  }
+                : post
+            )
+          );
+        }
+      } catch (error) {
+        console.error(`❌ Error toggling like for post: ${postId}`, error);
+
+        // Revert the optimistic update on error
+        setPosts((prevPosts) =>
+          prevPosts.map((post) =>
+            post.id === postId
+              ? {
+                  ...post,
+                  isLiked: isCurrentlyLiked,
+                  likes: isCurrentlyLiked ? post.likes + 1 : post.likes - 1,
+                }
+              : post
+          )
+        );
+      }
+    },
+    [posts]
+  );
 
   if (isLoading) {
     return (
@@ -260,6 +320,7 @@ const CommunityDetailScreen = () => {
             onPostPress={() => {
               navigation.navigate("PostDetail", { postId: item.id });
             }}
+            // Share button enabled for community detail view
           />
         )}
         refreshControl={

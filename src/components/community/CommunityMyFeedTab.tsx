@@ -20,6 +20,7 @@ import { Post, Community } from "../../types";
 import {
   fetchFeedPosts,
   fetchCommunityPosts,
+  toggleLikePost as toggleLikePostAPI,
 } from "../../services/CommunityPostService";
 import { fetchJoinedCommunities } from "../../services/CommunityService";
 import { adaptCommunity } from "../../screens/CreatePostScreen";
@@ -320,22 +321,85 @@ const CommunityMyFeedTab = () => {
     setIsRefreshing(false);
   }, [fetchPosts]);
 
-  // Like/unlike a post with optimistic updates
-  const toggleLikePost = useCallback((postId: string) => {
-    const updatePosts = (prevPosts: Post[]) =>
-      prevPosts.map((post) =>
-        post.id === postId
-          ? {
-              ...post,
-              isLiked: !post.isLiked,
-              likes: post.isLiked ? post.likes - 1 : post.likes + 1,
-            }
-          : post
-      );
+  // FIXED: Like/unlike a post with proper API integration
+  const toggleLikePost = useCallback(
+    async (postId: string) => {
+      console.log(`🔄 Toggling like for post: ${postId}`);
 
-    setPosts(updatePosts);
-    setAllPosts(updatePosts);
-  }, []);
+      // Find the current post to get its like status
+      const currentPost = [...posts, ...allPosts].find(
+        (post) => post.id === postId
+      );
+      if (!currentPost) {
+        console.warn(`⚠️ Post ${postId} not found in current posts`);
+        return;
+      }
+
+      const isCurrentlyLiked = currentPost.isLiked;
+      console.log(`📝 Post ${postId} currently liked: ${isCurrentlyLiked}`);
+
+      // Optimistic update - update UI immediately
+      const updatePosts = (prevPosts: Post[]) =>
+        prevPosts.map((post) =>
+          post.id === postId
+            ? {
+                ...post,
+                isLiked: !post.isLiked,
+                likes: post.isLiked ? post.likes - 1 : post.likes + 1,
+              }
+            : post
+        );
+
+      setPosts(updatePosts);
+      setAllPosts(updatePosts);
+
+      try {
+        // Call the API to toggle like
+        const success = await toggleLikePostAPI(postId, isCurrentlyLiked);
+
+        if (success) {
+          console.log(`✅ Successfully toggled like for post: ${postId}`);
+        } else {
+          console.warn(
+            `⚠️ Failed to toggle like for post: ${postId}, reverting changes`
+          );
+
+          // Revert the optimistic update if API call failed
+          const revertPosts = (prevPosts: Post[]) =>
+            prevPosts.map((post) =>
+              post.id === postId
+                ? {
+                    ...post,
+                    isLiked: isCurrentlyLiked,
+                    likes: isCurrentlyLiked ? post.likes + 1 : post.likes - 1,
+                  }
+                : post
+            );
+
+          setPosts(revertPosts);
+          setAllPosts(revertPosts);
+        }
+      } catch (error) {
+        console.error(`❌ Error toggling like for post: ${postId}`, error);
+
+        // Revert the optimistic update on error
+        const revertPosts = (prevPosts: Post[]) =>
+          prevPosts.map((post) =>
+            post.id === postId
+              ? {
+                  ...post,
+                  isLiked: isCurrentlyLiked,
+                  likes: isCurrentlyLiked ? post.likes + 1 : post.likes - 1,
+                }
+              : post
+          );
+
+        setPosts(revertPosts);
+        setAllPosts(revertPosts);
+      }
+    },
+    [posts, allPosts]
+  );
 
   // Handle user profile navigation
   const handleUserPress = useCallback((userId: string) => {
@@ -345,11 +409,7 @@ const CommunityMyFeedTab = () => {
     }
   }, []);
 
-  // Handle post sharing
-  const handleSharePost = useCallback((post: Post) => {
-    console.log(`Sharing post: ${post.id}`);
-    // Custom share logic here if needed
-  }, []);
+  // REMOVED: handleSharePost function (no longer needed)
 
   // Toggle community selection
   const toggleCommunitySelection = (communityId: string) => {
@@ -574,7 +634,7 @@ const CommunityMyFeedTab = () => {
         onCommentPress={() => navigateToPostDetail(item.id)}
         onPostPress={() => navigateToPostDetail(item.id)}
         onUserPress={handleUserPress}
-        onSharePress={handleSharePost}
+        // Share button enabled for MyFeed view
       />
     );
   };
