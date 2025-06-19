@@ -1,4 +1,4 @@
-// Fixed version of GoalService.ts with getUserStreaks function added back
+// Complete Fixed GoalService.ts with proper goal editing functionality
 import { Goal } from '../types';
 import { Platform } from 'react-native';
 import { auth } from '../config/firebase.js';
@@ -13,7 +13,7 @@ export const getApiBaseUrl = () => {
   }
 };
 
-// Helper function to get current user ID from Frirebase
+// Helper function to get current user ID from Firebase
 export const getCurrentUserId = async (): Promise<string> => {
   const currentUser = auth.currentUser;
   if (currentUser) {
@@ -247,6 +247,108 @@ export const fetchGoalById = async (goalId: number): Promise<Goal | null> => {
   }
 };
 
+// FIXED: Update a goal with proper PATCH method and field mapping
+export const updateGoal = async (goal: Goal): Promise<boolean> => {
+  try {
+    console.log(`Updating goal with ID: ${goal.id}`);
+    
+    // Validate input
+    if (!goal || !goal.id) {
+      console.warn('Invalid goal for update', goal);
+      return false;
+    }
+    
+    // For local goals (with negative IDs), just return success
+    if (goal.id < 0) {
+      console.log(`Cannot update server for local goal ID: ${goal.id}`);
+      return true; // Return success for UI update
+    }
+    
+    // Prepare routine days - convert to json string if needed
+    let routineDaysString: string | null = null;
+    if (goal.isDaily && goal.routineDays && goal.routineDays.length > 0) {
+      routineDaysString = JSON.stringify(goal.routineDays);
+    } else if (goal.isDaily) {
+      // If it's daily but no specific days selected, default to all days
+      routineDaysString = JSON.stringify([0, 1, 2, 3, 4, 5, 6]);
+    }
+    
+    // Prepare API payload - match the server's expected field names
+    const payload = {
+      title: goal.title,
+      description: goal.description || '',
+      target_date: goal.targetDate || goal.startDate || new Date().toISOString().split('T')[0],
+      is_daily: goal.isDaily ? 1 : 0,
+      category: goal.category || 'Personal',
+      coin_reward: goal.coinReward || 10,
+      routine_days: routineDaysString,
+      type: goal.type || (goal.isDaily ? 'recurring' : 'one-time')
+    };
+    
+    console.log('Update payload:', payload);
+    
+    // Add timeout to prevent hanging requests
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    
+    // Make API request using PATCH method (as expected by server)
+    const apiUrl = getApiBaseUrl();
+    const res = await fetch(`${apiUrl}/goals/${goal.id}`, {
+      method: 'PATCH', // Changed from PUT to PATCH
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    
+    // Check response
+    if (!res.ok) {
+      console.warn(`Error updating goal: ${res.status} ${res.statusText}`);
+      
+      // Try to get error details from response
+      try {
+        const errorData = await res.text();
+        console.warn('Server error details:', errorData);
+      } catch (e) {
+        console.warn('Could not parse error response');
+      }
+      
+      // For connectivity issues, still return success for optimistic UI update
+      if (res.status === 0 || res.status >= 500) {
+        console.log('Server error during update, using optimistic update');
+        return true;
+      }
+      
+      return false;
+    }
+    
+    // Parse response
+    try {
+      const data = await res.json();
+      console.log(`Goal updated successfully, ID: ${goal.id}`, data);
+      return true;
+    } catch (parseError) {
+      console.error('Error parsing update response:', parseError);
+      // Still return true if server returned OK but parsing failed
+      return true;
+    }
+  } catch (err) {
+    // Handle fetch timeout/abort error specifically
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      console.error(`Fetch request for goal update ${goal.id} timed out`);
+    } else {
+      console.error(`Error updating goal with ID: ${goal.id}`, err);
+    }
+    
+    // For network errors, still return success for optimistic UI update
+    return true;
+  }
+};
+
 // ENHANCED: Update a goal's progress with improved data validation and fallback
 export const updateGoalProgress = async (goalId: number, progress: number): Promise<Goal | null> => {
   try {
@@ -424,97 +526,6 @@ export const updateGoalProgress = async (goalId: number, progress: number): Prom
     return null;
   }
 };
-export const updateGoal = async (goal: Goal): Promise<boolean> => {
-  try {
-    console.log(`Updating goal with ID: ${goal.id}`);
-    
-    // Validate input
-    if (!goal || !goal.id) {
-      console.warn('Invalid goal for update', goal);
-      return false;
-    }
-    
-    // For local goals (with negative IDs), just return success
-    if (goal.id < 0) {
-      console.log(`Cannot update server for local goal ID: ${goal.id}`);
-      return true; // Return success for UI update
-    }
-    
-    // Prepare routine days - convert to json string if needed
-    let routineDaysString: string | null = null;
-    if (goal.isDaily && goal.routineDays) {
-      routineDaysString = JSON.stringify(goal.routineDays);
-    }
-    
-    // Prepare API payload
-    const payload = {
-      title: goal.title,
-      description: goal.description || '',
-      target_date: goal.targetDate || goal.startDate || new Date().toISOString().split('T')[0],
-      progress: goal.progress,
-      is_completed: goal.isCompleted ? 1 : 0,
-      is_daily: goal.isDaily ? 1 : 0,
-      category: goal.category || 'Personal',
-      coin_reward: goal.coinReward || 10,
-      routine_days: routineDaysString,
-      type: goal.type || (goal.isDaily ? 'recurring' : 'one-time'),
-      // Preserve existing last_completed date if present
-      last_completed: goal.lastCompleted,
-    };
-    
-    // Add timeout to prevent hanging requests
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-    
-    // Make API request
-    const apiUrl = getApiBaseUrl();
-    const res = await fetch(`${apiUrl}/goals/${goal.id}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}`
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    });
-    
-    clearTimeout(timeoutId);
-    
-    // Check response
-    if (!res.ok) {
-      console.warn(`Error updating goal: ${res.status} ${res.statusText}`);
-      
-      // For connectivity issues, still return success for optimistic UI update
-      if (res.status === 0 || res.status >= 500) {
-        console.log('Server error during update, using optimistic update');
-        return true;
-      }
-      
-      return false;
-    }
-    
-    // Parse response
-    try {
-      const data = await res.json();
-      console.log(`Goal updated successfully, ID: ${goal.id}`);
-      return true;
-    } catch (parseError) {
-      console.error('Error parsing update response:', parseError);
-      // Still return true if server returned OK but parsing failed
-      return true;
-    }
-  } catch (err) {
-    // Handle fetch timeout/abort error specifically
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      console.error(`Fetch request for goal update ${goal.id} timed out`);
-    } else {
-      console.error(`Error updating goal with ID: ${goal.id}`, err);
-    }
-    
-    // For network errors, still return success for optimistic UI update
-    return true;
-  }
-};
 
 // Delete goal function
 export const deleteGoal = async (goalId: number): Promise<boolean> => {
@@ -618,7 +629,7 @@ export const isGoalActiveToday = (goal: Goal): boolean => {
   }
 };
 
-// ADDED BACK: Get user's streak function that was missing
+// Get user's streak function
 export const getUserStreaks = async (): Promise<number> => {
   try {
     // Get user ID from Firebase
@@ -861,7 +872,7 @@ export const canClaimRewardsForGoal = (goal: Goal): boolean => {
   return true;
 };
 
-// ADDED BACK: Get user's coin balance function that was missing
+// Get user's coin balance function
 export const getUserFutureCoins = async (): Promise<number> => {
   try {
     // Get user ID from Firebase
@@ -1151,6 +1162,7 @@ export const getTodaysGoals = async (): Promise<Goal[]> => {
     return [];
   }
 };
+
 /**
  * Update user's FutureCoins balance
  * @param userId User ID

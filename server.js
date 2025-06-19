@@ -824,11 +824,31 @@ app.get('/api/goals/:id', async (req, res) => {
     // Add type field
     goal.type = goal.is_daily === 1 ? 'recurring' : 'one-time';
     
-    // Add targetDate
+    // Add targetDate and startDate for compatibility
     goal.targetDate = goal.target_date ? new Date(goal.target_date).toISOString().split('T')[0] : null;
+    goal.startDate = goal.target_date ? new Date(goal.target_date).toISOString().split('T')[0] : null;
     
-    goal.subgoals = subgoals;
-    res.json(goal);
+    // Transform to match frontend Goal type format
+    const responseGoal = {
+      id: goal.goal_id,
+      title: goal.title,
+      description: goal.description,
+      category: goal.category,
+      color: getCategoryColor(goal.category), // Add color based on category
+      isCompleted: goal.is_completed === 1,
+      isDaily: goal.is_daily === 1,
+      progress: goal.progress,
+      startDate: goal.startDate,
+      targetDate: goal.targetDate,
+      userId: goal.user_id,
+      coinReward: goal.coin_reward,
+      routineDays: goal.routineDays || [],
+      type: goal.type,
+      lastCompleted: goal.last_completed || undefined,
+      subgoals: subgoals
+    };
+    
+    res.json(responseGoal);
   } catch (error) {
     console.error('Error fetching goal by ID:', error);
     res.status(500).json({ error: 'Internal server error', details: error.message });
