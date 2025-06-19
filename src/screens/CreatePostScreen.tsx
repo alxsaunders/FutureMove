@@ -25,13 +25,9 @@ import { auth } from "../config/firebase";
 import {
   getStorage,
   ref,
-  uploadBytes,
+  uploadBytesResumable,
   getDownloadURL,
-  deleteObject,
 } from "firebase/storage";
-
-// Fixed user ID for development/testing
-const FALLBACK_USER_ID = "KbtY3t4Tatd0r5tCjnjlmJyoNT5R2";
 
 // Define interface for route params
 interface RouteParams {
@@ -53,7 +49,7 @@ export const adaptCommunity = (apiCommunity: any): Community => {
   };
 };
 
-const CreatePostScreen = () => {
+const CreatePostScreen: React.FC = () => {
   const { currentUser } = useAuth();
   const navigation = useNavigation();
   const route = useRoute();
@@ -62,6 +58,9 @@ const CreatePostScreen = () => {
 
   const [postContent, setPostContent] = useState("");
   const [selectedImage, setSelectedImage] = useState<string | undefined>(
+    undefined
+  );
+  const [selectedImageBlob, setSelectedImageBlob] = useState<Blob | undefined>(
     undefined
   );
   const [uploadedImageUrl, setUploadedImageUrl] = useState<string | undefined>(
@@ -79,7 +78,7 @@ const CreatePostScreen = () => {
   const [authChecked, setAuthChecked] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
 
-  // Authentication check effect
+  // Authentication check effect - require real user authentication
   useEffect(() => {
     let resolvedUserId = null;
 
@@ -90,8 +89,8 @@ const CreatePostScreen = () => {
       resolvedUserId = auth.currentUser.uid;
       console.log(`User found from Firebase: ${resolvedUserId}`);
     } else {
-      resolvedUserId = FALLBACK_USER_ID;
-      console.log(`No user ID found, using fallback: ${FALLBACK_USER_ID}`);
+      console.log("No authenticated user found - user must log in");
+      resolvedUserId = null;
     }
 
     setUserId(resolvedUserId);
@@ -165,12 +164,11 @@ const CreatePostScreen = () => {
     }
   }, [fetchUserCommunities, authChecked]);
 
-  // Enhanced URI to Blob conversion with React Native compatible approach
+  // Convert URI to Blob (same as ProfileService.ts)
   const uriToBlob = async (uri: string): Promise<Blob> => {
     console.log("🔄 Converting URI to blob:", uri);
 
     try {
-      // Use fetch API which works better with React Native file URIs
       const response = await fetch(uri);
 
       if (!response.ok) {
@@ -195,33 +193,31 @@ const CreatePostScreen = () => {
     }
   };
 
-  // Enhanced Firebase upload with better error handling and progress tracking
-  const uploadImageToFirebase = async (imageUri: string) => {
+  // Upload image using ProfileService.ts method BUT for posts folder
+  const uploadPostImage = async (imageUri: string) => {
     if (!userId) {
       Alert.alert("Error", "You need to be logged in to upload images");
       return;
     }
 
-    console.log("🚀 Starting Firebase upload process");
-    console.log("📁 Image URI:", imageUri);
-    console.log("👤 User ID:", userId);
-
+    console.log("🚀 Starting post image upload using ProfileService pattern");
     setIsUploading(true);
     setUploadProgress(0);
 
     try {
-      // Step 1: Convert URI to blob
-      console.log("📤 Step 1: Converting image to blob...");
+      // Step 1: Convert URI to blob (same as ProfileService)
+      console.log("📤 Converting image to blob...");
       const blob = await uriToBlob(imageUri);
       setUploadProgress(20);
 
-      // Step 2: Validate blob
+      // Step 2: Validate blob (same as ProfileService)
       if (!blob || blob.size === 0) {
-        throw new Error("Image blob is empty or invalid");
+        throw new Error("Invalid image data");
       }
 
+      // Size validation - limit to 5MB (same as ProfileService)
       if (blob.size > 5 * 1024 * 1024) {
-        throw new Error("Image is too large (maximum 5MB allowed)");
+        throw new Error("Image is too large (over 5MB)");
       }
 
       console.log("✅ Blob validation passed:", {
@@ -230,72 +226,90 @@ const CreatePostScreen = () => {
       });
       setUploadProgress(30);
 
-      // Step 3: Generate unique filename (matching current working format)
+      // Step 3: Generate filename for posts (different from profile)
       const timestamp = Date.now();
       const randomSuffix = Math.random().toString(36).substring(2, 15);
-      const fileName = `post_${timestamp}_${randomSuffix}.jpg`;
+      const fileName = `post_${userId}_${timestamp}_${randomSuffix}.jpg`;
 
       console.log("📝 Generated filename:", fileName);
       setUploadProgress(40);
 
-      // Step 4: Get Firebase Storage instance and create reference
-      // Structure: posts/userId/post_timestamp_random.jpg
+      // Step 4: Get Firebase Storage instance (same as ProfileService)
       const storage = getStorage();
-      const imagePath = `posts/${userId}/${fileName}`;
-      const imageRef = ref(storage, imagePath);
-
-      console.log("🗂️ Firebase reference created:", imagePath);
-      setUploadProgress(50);
-
-      // Step 5: Upload to Firebase Storage
-      console.log("⬆️ Starting upload to Firebase Storage...");
-      const uploadResult = await uploadBytes(imageRef, blob);
-
-      console.log("✅ Upload completed:", {
-        fullPath: uploadResult.metadata.fullPath,
-        size: uploadResult.metadata.size,
-        bucket: uploadResult.metadata.bucket,
-        storagePath: imagePath,
-      });
-      setUploadProgress(80);
-
-      // Step 6: Get download URL
-      console.log("🔗 Getting download URL...");
-      const downloadURL = await getDownloadURL(uploadResult.ref);
-
-      console.log("✅ Download URL obtained:", downloadURL);
-      setUploadProgress(100);
-
-      // Validate the download URL
-      if (
-        !downloadURL ||
-        !downloadURL.includes("firebasestorage.googleapis.com")
-      ) {
-        throw new Error("Invalid download URL received from Firebase");
+      if (!storage) {
+        throw new Error("Firebase Storage not initialized");
       }
 
-      // Step 7: Set the uploaded URL
-      setUploadedImageUrl(downloadURL);
+      console.log("🗂️ Creating storage reference for posts folder");
+      // Use posts folder instead of profile_images
+      const storageRef = ref(storage, `posts/${fileName}`);
+      setUploadProgress(50);
 
-      console.log("🎉 Firebase upload process completed successfully!");
-      console.log("🔗 Final URL:", downloadURL);
+      // Step 5: Upload with retry logic (EXACTLY like ProfileService)
+      let attempts = 0;
+      const maxAttempts = 3;
+      let uploadError = null;
+
+      while (attempts < maxAttempts) {
+        try {
+          console.log(`Upload attempt ${attempts + 1} of ${maxAttempts}`);
+          const uploadTask = await uploadBytesResumable(storageRef, blob);
+          console.log("Upload successful, getting download URL");
+          setUploadProgress(85);
+
+          // Get the download URL
+          const downloadURL = await getDownloadURL(uploadTask.ref);
+          console.log(`✅ Download URL obtained: ${downloadURL}`);
+          setUploadProgress(100);
+
+          // Validate the download URL
+          if (
+            !downloadURL ||
+            !downloadURL.includes("firebasestorage.googleapis.com")
+          ) {
+            throw new Error("Invalid download URL received from Firebase");
+          }
+
+          // Set the uploaded URL
+          setUploadedImageUrl(downloadURL);
+          console.log("🎉 Post image upload completed successfully!");
+          return;
+        } catch (error) {
+          attempts++;
+          uploadError = error;
+          console.log(`Upload attempt ${attempts} failed:`, error);
+
+          if (attempts < maxAttempts) {
+            // Wait before retry (exponential backoff - same as ProfileService)
+            const delay = 1000 * Math.pow(2, attempts);
+            console.log(`Waiting ${delay}ms before retry...`);
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            setUploadProgress(50 + attempts * 10);
+          }
+        }
+      }
+
+      // If we got here, all attempts failed
+      throw (
+        uploadError ||
+        new Error("Failed to upload image after multiple attempts")
+      );
     } catch (error) {
-      console.error("❌ Firebase upload failed:", error);
+      console.error("❌ Post image upload failed:", error);
 
-      // Provide specific error messages
+      // Provide specific error messages (same as ProfileService)
       let errorMessage = "Failed to upload image. Please try again.";
 
       if (error.message.includes("storage/unauthorized")) {
-        errorMessage =
-          "Permission denied. Please check your Firebase settings.";
+        errorMessage = "Upload permission denied. Please try again.";
       } else if (error.message.includes("storage/canceled")) {
         errorMessage = "Upload was canceled.";
-      } else if (error.message.includes("storage/unknown")) {
-        errorMessage = "Unknown storage error occurred.";
       } else if (error.message.includes("Network")) {
         errorMessage = "Network error. Please check your connection.";
       } else if (error.message.includes("timeout")) {
         errorMessage = "Upload timed out. Please try again.";
+      } else if (error.message.includes("too large")) {
+        errorMessage = "Image is too large. Please choose a smaller image.";
       }
 
       Alert.alert("Upload Failed", errorMessage, [
@@ -306,40 +320,7 @@ const CreatePostScreen = () => {
     }
   };
 
-  // Enhanced Firebase deletion with better error handling
-  const deleteImageFromFirebase = async (imageUrl: string) => {
-    try {
-      if (!imageUrl || !imageUrl.includes("firebasestorage.googleapis.com")) {
-        console.log("❌ Invalid URL for deletion:", imageUrl);
-        return;
-      }
-
-      console.log("🗑️ Attempting to delete from Firebase:", imageUrl);
-
-      // Extract the path from Firebase Storage URL
-      const urlParts = imageUrl.split("/o/");
-      if (urlParts.length < 2) {
-        console.log("❌ Could not parse Firebase URL for deletion");
-        return;
-      }
-
-      const pathWithQuery = urlParts[1];
-      const path = decodeURIComponent(pathWithQuery.split("?")[0]);
-
-      console.log("📁 Extracted path for deletion:", path);
-
-      const storage = getStorage();
-      const imageRef = ref(storage, path);
-
-      await deleteObject(imageRef);
-      console.log("✅ Image successfully deleted from Firebase Storage");
-    } catch (error) {
-      console.error("❌ Error deleting image from Firebase:", error);
-      // Don't throw error - deletion failure shouldn't block the user
-    }
-  };
-
-  // Handle image picking with Firebase upload
+  // Handle image picking
   const pickImage = async () => {
     try {
       const permissionResult =
@@ -357,7 +338,7 @@ const CreatePostScreen = () => {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 3],
-        quality: 0.8, // Good quality but reasonable file size
+        quality: 0.8,
       });
 
       if (!result.canceled && result.assets[0]) {
@@ -365,7 +346,7 @@ const CreatePostScreen = () => {
         console.log("📷 Image selected from gallery:", imageUri);
 
         setSelectedImage(imageUri);
-        await uploadImageToFirebase(imageUri);
+        await uploadPostImage(imageUri);
       }
     } catch (error) {
       console.error("❌ Error picking image:", error);
@@ -373,7 +354,7 @@ const CreatePostScreen = () => {
     }
   };
 
-  // Handle camera access with Firebase upload
+  // Handle camera access
   const takePicture = async () => {
     try {
       const cameraPermission =
@@ -390,7 +371,7 @@ const CreatePostScreen = () => {
       const result = await ImagePicker.launchCameraAsync({
         allowsEditing: true,
         aspect: [4, 3],
-        quality: 0.8, // Good quality but reasonable file size
+        quality: 0.8,
       });
 
       if (!result.canceled && result.assets[0]) {
@@ -398,7 +379,7 @@ const CreatePostScreen = () => {
         console.log("📷 Image captured from camera:", imageUri);
 
         setSelectedImage(imageUri);
-        await uploadImageToFirebase(imageUri);
+        await uploadPostImage(imageUri);
       }
     } catch (error) {
       console.error("❌ Error taking picture:", error);
@@ -406,24 +387,17 @@ const CreatePostScreen = () => {
     }
   };
 
-  // Remove selected image and delete from Firebase if uploaded
-  const removeImage = async () => {
+  // Remove selected image
+  const removeImage = () => {
     console.log("🗑️ Removing image...");
-
-    // If image was uploaded to Firebase, delete it
-    if (uploadedImageUrl) {
-      console.log("🗑️ Deleting from Firebase:", uploadedImageUrl);
-      await deleteImageFromFirebase(uploadedImageUrl);
-    }
-
     setSelectedImage(undefined);
     setUploadedImageUrl(undefined);
+    setSelectedImageBlob(undefined);
     setUploadProgress(0);
-
     console.log("✅ Image removed successfully");
   };
 
-  // Enhanced post submission with better validation and error handling
+  // Submit post
   const handleSubmitPost = async () => {
     console.log("📝 Starting post submission...");
 
@@ -475,6 +449,7 @@ const CreatePostScreen = () => {
         setPostContent("");
         setSelectedImage(undefined);
         setUploadedImageUrl(undefined);
+        setSelectedImageBlob(undefined);
         setUploadProgress(0);
 
         // Navigate back
@@ -501,17 +476,6 @@ const CreatePostScreen = () => {
     }
   };
 
-  // Clean up uploaded image if user navigates away without posting
-  useEffect(() => {
-    return () => {
-      // Cleanup function when component unmounts
-      if (uploadedImageUrl && !isSubmitting) {
-        console.log("🧹 Cleaning up uploaded image on unmount");
-        deleteImageFromFirebase(uploadedImageUrl).catch(console.error);
-      }
-    };
-  }, [uploadedImageUrl, isSubmitting]);
-
   // Login required view
   const LoginRequiredView = () => (
     <View style={styles.loginRequiredContainer}>
@@ -523,7 +487,7 @@ const CreatePostScreen = () => {
       <TouchableOpacity
         style={styles.loginButton}
         onPress={() => {
-          navigation.navigate("Login");
+          navigation.navigate("Login" as never);
         }}
       >
         <Text style={styles.loginButtonText}>Log In</Text>
@@ -610,7 +574,7 @@ const CreatePostScreen = () => {
                 style={styles.joinCommunityButton}
                 onPress={() => {
                   setShowCommunityModal(false);
-                  navigation.navigate("Home");
+                  navigation.navigate("Home" as never);
                 }}
               >
                 <Text style={styles.joinCommunityButtonText}>
@@ -636,7 +600,9 @@ const CreatePostScreen = () => {
         {isUploading && (
           <View style={styles.uploadOverlay}>
             <ActivityIndicator size="large" color={COLORS.white} />
-            <Text style={styles.uploadText}>Uploading to Firebase...</Text>
+            <Text style={styles.uploadText}>
+              Uploading...
+            </Text>
             <View style={styles.progressBar}>
               <View
                 style={[styles.progressFill, { width: `${uploadProgress}%` }]}
@@ -654,7 +620,7 @@ const CreatePostScreen = () => {
               size={24}
               color={COLORS.success}
             />
-            <Text style={styles.uploadSuccessText}>Uploaded to Firebase</Text>
+            <Text style={styles.uploadSuccessText}>Ready to post!</Text>
           </View>
         )}
 
@@ -670,15 +636,6 @@ const CreatePostScreen = () => {
             color={isUploading ? COLORS.textSecondary : COLORS.white}
           />
         </TouchableOpacity>
-
-        {/* Debug info */}
-        {uploadedImageUrl && (
-          <View style={styles.debugInfo}>
-            <Text style={styles.debugText} numberOfLines={2}>
-              Firebase URL: {uploadedImageUrl}
-            </Text>
-          </View>
-        )}
       </View>
     );
   };
@@ -747,7 +704,7 @@ const CreatePostScreen = () => {
                 [
                   {
                     text: "Find Communities",
-                    onPress: () => navigation.navigate("Home"),
+                    onPress: () => navigation.navigate("Home" as never),
                   },
                   { text: "Cancel", style: "cancel" },
                 ]
@@ -1012,20 +969,6 @@ const styles = StyleSheet.create({
     right: 8,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
     borderRadius: 12,
-  },
-  debugInfo: {
-    position: "absolute",
-    bottom: 8,
-    left: 8,
-    right: 8,
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
-    borderRadius: 4,
-    padding: 4,
-  },
-  debugText: {
-    color: COLORS.white,
-    fontSize: 10,
-    fontFamily: "monospace",
   },
   actionBar: {
     flexDirection: "row",
