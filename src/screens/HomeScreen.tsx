@@ -68,8 +68,8 @@ interface ExtendedRoutine extends Omit<Routine, "frequency"> {
   routine_days?: number[];
   category: string;
   isCompleted?: boolean;
-  completedTasks?: number;
-  totalTasks?: number;
+  completedTasks: number;
+  totalTasks: number;
   frequency?: string;
 }
 
@@ -231,7 +231,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [allGoals, setAllGoals] = useState<Goal[]>([]);
   const [todayGoals, setTodayGoals] = useState<Goal[]>([]);
-  const [routines, setRoutines] = useState<ExtendedRoutine[]>([]);
+  const [routines, setRoutines] = useState<Goal[]>([]);
   const [news, setNews] = useState<News[]>([]);
   const [overallProgress, setOverallProgress] = useState(0);
 
@@ -298,29 +298,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
         totalGoals > 0 ? Math.round((completedGoals / totalGoals) * 100) : 0;
       setOverallProgress(progressPercentage);
 
-      // Get user routines
-      const routinesData = await fetchUserRoutines(effectiveUserId);
-
-      // UPDATED: Process routines to include routine_days and category
-      const processedRoutines = routinesData.map((routine) => {
-        // Find matching goal to get routine_days data and category
-        const matchingGoal = goalsData.find(
-          (goal) =>
-            (goal as any).id === routine.id ||
-            (goal as any).goal_id === routine.id
-        );
-
-        // Parse routine days from the matching goal
-        const routineDays = matchingGoal ? parseRoutineDays(matchingGoal) : [];
-
-        return {
-          ...routine,
-          category: matchingGoal?.category || "Personal",
-          routine_days: routineDays,
-        };
-      });
-
-      setRoutines(processedRoutines);
+      // Get user routines - just filter daily goals from all goals
+      const routinesData = goalsData.filter((goal) => goal.isDaily);
+      setRoutines(routinesData);
 
       // Get relevant news
       const newsData = await fetchNews();
@@ -530,10 +510,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
 
           // Check for new achievements
           console.log(
-            `Checking for achievements in category: ${goalToToggle.category}`
+            `Checking for achievements in category: ${
+              goalToToggle.category || "Personal"
+            }`
           );
           const newAchievements = await checkForNewAchievements(
-            goalToToggle.category,
+            goalToToggle.category || "Personal",
             effectiveUserId
           );
 
@@ -572,7 +554,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
           // Still try to check achievements even if stats update failed
           try {
             const newAchievements = await checkForNewAchievements(
-              goalToToggle.category,
+              goalToToggle.category || "Personal",
               effectiveUserId
             );
 
@@ -722,7 +704,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
             return {
               ...routine,
               isCompleted: newIsCompleted,
-              completedTasks: newIsCompleted ? 1 : 0,
+              progress: newIsCompleted ? 100 : 0,
             };
           }
           return routine;
@@ -845,7 +827,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
         onPress={() => {
           // Navigate to the Goals tab first, then to the GoalDetail screen
           navigation.navigate("Goals", {
-            screen: "GoalDetail",
             params: { goalId: item.id },
           });
         }}
@@ -961,7 +942,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
         onPress={() => {
           // Navigate to Goals tab with param to trigger create form using nested navigation
           navigation.navigate("Goals", {
-            screen: "Goals",
             params: { openCreateGoal: true },
           });
         }}
@@ -974,20 +954,36 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   // UPDATED: Render individual routine item with improved day count display
   const renderRoutineItem = ({ item }: { item: ExtendedRoutine }) => {
     // Get color based on routine category
-    const categoryColor = getCategoryColor(item.category) || COLORS.accent1;
+    const categoryColor =
+      getCategoryColor(item.category || "Personal") || COLORS.accent1;
 
     // Use dedicated routine background
     const backgroundImage = require("../assets/images/routinepic.png");
 
     // Get routine days
     const routineDays = item.routine_days || [];
+    const today = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
 
-    // Determine the day count for display
-    const totalDays = routineDays.length > 0 ? routineDays.length : 1;
-    const completedDays = item.isCompleted ? 1 : 0;
+    // Calculate weekly progress
+    const totalDaysThisWeek = routineDays.length > 0 ? routineDays.length : 1;
 
-    // Calculate progress percentage based on completion
-    const progressPercentage = item.isCompleted ? 100 : 0;
+    // Count how many scheduled days have passed this week (including today)
+    const daysPassed = routineDays.filter((day) => {
+      // For days that have already passed this week (including today)
+      return day <= today;
+    }).length;
+
+    // For simplicity, assume completion tracking per day
+    // In a real app, you'd track completion per day from your backend
+    const completedDaysThisWeek = item.isCompleted
+      ? Math.min(daysPassed, 1)
+      : 0;
+
+    // Calculate progress percentage based on days passed so far
+    const progressPercentage =
+      daysPassed > 0
+        ? Math.round((completedDaysThisWeek / daysPassed) * 100)
+        : 0;
 
     return (
       <TouchableOpacity
@@ -995,7 +991,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
         onPress={() => {
           // Navigate to the Goals tab first, then to the GoalDetail screen
           navigation.navigate("Goals", {
-            screen: "GoalDetail",
             params: { goalId: item.id },
           });
         }}
@@ -1019,14 +1014,16 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
                 >
                   {item.title}
                 </Text>
-                {/* Show category badge */}
+                {/* Show routine frequency badge */}
                 <View
                   style={[
                     styles.categoryBadge,
                     { backgroundColor: categoryColor },
                   ]}
                 >
-                  <Text style={styles.categoryText}>{item.category}</Text>
+                  <Text style={styles.categoryText}>
+                    {totalDaysThisWeek}/week
+                  </Text>
                 </View>
               </View>
 
@@ -1037,16 +1034,18 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
                       styles.routineProgressFill,
                       {
                         width: `${progressPercentage}%`,
-                        backgroundColor: item.isCompleted
-                          ? COLORS.success
-                          : categoryColor,
+                        backgroundColor:
+                          progressPercentage === 100
+                            ? COLORS.success
+                            : categoryColor,
                       },
                     ]}
                   />
                 </View>
-                {/* Display simplified day count */}
+                {/* Display weekly progress */}
                 <Text style={styles.routineProgressText}>
-                  {completedDays}/{totalDays}
+                  {completedDaysThisWeek}/
+                  {daysPassed > 0 ? daysPassed : totalDaysThisWeek}
                 </Text>
               </View>
             </View>
@@ -1081,7 +1080,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
           onPress={() => {
             // Navigate to Goals tab and switch to the routines tab
             navigation.navigate("Goals", {
-              screen: "Goals",
               params: {
                 filterType: "routine",
                 activeTab: "routine", // Add this parameter to explicitly switch to routines tab
@@ -1106,7 +1104,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
         onPress={() => {
           // Navigate to create goal as daily/routine using nested navigation
           navigation.navigate("Goals", {
-            screen: "Goals",
             params: {
               openCreateGoal: true,
               createAsRoutine: true,
@@ -1129,7 +1126,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
           style={styles.viewAllButton}
           onPress={() => {
             // Navigate to NewsScreen to see all news
-            navigation.navigate("NewsScreen");
+            navigation.navigate("NewsScreen" as never);
           }}
         >
           <Text style={styles.viewAllText}>View All</Text>
@@ -1139,7 +1136,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
         news={news}
         onItemPress={(selectedNews) => {
           // Navigate to NewsScreen with the selected news item
-          navigation.navigate("NewsScreen", { selectedNews });
+          navigation.navigate("NewsScreen" as never, { selectedNews } as never);
         }}
       />
     </View>
@@ -1165,12 +1162,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
       renderItem: () => renderGoalsSection(),
       keyExtractor: () => "goals",
     },
-    {
-      title: "routines",
-      data: [{ id: "routines" }],
-      renderItem: () => renderRoutinesSection(),
-      keyExtractor: () => "routines",
-    },
+ 
     {
       title: "news",
       data: [{ id: "news" }],

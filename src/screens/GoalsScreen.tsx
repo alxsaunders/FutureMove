@@ -818,7 +818,9 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
               </Text>
               {item.isDaily && (
                 <View style={styles.dailyBadge}>
-                  <Text style={styles.dailyBadgeText}>Daily</Text>
+                  <Text style={styles.dailyBadgeText}>
+                    {daysToShow.length}/week
+                  </Text>
                 </View>
               )}
             </View>
