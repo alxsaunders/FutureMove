@@ -25,6 +25,7 @@ import {
 import { fetchJoinedCommunities } from "../../services/CommunityService";
 import { adaptCommunity } from "../../screens/CreatePostScreen";
 import { auth } from "../../config/firebase";
+import UserProfileModal from "../UserProfileModal";
 
 const CommunityMyFeedTab = () => {
   const { currentUser } = useAuth();
@@ -38,6 +39,8 @@ const CommunityMyFeedTab = () => {
   const [authChecked, setAuthChecked] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<string>("");
   const navigation = useNavigation();
 
   // Enhanced image URL validation and cleaning
@@ -401,16 +404,14 @@ const CommunityMyFeedTab = () => {
     [posts, allPosts]
   );
 
-  // Handle user profile navigation - UPDATED TO NAVIGATE TO PROFILE SCREEN
-  const handleUserPress = useCallback(
-    (userId: string) => {
-      if (userId) {
-        console.log(`Navigating to user profile: ${userId}`);
-        navigation.navigate("UserProfile", { userId });
-      }
-    },
-    [navigation]
-  );
+  // Handle user profile navigation - UPDATED TO USE MODAL
+  const handleUserPress = useCallback((userId: string) => {
+    if (userId) {
+      console.log(`Opening user profile modal for: ${userId}`);
+      setSelectedUserId(userId);
+      setProfileModalVisible(true);
+    }
+  }, []);
 
   // Toggle community selection
   const toggleCommunitySelection = (communityId: string) => {
@@ -737,6 +738,13 @@ const CommunityMyFeedTab = () => {
 
       {/* Filter Modal */}
       {renderFilterModal()}
+
+      {/* User Profile Modal */}
+      <UserProfileModal
+        visible={profileModalVisible}
+        onClose={() => setProfileModalVisible(false)}
+        userId={selectedUserId}
+      />
     </View>
   );
 };
