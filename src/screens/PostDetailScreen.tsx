@@ -38,9 +38,18 @@ const EnhancedImage: React.FC<{
   style: any;
   defaultIcon?: string;
   showLoading?: boolean;
-}> = ({ uri, style, defaultIcon = "person", showLoading = true }) => {
+  preventReload?: boolean;
+}> = ({
+  uri,
+  style,
+  defaultIcon = "person",
+  showLoading = true,
+  preventReload = false,
+}) => {
   const [imageLoading, setImageLoading] = useState(!!uri);
   const [imageError, setImageError] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const previousUri = useRef(uri);
 
   // Validate and clean Firebase Storage URL
   const validateFirebaseUrl = (url: string): string => {
@@ -58,27 +67,37 @@ const EnhancedImage: React.FC<{
 
       return urlObj.toString();
     } catch (error) {
-      console.error("Error validating Firebase URL:", error);
       return url;
     }
   };
 
+  // Only reset loading state if URI actually changed
+  useEffect(() => {
+    if (previousUri.current !== uri && !preventReload) {
+      setImageLoading(!!uri);
+      setImageError(false);
+      setImageLoaded(false);
+      previousUri.current = uri;
+    }
+  }, [uri, preventReload]);
+
   const handleImageLoad = () => {
-    console.log("✅ Image loaded successfully:", uri);
     setImageLoading(false);
     setImageError(false);
+    setImageLoaded(true);
   };
 
   const handleImageError = (error: any) => {
-    console.error("❌ Image failed to load:", uri, error);
     setImageLoading(false);
     setImageError(true);
+    setImageLoaded(false);
   };
 
   const handleImageLoadStart = () => {
-    console.log("🔄 Starting to load image:", uri);
-    setImageLoading(true);
-    setImageError(false);
+    if (!preventReload || !imageLoaded) {
+      setImageLoading(true);
+      setImageError(false);
+    }
   };
 
   // If no URI or error, show default icon
@@ -108,7 +127,7 @@ const EnhancedImage: React.FC<{
       />
 
       {/* Loading Indicator */}
-      {imageLoading && showLoading && !imageError && (
+      {imageLoading && showLoading && !imageError && !imageLoaded && (
         <View style={[styles.imageLoadingOverlay, style]}>
           <ActivityIndicator size="small" color={COLORS.primary} />
         </View>
@@ -121,9 +140,12 @@ const EnhancedImage: React.FC<{
 const PostImage: React.FC<{
   uri: string;
   style: any;
-}> = ({ uri, style }) => {
+  preventReload?: boolean;
+}> = ({ uri, style, preventReload = false }) => {
   const [imageLoading, setImageLoading] = useState(true);
   const [imageError, setImageError] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const previousUri = useRef(uri);
 
   const validateFirebaseUrl = (url: string): string => {
     try {
@@ -137,27 +159,37 @@ const PostImage: React.FC<{
       }
       return urlObj.toString();
     } catch (error) {
-      console.error("Error validating Firebase URL:", error);
       return url;
     }
   };
 
+  // Only reset loading state if URI actually changed
+  useEffect(() => {
+    if (previousUri.current !== uri && !preventReload) {
+      setImageLoading(true);
+      setImageError(false);
+      setImageLoaded(false);
+      previousUri.current = uri;
+    }
+  }, [uri, preventReload]);
+
   const handleImageLoad = () => {
-    console.log("✅ Post image loaded successfully:", uri);
     setImageLoading(false);
     setImageError(false);
+    setImageLoaded(true);
   };
 
   const handleImageError = (error: any) => {
-    console.error("❌ Post image failed to load:", uri, error);
     setImageLoading(false);
     setImageError(true);
+    setImageLoaded(false);
   };
 
   const handleImageLoadStart = () => {
-    console.log("🔄 Starting to load post image:", uri);
-    setImageLoading(true);
-    setImageError(false);
+    if (!preventReload || !imageLoaded) {
+      setImageLoading(true);
+      setImageError(false);
+    }
   };
 
   const validatedUri = validateFirebaseUrl(uri);
@@ -175,7 +207,7 @@ const PostImage: React.FC<{
       />
 
       {/* Loading State */}
-      {imageLoading && !imageError && (
+      {imageLoading && !imageError && !imageLoaded && (
         <View style={[styles.postImageLoadingContainer, style]}>
           <ActivityIndicator size="large" color={COLORS.primary} />
           <Text style={styles.postImageLoadingText}>Loading image...</Text>
@@ -196,6 +228,7 @@ const PostImage: React.FC<{
             onPress={() => {
               setImageError(false);
               setImageLoading(true);
+              setImageLoaded(false);
             }}
           >
             <Text style={styles.retryButtonText}>Retry</Text>
@@ -221,6 +254,10 @@ const PostDetailScreen = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const commentInputRef = useRef<TextInput>(null);
+
+  // Track if user is actively typing
+  const [isTypingComment, setIsTypingComment] = useState(false);
+  const [commentInputFocused, setCommentInputFocused] = useState(false);
 
   // Modal state
   const [profileModalVisible, setProfileModalVisible] = useState(false);
@@ -251,9 +288,6 @@ const PostDetailScreen = () => {
         };
         setPost(cleanedPost);
         console.log(`Successfully fetched post: ${cleanedPost.id}`);
-        if (cleanedPost.image) {
-          console.log(`🖼️ Post has image: ${cleanedPost.image}`);
-        }
       } else {
         console.warn(`Post not found for ID: ${postId}`);
         Alert.alert(
@@ -323,13 +357,52 @@ const PostDetailScreen = () => {
     return url;
   };
 
-  // Refresh data
+  // Check if refresh should be blocked
+  const shouldBlockRefresh = () => {
+    return (
+      isTypingComment || commentInputFocused || newComment.trim().length > 0
+    );
+  };
+
+  // Refresh data - but only if not typing
   const handleRefresh = async () => {
+    // Block refresh if user is actively typing
+    if (shouldBlockRefresh()) {
+      console.log("🚫 Blocking refresh - user is typing comment");
+      return;
+    }
+
     setIsRefreshing(true);
     try {
       await fetchPostData();
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  // Handle comment input changes
+  const handleCommentChange = (text: string) => {
+    setNewComment(text);
+
+    // Set typing state based on whether there's text
+    if (text.length > 0 && !isTypingComment) {
+      setIsTypingComment(true);
+    } else if (text.length === 0 && isTypingComment) {
+      setIsTypingComment(false);
+    }
+  };
+
+  // Handle comment input focus
+  const handleCommentFocus = () => {
+    setCommentInputFocused(true);
+  };
+
+  // Handle comment input blur
+  const handleCommentBlur = () => {
+    setCommentInputFocused(false);
+    // If no text, also clear typing state
+    if (newComment.trim().length === 0) {
+      setIsTypingComment(false);
     }
   };
 
@@ -406,8 +479,10 @@ const PostDetailScreen = () => {
             : null
         );
 
-        // Clear input
+        // Clear input and reset typing states
         setNewComment("");
+        setIsTypingComment(false);
+        setCommentInputFocused(false);
 
         // Show success feedback
         console.log("Comment posted successfully");
@@ -458,6 +533,7 @@ const PostDetailScreen = () => {
           style={styles.commentAvatar}
           defaultIcon="person"
           showLoading={false}
+          preventReload={shouldBlockRefresh()}
         />
       </TouchableOpacity>
       <View style={styles.commentContent}>
@@ -516,15 +592,26 @@ const PostDetailScreen = () => {
             <Ionicons name="arrow-back" size={24} color={COLORS.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{post.communityName}</Text>
-          <TouchableOpacity onPress={handleRefresh}>
+          <TouchableOpacity
+            onPress={handleRefresh}
+            disabled={shouldBlockRefresh()}
+          >
             <Ionicons
               name="refresh"
               size={20}
-              color={isRefreshing ? COLORS.primary : COLORS.text}
+              color={
+                shouldBlockRefresh()
+                  ? COLORS.border
+                  : isRefreshing
+                  ? COLORS.primary
+                  : COLORS.text
+              }
             />
           </TouchableOpacity>
         </View>
 
+        {/* Show typing indicator when refresh is blocked */}
+    
         <FlatList
           data={comments}
           renderItem={renderCommentItem}
@@ -545,6 +632,7 @@ const PostDetailScreen = () => {
                     style={styles.avatar}
                     defaultIcon="person"
                     showLoading={false}
+                    preventReload={shouldBlockRefresh()}
                   />
                   <View style={styles.postHeaderInfo}>
                     <Text style={styles.userName}>{post.userName}</Text>
@@ -560,7 +648,11 @@ const PostDetailScreen = () => {
 
               {/* Post Image with Enhanced Error Handling */}
               {post.image && (
-                <PostImage uri={post.image} style={styles.postImage} />
+                <PostImage
+                  uri={post.image}
+                  style={styles.postImage}
+                  preventReload={shouldBlockRefresh()}
+                />
               )}
 
               {/* Post Actions */}
@@ -640,13 +732,16 @@ const PostDetailScreen = () => {
             style={styles.currentUserAvatar}
             defaultIcon="person"
             showLoading={false}
+            preventReload={shouldBlockRefresh()}
           />
           <TextInput
             ref={commentInputRef}
             style={styles.commentInput}
             placeholder="Add a comment..."
             value={newComment}
-            onChangeText={setNewComment}
+            onChangeText={handleCommentChange}
+            onFocus={handleCommentFocus}
+            onBlur={handleCommentBlur}
             multiline
           />
           <TouchableOpacity
@@ -698,6 +793,21 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "600",
     color: COLORS.text,
+  },
+  typingIndicator: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: COLORS.primary + "15",
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.primary + "30",
+  },
+  typingText: {
+    fontSize: 12,
+    color: COLORS.primary,
+    marginLeft: 6,
+    fontStyle: "italic",
   },
   loadingContainer: {
     flex: 1,
