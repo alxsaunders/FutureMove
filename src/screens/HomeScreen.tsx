@@ -12,6 +12,7 @@ import {
   Platform,
   ImageBackground,
   Image,
+  ActivityIndicator,
 } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { GoalsScreenNavigationProp, HomeScreenProps } from "../types/navigaton";
@@ -251,6 +252,11 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [quoteLoaded, setQuoteLoaded] = useState(false);
 
+  // SECURITY FIX: Add state to track which goals are being processed
+  const [processingGoals, setProcessingGoals] = useState<Set<number>>(
+    new Set()
+  );
+
   // Ref for the main SectionList
   const sectionListRef = useRef(null);
 
@@ -451,10 +457,18 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
     route.params?.streakCount,
   ]);
 
-  // UPDATED: Toggle goal completion with achievement checking
+  // SECURITY FIX: Toggle goal completion with button freezing protection
   const toggleGoalCompletion = async (goalId: number) => {
+    // Prevent multiple clicks if already processing
+    if (processingGoals.has(goalId)) {
+      return;
+    }
+
     try {
       console.log(`Toggling goal completion for goal ID: ${goalId}`);
+
+      // Add goal to processing set to disable button
+      setProcessingGoals((prev) => new Set(prev).add(goalId));
 
       // Ensure we have the latest Firebase user ID
       const firebaseUserId = auth.currentUser?.uid;
@@ -626,6 +640,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
 
       // If there was an error, refresh the goals to make sure UI is in sync with database
       fetchUserData();
+    } finally {
+      // Remove goal from processing set to re-enable button
+      setProcessingGoals((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(goalId);
+        return newSet;
+      });
     }
   };
 
@@ -807,8 +828,11 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
     return <DailyQuote quote={quoteText} author={quoteAuthor} />;
   };
 
-  // UPDATED: Render individual goal item for goals section with improved background
+  // SECURITY FIX: Render individual goal item for goals section with improved background and processing state
   const renderGoalItem = ({ item }: { item: Goal }) => {
+    // Check if this goal is currently being processed
+    const isProcessing = processingGoals.has(item.id);
+
     // Get background image based on category
     const backgroundImage = getCategoryBackground(item.category);
 
@@ -857,18 +881,23 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
                 )}
               </View>
 
+              {/* SECURITY FIX: Updated check button with disabled state and loading indicator */}
               <TouchableOpacity
                 style={[
                   styles.checkButton,
                   item.isCompleted ? styles.completedCheckButton : {},
+                  isProcessing && styles.checkButtonDisabled,
                 ]}
                 onPress={(event) => {
                   // Stop event propagation to prevent navigation when toggling completion
                   event.stopPropagation();
                   toggleGoalCompletion(item.id);
                 }}
+                disabled={isProcessing}
               >
-                {item.isCompleted ? (
+                {isProcessing ? (
+                  <ActivityIndicator size="small" color={COLORS.white} />
+                ) : item.isCompleted ? (
                   <Ionicons
                     name="checkmark-circle"
                     size={24}
@@ -888,6 +917,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
       </TouchableOpacity>
     );
   };
+
   // Render horizontal goal list
   const renderHorizontalGoalList = () => (
     <FlatList
@@ -1451,6 +1481,10 @@ const styles = StyleSheet.create({
   },
   completedCheckButton: {
     opacity: 0.9,
+  },
+  // SECURITY FIX: Add disabled style for check button
+  checkButtonDisabled: {
+    opacity: 0.5,
   },
 
   // Routine card specific styles - UPDATED

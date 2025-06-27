@@ -86,6 +86,11 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
   const [isDeleteModalVisible, setDeleteModalVisible] = useState(false);
   const [goalToDelete, setGoalToDelete] = useState<number | null>(null);
 
+  // SECURITY FIX: Add state to track which goals are being processed
+  const [processingGoals, setProcessingGoals] = useState<Set<number>>(
+    new Set()
+  );
+
   // Categories with colors
   const categories = [
     { name: "Personal", color: COLORS.primary },
@@ -143,11 +148,6 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
 
     return { newLevel, finalXP };
   };
-
-  // Check if goal rewards can be claimed (REMOVED - not used anymore)
-  // const canClaimRewardsForGoal = (goal: Goal): boolean => {
-  //   return true; // Always allow rewards
-  // };
 
   // FIXED: Process goal rewards using the updateUserCoins and updateUserXP functions
   const handleGoalRewards = async (goal: Goal) => {
@@ -470,12 +470,20 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
     setFilteredGoals(result);
   };
 
-  // FIXED: Toggle goal completion with proper reward processing
+  // SECURITY FIX: Toggle goal completion with button freezing protection
   const toggleGoalCompletion = async (goalId: number) => {
+    // Prevent multiple clicks if already processing
+    if (processingGoals.has(goalId)) {
+      return;
+    }
+
     try {
       console.log(
         `[GOALS SCREEN] Toggling goal completion for goal ID: ${goalId}`
       );
+
+      // Add goal to processing set to disable button
+      setProcessingGoals((prev) => new Set(prev).add(goalId));
 
       // Find the goal to toggle
       const goalToToggle = goals.find((g) => g.id === goalId);
@@ -528,6 +536,13 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
     } catch (error) {
       console.error("Error updating goal:", error);
       Alert.alert("Error", "Failed to update goal. Please try again.");
+    } finally {
+      // Remove goal from processing set to re-enable button
+      setProcessingGoals((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(goalId);
+        return newSet;
+      });
     }
   };
 
@@ -755,7 +770,11 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
     </View>
   );
 
+  // SECURITY FIX: Updated renderGoalItem with disabled state for completion button
   const renderGoalItem = ({ item }: { item: Goal }) => {
+    // Check if this goal is currently being processed
+    const isProcessing = processingGoals.has(item.id);
+
     // First check if goal has routineDays property from database
     let daysToShow = item.routineDays || [];
 
@@ -880,11 +899,18 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
             </View>
           </View>
 
+          {/* SECURITY FIX: Updated check button with disabled state and loading indicator */}
           <TouchableOpacity
-            style={styles.checkButton}
+            style={[
+              styles.checkButton,
+              isProcessing && styles.checkButtonDisabled,
+            ]}
             onPress={() => toggleGoalCompletion(item.id)}
+            disabled={isProcessing}
           >
-            {item.isCompleted ? (
+            {isProcessing ? (
+              <ActivityIndicator size="small" color={COLORS.textLight} />
+            ) : item.isCompleted ? (
               <Ionicons
                 name="checkmark-circle"
                 size={28}
@@ -1513,6 +1539,10 @@ const styles = StyleSheet.create({
   checkButton: {
     justifyContent: "center",
     paddingLeft: 12,
+  },
+  // SECURITY FIX: Add disabled style for check button
+  checkButtonDisabled: {
+    opacity: 0.5,
   },
   completedText: {
     color: COLORS.textSecondary,
