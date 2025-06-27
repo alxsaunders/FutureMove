@@ -27,6 +27,7 @@ import {
 } from "../services/CommunityPostService";
 import { Community, Post } from "../types";
 import CommunityPostItem from "../components/community/CommunityPostItem";
+import UserProfileModal from "../components/UserProfileModal";
 
 const CommunityDetailScreen = () => {
   const { currentUser } = useAuth();
@@ -39,6 +40,17 @@ const CommunityDetailScreen = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isJoining, setIsJoining] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<string>("");
+
+  // Handle user profile navigation
+  const handleUserPress = useCallback((userId: string) => {
+    if (userId) {
+      console.log(`Opening user profile modal for: ${userId}`);
+      setSelectedUserId(userId);
+      setProfileModalVisible(true);
+    }
+  }, []);
 
   // Fetch community details
   const fetchCommunityDetails = useCallback(async () => {
@@ -87,15 +99,15 @@ const CommunityDetailScreen = () => {
     }
   }, [communityId]);
 
-  // Load data on initial render and when focused
+  // Load data on initial render and when focused - UPDATED TO 5 MINUTES
   useFocusEffect(
     useCallback(() => {
       fetchCommunityDetails();
 
-      // Set up a refresh interval when screen is active
+      // Changed from 30000ms (30 seconds) to 300000ms (5 minutes)
       const refreshTimer = setInterval(() => {
         fetchCommunityDetails();
-      }, 30000); // Refresh every 30 seconds
+      }, 300000); // Refresh every 5 minutes
 
       return () => {
         clearInterval(refreshTimer);
@@ -320,6 +332,7 @@ const CommunityDetailScreen = () => {
             onPostPress={() => {
               navigation.navigate("PostDetail", { postId: item.id });
             }}
+            onUserPress={handleUserPress} // Added user profile navigation
             // Share button enabled for community detail view
           />
         )}
@@ -446,6 +459,13 @@ const CommunityDetailScreen = () => {
           <Ionicons name="add" size={24} color={COLORS.white} />
         </TouchableOpacity>
       )}
+
+      {/* User Profile Modal */}
+      <UserProfileModal
+        visible={profileModalVisible}
+        onClose={() => setProfileModalVisible(false)}
+        userId={selectedUserId}
+      />
     </SafeAreaView>
   );
 };

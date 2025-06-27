@@ -26,6 +26,7 @@ import {
 import { Community } from "../../types";
 import { auth } from "../../config/firebase.js";
 import CommunityRequestModal from "./CommunityRequestModal";
+import UserProfileModal from "../UserProfileModal";
 
 // Get screen width for category pills
 const { width } = Dimensions.get("window");
@@ -46,6 +47,8 @@ const CommunityHubTab = () => {
     new Set()
   );
   const [isRequestModalVisible, setIsRequestModalVisible] = useState(false);
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<string>("");
   const navigation = useNavigation();
 
   // Available categories with fixed widths
@@ -103,6 +106,15 @@ const CommunityHubTab = () => {
       communityId: communityId ? String(communityId) : undefined,
     });
   };
+
+  // Handle user profile navigation
+  const handleUserPress = useCallback((userId: string) => {
+    if (userId) {
+      console.log(`Opening user profile modal for: ${userId}`);
+      setSelectedUserId(userId);
+      setProfileModalVisible(true);
+    }
+  }, []);
 
   // Handle community request button press
   const handleRequestCommunity = () => {
@@ -249,14 +261,15 @@ const CommunityHubTab = () => {
     setFilteredCommunities(result);
   }, [communities, selectedCategory, showJoinedOnly, searchQuery]);
 
-  // Load data when screen is focused
+  // Load data when screen is focused - UPDATED TO 5 MINUTES
   useFocusEffect(
     useCallback(() => {
       fetchCommunityData();
 
+      // Changed from 60000ms (1 minute) to 300000ms (5 minutes)
       const refreshTimer = setInterval(() => {
         fetchCommunityData();
-      }, 60000);
+      }, 300000); // Refresh every 5 minutes
 
       return () => {
         clearInterval(refreshTimer);
@@ -670,6 +683,13 @@ const CommunityHubTab = () => {
         visible={isRequestModalVisible}
         onClose={() => setIsRequestModalVisible(false)}
         onSuccess={handleRequestSuccess}
+      />
+
+      {/* User Profile Modal */}
+      <UserProfileModal
+        visible={profileModalVisible}
+        onClose={() => setProfileModalVisible(false)}
+        userId={selectedUserId}
       />
     </View>
   );
