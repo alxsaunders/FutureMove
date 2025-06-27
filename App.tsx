@@ -94,6 +94,7 @@ const AppContent = () => {
             gestureDirection: "vertical",
           }}
         />
+        
       </Stack.Navigator>
     </NavigationContainer>
   );

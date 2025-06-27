@@ -1,55 +1,240 @@
 // src/screens/PostDetailScreen.tsx
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
-  ActivityIndicator,
-  SafeAreaView,
   TouchableOpacity,
-  RefreshControl,
   FlatList,
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
+  Keyboard,
   Alert,
+  Image,
+  Dimensions,
 } from "react-native";
-import { useRoute, useNavigation } from "@react-navigation/native";
-import { useFocusEffect } from "@react-navigation/native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import { COLORS } from "../common/constants/colors";
 import { useAuth } from "../contexts/AuthContext";
+import { Post, Comment } from "../types";
 import {
   fetchPost,
   fetchComments,
   createComment,
-  toggleLikePost as toggleLikePostAPI,
+  toggleLikePost,
   toggleLikeComment,
 } from "../services/CommunityPostService";
-import { Post, Comment } from "../types";
-import CommunityPostItem from "../components/community/CommunityPostItem";
+import UserProfileModal from "../components/UserProfileModal";
+
+const { width } = Dimensions.get("window");
+
+// Enhanced Image Component with Firebase Storage support
+const EnhancedImage: React.FC<{
+  uri?: string;
+  style: any;
+  defaultIcon?: string;
+  showLoading?: boolean;
+}> = ({ uri, style, defaultIcon = "person", showLoading = true }) => {
+  const [imageLoading, setImageLoading] = useState(!!uri);
+  const [imageError, setImageError] = useState(false);
+
+  // Validate and clean Firebase Storage URL
+  const validateFirebaseUrl = (url: string): string => {
+    try {
+      if (!url.includes("firebasestorage.googleapis.com")) {
+        return url;
+      }
+
+      const urlObj = new URL(url);
+
+      // Ensure alt=media is present for direct image access
+      if (!urlObj.searchParams.get("alt")) {
+        urlObj.searchParams.set("alt", "media");
+      }
+
+      return urlObj.toString();
+    } catch (error) {
+      console.error("Error validating Firebase URL:", error);
+      return url;
+    }
+  };
+
+  const handleImageLoad = () => {
+    console.log("✅ Image loaded successfully:", uri);
+    setImageLoading(false);
+    setImageError(false);
+  };
+
+  const handleImageError = (error: any) => {
+    console.error("❌ Image failed to load:", uri, error);
+    setImageLoading(false);
+    setImageError(true);
+  };
+
+  const handleImageLoadStart = () => {
+    console.log("🔄 Starting to load image:", uri);
+    setImageLoading(true);
+    setImageError(false);
+  };
+
+  // If no URI or error, show default icon
+  if (!uri || imageError) {
+    return (
+      <View style={[style, styles.defaultImageContainer]}>
+        <Ionicons
+          name={defaultIcon as any}
+          size={style.width ? style.width * 0.5 : 20}
+          color={COLORS.textSecondary}
+        />
+      </View>
+    );
+  }
+
+  const validatedUri = validateFirebaseUrl(uri);
+
+  return (
+    <View style={{ position: "relative" }}>
+      <Image
+        source={{ uri: validatedUri }}
+        style={[style, imageError && { opacity: 0 }]}
+        onLoadStart={handleImageLoadStart}
+        onLoad={handleImageLoad}
+        onError={handleImageError}
+        resizeMode="cover"
+      />
+
+      {/* Loading Indicator */}
+      {imageLoading && showLoading && !imageError && (
+        <View style={[styles.imageLoadingOverlay, style]}>
+          <ActivityIndicator size="small" color={COLORS.primary} />
+        </View>
+      )}
+    </View>
+  );
+};
+
+// Enhanced Post Image Component
+const PostImage: React.FC<{
+  uri: string;
+  style: any;
+}> = ({ uri, style }) => {
+  const [imageLoading, setImageLoading] = useState(true);
+  const [imageError, setImageError] = useState(false);
+
+  const validateFirebaseUrl = (url: string): string => {
+    try {
+      if (!url.includes("firebasestorage.googleapis.com")) {
+        return url;
+      }
+
+      const urlObj = new URL(url);
+      if (!urlObj.searchParams.get("alt")) {
+        urlObj.searchParams.set("alt", "media");
+      }
+      return urlObj.toString();
+    } catch (error) {
+      console.error("Error validating Firebase URL:", error);
+      return url;
+    }
+  };
+
+  const handleImageLoad = () => {
+    console.log("✅ Post image loaded successfully:", uri);
+    setImageLoading(false);
+    setImageError(false);
+  };
+
+  const handleImageError = (error: any) => {
+    console.error("❌ Post image failed to load:", uri, error);
+    setImageLoading(false);
+    setImageError(true);
+  };
+
+  const handleImageLoadStart = () => {
+    console.log("🔄 Starting to load post image:", uri);
+    setImageLoading(true);
+    setImageError(false);
+  };
+
+  const validatedUri = validateFirebaseUrl(uri);
+
+  return (
+    <View style={{ position: "relative" }}>
+      {/* Main Image */}
+      <Image
+        source={{ uri: validatedUri }}
+        style={[style, imageError && { opacity: 0 }]}
+        onLoadStart={handleImageLoadStart}
+        onLoad={handleImageLoad}
+        onError={handleImageError}
+        resizeMode="cover"
+      />
+
+      {/* Loading State */}
+      {imageLoading && !imageError && (
+        <View style={[styles.postImageLoadingContainer, style]}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.postImageLoadingText}>Loading image...</Text>
+        </View>
+      )}
+
+      {/* Error State */}
+      {imageError && (
+        <View style={[styles.postImageErrorContainer, style]}>
+          <Ionicons
+            name="image-outline"
+            size={40}
+            color={COLORS.textSecondary}
+          />
+          <Text style={styles.postImageErrorText}>Failed to load image</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => {
+              setImageError(false);
+              setImageLoading(true);
+            }}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+};
 
 const PostDetailScreen = () => {
   const { currentUser } = useAuth();
-  const route = useRoute();
   const navigation = useNavigation();
-  const { postId } = route.params as { postId: string };
+  const route = useRoute();
+  const { postId: rawPostId } = route.params as { postId: string | number };
 
+  // Ensure postId is always a string
+  const postId = String(rawPostId);
   const [post, setPost] = useState<Post | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [newComment, setNewComment] = useState("");
-  const [isSubmittingComment, setIsSubmittingComment] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const commentInputRef = useRef<TextInput>(null);
+
+  // Modal state
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<string>("");
 
   // Fetch post and comments
-  const fetchPostData = useCallback(async () => {
-    if (!postId) return;
+  useEffect(() => {
+    fetchPostData();
+  }, [postId]);
 
+  const fetchPostData = async () => {
     setIsLoading(true);
     try {
-      console.log("Fetching post details for ID:", postId);
+      console.log(`Fetching post data for postId: ${postId}`);
 
       // Fetch post and comments in parallel
       const [postData, commentsData] = await Promise.all([
@@ -58,237 +243,234 @@ const PostDetailScreen = () => {
       ]);
 
       if (postData) {
-        setPost(postData);
-        console.log(
-          "Post data loaded:",
-          postData.content.substring(0, 50) + "..."
-        );
+        // Clean the post image URL
+        const cleanedPost = {
+          ...postData,
+          image: cleanImageUrl(postData.image),
+          userAvatar: cleanImageUrl(postData.userAvatar),
+        };
+        setPost(cleanedPost);
+        console.log(`Successfully fetched post: ${cleanedPost.id}`);
+        if (cleanedPost.image) {
+          console.log(`🖼️ Post has image: ${cleanedPost.image}`);
+        }
       } else {
-        console.warn("No post data returned from API");
-        setPost(null);
+        console.warn(`Post not found for ID: ${postId}`);
+        Alert.alert(
+          "Post Not Found",
+          "This post may have been deleted or doesn't exist.",
+          [
+            {
+              text: "Go Back",
+              onPress: () => navigation.goBack(),
+            },
+          ]
+        );
       }
 
-      setComments(commentsData);
-      console.log(`Loaded ${commentsData.length} comments`);
+      // Clean comment image URLs
+      const cleanedComments = commentsData.map((comment) => ({
+        ...comment,
+        userAvatar: cleanImageUrl(comment.userAvatar),
+      }));
+      setComments(cleanedComments);
+      console.log(`Successfully fetched ${cleanedComments.length} comments`);
     } catch (error) {
-      console.error("Error fetching post data:", error);
-      setPost(null);
-      setComments([]);
+      console.error("Error fetching post details:", error);
+      Alert.alert("Error", "Failed to load post details. Please try again.", [
+        {
+          text: "Retry",
+          onPress: fetchPostData,
+        },
+        {
+          text: "Go Back",
+          onPress: () => navigation.goBack(),
+        },
+      ]);
     } finally {
       setIsLoading(false);
     }
-  }, [postId]);
+  };
 
-  // Load data on initial render and when focused
-  useFocusEffect(
-    useCallback(() => {
-      fetchPostData();
-    }, [fetchPostData])
-  );
+  // Clean image URL function
+  const cleanImageUrl = (url: string | undefined): string | undefined => {
+    if (!url) return undefined;
 
-  // Handle refresh
-  const handleRefresh = useCallback(async () => {
+    // Remove local file paths
+    if (
+      url.includes("/ImagePicker/") ||
+      url.includes("file://") ||
+      url.includes("/data/user/")
+    ) {
+      console.warn("🚫 Removing invalid local image path:", url);
+      return undefined;
+    }
+
+    // Handle Firebase Storage URLs
+    if (url.includes("firebasestorage.googleapis.com")) {
+      try {
+        const urlObj = new URL(url);
+        if (!urlObj.searchParams.get("alt")) {
+          urlObj.searchParams.set("alt", "media");
+        }
+        return urlObj.toString();
+      } catch (error) {
+        console.warn("🚫 Invalid Firebase Storage URL:", url);
+        return undefined;
+      }
+    }
+
+    return url;
+  };
+
+  // Refresh data
+  const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
       await fetchPostData();
     } finally {
       setIsRefreshing(false);
     }
-  }, [fetchPostData]);
+  };
 
-  // Handle post like
-  const handleLikePost = useCallback(async () => {
+  // Handle user profile click
+  const handleUserProfileClick = (userId: string) => {
+    if (!userId) return;
+    setSelectedUserId(userId);
+    setProfileModalVisible(true);
+  };
+
+  // Toggle like on post
+  const handleToggleLikePost = async () => {
     if (!post) return;
 
-    console.log(`🔄 Toggling like for post: ${post.id}`);
-    const isCurrentlyLiked = post.isLiked;
-
     // Optimistic update
-    setPost((prevPost) => {
-      if (!prevPost) return null;
-      return {
-        ...prevPost,
-        isLiked: !prevPost.isLiked,
-        likes: prevPost.isLiked ? prevPost.likes - 1 : prevPost.likes + 1,
-      };
+    const wasLiked = post.isLiked;
+    const newLikesCount = wasLiked ? post.likes - 1 : post.likes + 1;
+
+    setPost({
+      ...post,
+      isLiked: !wasLiked,
+      likes: newLikesCount,
     });
 
     try {
-      const success = await toggleLikePostAPI(post.id, isCurrentlyLiked);
+      const success = await toggleLikePost(post.id, wasLiked);
 
       if (!success) {
-        console.warn(
-          `⚠️ Failed to toggle like for post: ${post.id}, reverting changes`
-        );
-        // Revert optimistic update
-        setPost((prevPost) => {
-          if (!prevPost) return null;
-          return {
-            ...prevPost,
-            isLiked: isCurrentlyLiked,
-            likes: isCurrentlyLiked ? prevPost.likes + 1 : prevPost.likes - 1,
-          };
+        // Revert optimistic update on failure
+        setPost({
+          ...post,
+          isLiked: wasLiked,
+          likes: post.likes,
         });
+        Alert.alert("Error", "Failed to update like. Please try again.");
       }
     } catch (error) {
-      console.error(`❌ Error toggling like for post: ${post.id}`, error);
-      // Revert optimistic update
-      setPost((prevPost) => {
-        if (!prevPost) return null;
-        return {
-          ...prevPost,
-          isLiked: isCurrentlyLiked,
-          likes: isCurrentlyLiked ? prevPost.likes + 1 : prevPost.likes - 1,
-        };
+      // Revert optimistic update on error
+      setPost({
+        ...post,
+        isLiked: wasLiked,
+        likes: post.likes,
       });
+      console.error("Error toggling post like:", error);
     }
-  }, [post]);
+  };
 
-  // Handle comment like
-  const handleLikeComment = useCallback(
-    async (commentId: string) => {
-      const comment = comments.find((c) => c.id === commentId);
-      if (!comment) return;
+  // Submit new comment
+  const handleSubmitComment = async () => {
+    if (!newComment.trim() || !post) return;
 
-      console.log(`🔄 Toggling like for comment: ${commentId}`);
-      const isCurrentlyLiked = comment.isLiked;
+    setIsSubmitting(true);
 
-      // Optimistic update
-      setComments((prevComments) =>
-        prevComments.map((c) =>
-          c.id === commentId
-            ? {
-                ...c,
-                isLiked: !c.isLiked,
-                likes: c.isLiked ? c.likes - 1 : c.likes + 1,
-              }
-            : c
-        )
-      );
-
-      try {
-        const success = await toggleLikeComment(commentId, isCurrentlyLiked);
-
-        if (!success) {
-          console.warn(
-            `⚠️ Failed to toggle like for comment: ${commentId}, reverting changes`
-          );
-          // Revert optimistic update
-          setComments((prevComments) =>
-            prevComments.map((c) =>
-              c.id === commentId
-                ? {
-                    ...c,
-                    isLiked: isCurrentlyLiked,
-                    likes: isCurrentlyLiked ? c.likes + 1 : c.likes - 1,
-                  }
-                : c
-            )
-          );
-        }
-      } catch (error) {
-        console.error(
-          `❌ Error toggling like for comment: ${commentId}`,
-          error
-        );
-        // Revert optimistic update
-        setComments((prevComments) =>
-          prevComments.map((c) =>
-            c.id === commentId
-              ? {
-                  ...c,
-                  isLiked: isCurrentlyLiked,
-                  likes: isCurrentlyLiked ? c.likes + 1 : c.likes - 1,
-                }
-              : c
-          )
-        );
-      }
-    },
-    [comments]
-  );
-
-  // Handle comment submission
-  const handleSubmitComment = useCallback(async () => {
-    if (!newComment.trim() || !post || !currentUser) return;
-
-    setIsSubmittingComment(true);
     try {
-      console.log("Submitting comment:", newComment.trim());
+      const comment = await createComment(post.id, newComment.trim());
 
-      const createdComment = await createComment(post.id, newComment.trim());
+      if (comment) {
+        // Clean the comment image URL
+        const cleanedComment = {
+          ...comment,
+          userAvatar: cleanImageUrl(comment.userAvatar),
+        };
 
-      if (createdComment) {
         // Add new comment to the list
-        setComments((prevComments) => [createdComment, ...prevComments]);
+        setComments((prevComments) => [...prevComments, cleanedComment]);
 
         // Update post comment count
-        setPost((prevPost) => {
-          if (!prevPost) return null;
-          return {
-            ...prevPost,
-            comments: prevPost.comments + 1,
-          };
-        });
+        setPost((prevPost) =>
+          prevPost
+            ? {
+                ...prevPost,
+                comments: prevPost.comments + 1,
+              }
+            : null
+        );
 
-        // Clear the input
+        // Clear input
         setNewComment("");
-        console.log("✅ Comment added successfully");
+
+        // Show success feedback
+        console.log("Comment posted successfully");
       } else {
-        Alert.alert("Error", "Failed to add comment. Please try again.");
+        Alert.alert("Error", "Failed to post comment. Please try again.");
       }
     } catch (error) {
-      console.error("❌ Error submitting comment:", error);
-      Alert.alert("Error", "Failed to add comment. Please try again.");
+      console.error("Error posting comment:", error);
+      Alert.alert("Error", "Failed to post comment. Please try again.");
     } finally {
-      setIsSubmittingComment(false);
+      setIsSubmitting(false);
+      Keyboard.dismiss();
     }
-  }, [newComment, post, currentUser]);
+  };
 
-  // Handle share post
-  const handleSharePost = useCallback((postToShare: Post) => {
-    console.log("Sharing post:", postToShare.id);
-    // The CommunityPostItem component handles the sharing logic
-  }, []);
+  // Format date for display
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - date.getTime());
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) {
+      const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
+      if (diffHours === 0) {
+        const diffMinutes = Math.floor(diffTime / (1000 * 60));
+        return `${diffMinutes} min ago`;
+      }
+      return `${diffHours} hours ago`;
+    } else if (diffDays === 1) {
+      return "Yesterday";
+    } else if (diffDays < 7) {
+      return `${diffDays} days ago`;
+    } else {
+      return date.toLocaleDateString();
+    }
+  };
 
   // Render comment item
-  const renderComment = ({ item }: { item: Comment }) => (
+  const renderCommentItem = ({ item }: { item: Comment }) => (
     <View style={styles.commentItem}>
-      <View style={styles.commentHeader}>
-        <View style={styles.commentUser}>
-          <View style={styles.commentAvatar}>
-            <Ionicons name="person" size={16} color={COLORS.textSecondary} />
-          </View>
-          <Text style={styles.commentUserName}>{item.userName}</Text>
-          <Text style={styles.commentTime}>
-            {new Date(item.createdAt).toLocaleDateString()}
-          </Text>
+      <TouchableOpacity
+        onPress={() => handleUserProfileClick(item.userId)}
+        activeOpacity={0.7}
+      >
+        <EnhancedImage
+          uri={item.userAvatar}
+          style={styles.commentAvatar}
+          defaultIcon="person"
+          showLoading={false}
+        />
+      </TouchableOpacity>
+      <View style={styles.commentContent}>
+        <View style={styles.commentHeader}>
+          <TouchableOpacity
+            onPress={() => handleUserProfileClick(item.userId)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.commentUserName}>{item.userName}</Text>
+          </TouchableOpacity>
+          <Text style={styles.commentTime}>{formatDate(item.createdAt)}</Text>
         </View>
-      </View>
-
-      <Text style={styles.commentContent}>{item.content}</Text>
-
-      <View style={styles.commentActions}>
-        <TouchableOpacity
-          style={styles.commentLikeButton}
-          onPress={() => handleLikeComment(item.id)}
-        >
-          <Ionicons
-            name={item.isLiked ? "heart" : "heart-outline"}
-            size={16}
-            color={item.isLiked ? COLORS.primary : COLORS.textSecondary}
-          />
-          {item.likes > 0 && (
-            <Text
-              style={[
-                styles.commentLikeText,
-                item.isLiked && { color: COLORS.primary },
-              ]}
-            >
-              {item.likes}
-            </Text>
-          )}
-        </TouchableOpacity>
+        <Text style={styles.commentText}>{item.content}</Text>
       </View>
     </View>
   );
@@ -296,148 +478,201 @@ const PostDetailScreen = () => {
   if (isLoading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.text} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Post</Text>
-          <View style={{ width: 24 }} />
-        </View>
-        <View style={styles.loadingContent}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
-          <Text style={styles.loadingText}>Loading post...</Text>
-        </View>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Loading post...</Text>
       </SafeAreaView>
     );
   }
 
   if (!post) {
     return (
-      <SafeAreaView style={styles.errorContainer}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.text} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Post</Text>
-          <View style={{ width: 24 }} />
-        </View>
-        <View style={styles.errorContent}>
-          <Ionicons
-            name="alert-circle-outline"
-            size={60}
-            color={COLORS.textSecondary}
-          />
-          <Text style={styles.errorTitle}>Post Not Found</Text>
-          <Text style={styles.errorMessage}>
-            Sorry, we couldn't find this post.
-          </Text>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Text style={styles.backButtonText}>Go Back</Text>
-          </TouchableOpacity>
-        </View>
+      <SafeAreaView style={styles.loadingContainer}>
+        <Ionicons
+          name="alert-circle-outline"
+          size={48}
+          color={COLORS.textSecondary}
+        />
+        <Text style={styles.errorText}>Post not found</Text>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={styles.backButtonText}>Go Back</Text>
+        </TouchableOpacity>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Post</Text>
-        <View style={{ width: 24 }} />
-      </View>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={100}
+    >
+      <SafeAreaView style={styles.safeArea}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={24} color={COLORS.text} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{post.communityName}</Text>
+          <TouchableOpacity onPress={handleRefresh}>
+            <Ionicons
+              name="refresh"
+              size={20}
+              color={isRefreshing ? COLORS.primary : COLORS.text}
+            />
+          </TouchableOpacity>
+        </View>
 
-      {/* Content */}
-      <KeyboardAvoidingView
-        style={styles.keyboardContainer}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-      >
         <FlatList
           data={comments}
+          renderItem={renderCommentItem}
           keyExtractor={(item) => item.id}
-          renderItem={renderComment}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={handleRefresh}
-              colors={[COLORS.primary]}
-              tintColor={COLORS.primary}
-            />
-          }
+          refreshing={isRefreshing}
+          onRefresh={handleRefresh}
           ListHeaderComponent={() => (
             <View style={styles.postContainer}>
-              {/* Main Post with Share Button Enabled */}
-              <CommunityPostItem
-                post={post}
-                onLikePress={handleLikePost}
-                onCommentPress={() => {}} // No action needed, already on detail screen
-                onPostPress={() => {}} // No action needed, already on detail screen
-                onSharePress={handleSharePost}
-                showShareButton={false} // Share button removed from individual post view (not working)
-              />
-
-              {/* Comments Header */}
-              <View style={styles.commentsHeader}>
-                <Text style={styles.commentsTitle}>
-                  Comments ({comments.length})
-                </Text>
+              {/* Post Header */}
+              <View style={styles.postHeader}>
+                <TouchableOpacity
+                  onPress={() => handleUserProfileClick(post.userId)}
+                  activeOpacity={0.7}
+                  style={styles.postHeaderClickable}
+                >
+                  <EnhancedImage
+                    uri={post.userAvatar}
+                    style={styles.avatar}
+                    defaultIcon="person"
+                    showLoading={false}
+                  />
+                  <View style={styles.postHeaderInfo}>
+                    <Text style={styles.userName}>{post.userName}</Text>
+                    <Text style={styles.postTime}>
+                      {formatDate(post.createdAt)}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
               </View>
+
+              {/* Post Content */}
+              <Text style={styles.postContent}>{post.content}</Text>
+
+              {/* Post Image with Enhanced Error Handling */}
+              {post.image && (
+                <PostImage uri={post.image} style={styles.postImage} />
+              )}
+
+              {/* Post Actions */}
+              <View style={styles.postActions}>
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={handleToggleLikePost}
+                >
+                  <Ionicons
+                    name={post.isLiked ? "heart" : "heart-outline"}
+                    size={22}
+                    color={post.isLiked ? COLORS.primary : COLORS.textSecondary}
+                  />
+                  <Text
+                    style={[
+                      styles.actionText,
+                      post.isLiked && { color: COLORS.primary },
+                    ]}
+                  >
+                    {post.likes}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Comment button that focuses the input */}
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => commentInputRef.current?.focus()}
+                >
+                  <Ionicons
+                    name="chatbubble-outline"
+                    size={20}
+                    color={COLORS.textSecondary}
+                  />
+                  <Text style={styles.actionText}>{post.comments}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.actionButton}>
+                  <Ionicons
+                    name="share-social-outline"
+                    size={20}
+                    color={COLORS.textSecondary}
+                  />
+                </TouchableOpacity>
+              </View>
+
+              {/* Comments Section Divider */}
+              {comments.length > 0 && (
+                <View style={styles.commentsHeader}>
+                  <Text style={styles.commentsTitle}>
+                    Comments ({comments.length})
+                  </Text>
+                </View>
+              )}
             </View>
           )}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
           ListEmptyComponent={() => (
-            <View style={styles.emptyCommentsContainer}>
+            <View style={styles.emptyComments}>
               <Ionicons
-                name="chatbubble-outline"
+                name="chatbubbles-outline"
                 size={40}
                 color={COLORS.textSecondary}
               />
-              <Text style={styles.emptyCommentsText}>
-                No comments yet. Be the first to comment!
+              <Text style={styles.emptyCommentsText}>No comments yet</Text>
+              <Text style={styles.emptyCommentsSubtext}>
+                Be the first to comment!
               </Text>
             </View>
           )}
-          contentContainerStyle={styles.contentContainer}
         />
 
         {/* Comment Input */}
-        {currentUser && (
-          <View style={styles.commentInputContainer}>
-            <View style={styles.commentInputWrapper}>
-              <TextInput
-                style={styles.commentInput}
-                placeholder="Write a comment..."
-                placeholderTextColor={COLORS.textSecondary}
-                value={newComment}
-                onChangeText={setNewComment}
-                multiline
-                maxLength={500}
-              />
-              <TouchableOpacity
-                style={[
-                  styles.submitButton,
-                  (!newComment.trim() || isSubmittingComment) &&
-                    styles.submitButtonDisabled,
-                ]}
-                onPress={handleSubmitComment}
-                disabled={!newComment.trim() || isSubmittingComment}
-              >
-                {isSubmittingComment ? (
-                  <ActivityIndicator size="small" color={COLORS.white} />
-                ) : (
-                  <Ionicons name="send" size={20} color={COLORS.white} />
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+        <View style={styles.commentInputContainer}>
+          <EnhancedImage
+            uri={currentUser?.profileImage}
+            style={styles.currentUserAvatar}
+            defaultIcon="person"
+            showLoading={false}
+          />
+          <TextInput
+            ref={commentInputRef}
+            style={styles.commentInput}
+            placeholder="Add a comment..."
+            value={newComment}
+            onChangeText={setNewComment}
+            multiline
+          />
+          <TouchableOpacity
+            style={[
+              styles.sendButton,
+              !newComment.trim() && styles.sendButtonDisabled,
+            ]}
+            onPress={handleSubmitComment}
+            disabled={!newComment.trim() || isSubmitting}
+          >
+            {isSubmitting ? (
+              <ActivityIndicator size="small" color={COLORS.white} />
+            ) : (
+              <Ionicons name="send" size={16} color={COLORS.white} />
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {/* User Profile Modal */}
+        <UserProfileModal
+          visible={profileModalVisible}
+          onClose={() => setProfileModalVisible(false)}
+          userId={selectedUserId}
+        />
+      </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -446,13 +681,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  loadingContainer: {
+  safeArea: {
     flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  errorContainer: {
-    flex: 1,
-    backgroundColor: COLORS.background,
   },
   header: {
     flexDirection: "row",
@@ -469,33 +699,22 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: COLORS.text,
   },
-  loadingContent: {
+  loadingContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+    backgroundColor: COLORS.background,
   },
   loadingText: {
     marginTop: 16,
     fontSize: 16,
     color: COLORS.textSecondary,
   },
-  errorContent: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  errorTitle: {
+  errorText: {
     fontSize: 18,
-    fontWeight: "bold",
-    color: COLORS.text,
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  errorMessage: {
-    fontSize: 16,
+    fontWeight: "600",
     color: COLORS.textSecondary,
-    textAlign: "center",
+    marginTop: 12,
     marginBottom: 24,
   },
   backButton: {
@@ -508,61 +727,171 @@ const styles = StyleSheet.create({
     color: COLORS.white,
     fontWeight: "600",
   },
-  keyboardContainer: {
-    flex: 1,
-  },
-  contentContainer: {
-    paddingBottom: 20,
+  listContent: {
+    paddingBottom: 80,
   },
   postContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
+    backgroundColor: COLORS.cardBackground,
+    padding: 16,
+    marginBottom: 8,
   },
-  commentsHeader: {
-    paddingVertical: 16,
+  postHeader: {
+    marginBottom: 12,
+  },
+  postHeaderClickable: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+  },
+  defaultImageContainer: {
+    backgroundColor: COLORS.border,
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: 20,
+  },
+  imageLoadingOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.1)",
+    borderRadius: 20,
+  },
+  postHeaderInfo: {
+    flex: 1,
+  },
+  userName: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: COLORS.text,
+    marginBottom: 2,
+  },
+  postTime: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+  postContent: {
+    fontSize: 16,
+    color: COLORS.text,
+    lineHeight: 24,
+    marginBottom: 16,
+  },
+  postImage: {
+    width: "100%",
+    height: 250,
+    borderRadius: 8,
+    marginBottom: 16,
+    backgroundColor: COLORS.border,
+  },
+  postImageLoadingContainer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+    borderRadius: 8,
+  },
+  postImageLoadingText: {
+    color: COLORS.white,
+    fontSize: 14,
+    marginTop: 8,
+    fontWeight: "500",
+  },
+  postImageErrorContainer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderStyle: "dashed",
+  },
+  postImageErrorText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  retryButton: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+  },
+  retryButtonText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  postActions: {
+    flexDirection: "row",
+    justifyContent: "flex-start",
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
-    marginTop: 8,
+    paddingTop: 12,
+  },
+  actionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginRight: 24,
+  },
+  actionText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginLeft: 6,
+  },
+  commentsHeader: {
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    marginTop: 16,
+    paddingTop: 16,
   },
   commentsTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "600",
     color: COLORS.text,
   },
   commentItem: {
-    backgroundColor: COLORS.cardBackground,
-    marginHorizontal: 16,
-    marginBottom: 12,
-    padding: 16,
-    borderRadius: 12,
-  },
-  commentHeader: {
-    marginBottom: 8,
-  },
-  commentUser: {
     flexDirection: "row",
-    alignItems: "center",
+    padding: 16,
+    backgroundColor: COLORS.cardBackground,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
   commentAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: COLORS.border,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    marginRight: 12,
+  },
+  commentContent: {
+    flex: 1,
+  },
+  commentHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 6,
   },
   commentUserName: {
     fontSize: 14,
     fontWeight: "600",
     color: COLORS.text,
-    marginRight: 8,
   },
   commentTime: {
     fontSize: 12,
     color: COLORS.textSecondary,
   },
-  commentContent: {
+  commentText: {
     fontSize: 14,
     color: COLORS.text,
     lineHeight: 20,
@@ -570,64 +899,69 @@ const styles = StyleSheet.create({
   },
   commentActions: {
     flexDirection: "row",
-    alignItems: "center",
   },
-  commentLikeButton: {
+  commentAction: {
     flexDirection: "row",
     alignItems: "center",
+    marginRight: 16,
   },
-  commentLikeText: {
+  commentActionText: {
     fontSize: 12,
     color: COLORS.textSecondary,
     marginLeft: 4,
   },
-  emptyCommentsContainer: {
+  emptyComments: {
+    padding: 24,
     alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 40,
-    paddingHorizontal: 20,
+    backgroundColor: COLORS.cardBackground,
   },
   emptyCommentsText: {
     fontSize: 16,
+    fontWeight: "600",
     color: COLORS.textSecondary,
-    textAlign: "center",
     marginTop: 12,
+    marginBottom: 4,
+  },
+  emptyCommentsSubtext: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
   },
   commentInputContainer: {
-    backgroundColor: COLORS.cardBackground,
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 12,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    backgroundColor: COLORS.cardBackground,
   },
-  commentInputWrapper: {
-    flexDirection: "row",
-    alignItems: "flex-end",
+  currentUserAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    marginRight: 12,
   },
   commentInput: {
     flex: 1,
-    backgroundColor: COLORS.background,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginRight: 12,
+    minHeight: 36,
     maxHeight: 100,
-    fontSize: 16,
+    backgroundColor: COLORS.background,
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    fontSize: 14,
     color: COLORS.text,
-    borderWidth: 1,
-    borderColor: COLORS.border,
   },
-  submitButton: {
+  sendButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: COLORS.primary,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
     justifyContent: "center",
     alignItems: "center",
+    marginLeft: 8,
   },
-  submitButtonDisabled: {
-    backgroundColor: COLORS.textSecondary,
-    opacity: 0.5,
+  sendButtonDisabled: {
+    backgroundColor: COLORS.border,
   },
 });
 

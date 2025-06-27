@@ -401,15 +401,16 @@ const CommunityMyFeedTab = () => {
     [posts, allPosts]
   );
 
-  // Handle user profile navigation
-  const handleUserPress = useCallback((userId: string) => {
-    if (userId) {
-      console.log(`Navigating to user profile: ${userId}`);
-      // navigation.navigate("UserProfile", { userId });
-    }
-  }, []);
-
-  // REMOVED: handleSharePost function (no longer needed)
+  // Handle user profile navigation - UPDATED TO NAVIGATE TO PROFILE SCREEN
+  const handleUserPress = useCallback(
+    (userId: string) => {
+      if (userId) {
+        console.log(`Navigating to user profile: ${userId}`);
+        navigation.navigate("UserProfile", { userId });
+      }
+    },
+    [navigation]
+  );
 
   // Toggle community selection
   const toggleCommunitySelection = (communityId: string) => {
@@ -439,12 +440,12 @@ const CommunityMyFeedTab = () => {
         fetchPosts();
       }
 
-      // Set up a refresh interval when screen is active
+      // Set up a refresh interval when screen is active - Changed to 5 minutes (300000ms)
       const refreshTimer = setInterval(() => {
         if (authChecked && userId) {
           fetchPosts();
         }
-      }, 60000); // Refresh every 60 seconds
+      }, 300000); // Refresh every 5 minutes (300 seconds)
 
       return () => {
         clearInterval(refreshTimer);
@@ -633,7 +634,7 @@ const CommunityMyFeedTab = () => {
         onLikePress={() => toggleLikePost(item.id)}
         onCommentPress={() => navigateToPostDetail(item.id)}
         onPostPress={() => navigateToPostDetail(item.id)}
-        onUserPress={handleUserPress}
+        onUserPress={handleUserPress} // Now properly navigates to UserProfile
         // Share button enabled for MyFeed view
       />
     );
@@ -641,18 +642,45 @@ const CommunityMyFeedTab = () => {
 
   return (
     <View style={styles.container}>
-      {/* Filter button - only show if user has joined communities */}
-      {userId && hasJoinedCommunities && joinedCommunities.length > 1 && (
+      {/* Header with Filter and Refresh buttons */}
+      {userId && hasJoinedCommunities && (
         <View style={styles.headerContainer}>
-          <TouchableOpacity
-            style={styles.filterButton}
-            onPress={() => setIsFilterModalVisible(true)}
-          >
-            <Ionicons name="filter" size={20} color={COLORS.primary} />
-            <Text style={styles.filterButtonText}>
-              Filter ({selectedCommunities.length}/{joinedCommunities.length})
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.headerButtons}>
+            {/* Filter button on the left - only show if user has multiple communities */}
+            {joinedCommunities.length > 1 && (
+              <TouchableOpacity
+                style={styles.filterButton}
+                onPress={() => setIsFilterModalVisible(true)}
+              >
+                <Ionicons name="filter" size={20} color={COLORS.primary} />
+                <Text style={styles.filterButtonText}>
+                  Filter ({selectedCommunities.length}/
+                  {joinedCommunities.length})
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Refresh button on the right */}
+            <TouchableOpacity
+              style={styles.refreshButton}
+              onPress={handleRefresh}
+              disabled={isRefreshing}
+            >
+              <Ionicons
+                name="refresh"
+                size={20}
+                color={isRefreshing ? COLORS.textSecondary : COLORS.primary}
+              />
+              <Text
+                style={[
+                  styles.refreshButtonText,
+                  isRefreshing && { color: COLORS.textSecondary },
+                ]}
+              >
+                {isRefreshing ? "Refreshing..." : "Refresh"}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -725,10 +753,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
+  headerButtons: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
   filterButton: {
     flexDirection: "row",
     alignItems: "center",
-    alignSelf: "flex-end",
     paddingHorizontal: 12,
     paddingVertical: 8,
     backgroundColor: "rgba(59, 130, 246, 0.1)",
@@ -737,6 +769,22 @@ const styles = StyleSheet.create({
     borderColor: COLORS.primary,
   },
   filterButtonText: {
+    marginLeft: 6,
+    fontSize: 14,
+    fontWeight: "500",
+    color: COLORS.primary,
+  },
+  refreshButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: "rgba(59, 130, 246, 0.1)",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+  },
+  refreshButtonText: {
     marginLeft: 6,
     fontSize: 14,
     fontWeight: "500",
