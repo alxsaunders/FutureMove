@@ -32,7 +32,6 @@ const CommunityRequestModal: React.FC<CommunityRequestModalProps> = ({
     communityName: "",
     description: "",
     category: "General",
-    reason: "",
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -40,7 +39,6 @@ const CommunityRequestModal: React.FC<CommunityRequestModalProps> = ({
   const [charCounts, setCharCounts] = useState({
     communityName: 0,
     description: 0,
-    reason: 0,
   });
 
   const categories = CommunityRequestService.getAvailableCategories();
@@ -50,7 +48,6 @@ const CommunityRequestModal: React.FC<CommunityRequestModalProps> = ({
     setCharCounts({
       communityName: formData.communityName.length,
       description: formData.description.length,
-      reason: formData.reason.length,
     });
   }, [formData]);
 
@@ -61,7 +58,6 @@ const CommunityRequestModal: React.FC<CommunityRequestModalProps> = ({
         communityName: "",
         description: "",
         category: "General",
-        reason: "",
       });
       setErrors([]);
     }
@@ -90,10 +86,6 @@ const CommunityRequestModal: React.FC<CommunityRequestModalProps> = ({
 
     if (!formData.description.trim()) {
       validationErrors.push("Description is required");
-    }
-
-    if (!formData.reason.trim()) {
-      validationErrors.push("Reason is required");
     }
 
     if (!formData.category) {
@@ -260,22 +252,6 @@ const CommunityRequestModal: React.FC<CommunityRequestModalProps> = ({
               <Text style={styles.charCount}>
                 {charCounts.description}/1000
               </Text>
-            </View>
-
-            {/* Reason */}
-            <View style={styles.sectionContainer}>
-              <Text style={styles.label}>Why is this community needed? *</Text>
-              <TextInput
-                style={[styles.textInput, styles.textArea]}
-                placeholder="Explain why this community would be valuable..."
-                value={formData.reason}
-                onChangeText={(value) => handleInputChange("reason", value)}
-                multiline
-                numberOfLines={4}
-                maxLength={1000}
-                editable={!isSubmitting}
-              />
-              <Text style={styles.charCount}>{charCounts.reason}/1000</Text>
             </View>
 
             {/* Errors */}
