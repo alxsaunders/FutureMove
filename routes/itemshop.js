@@ -311,15 +311,19 @@ module.exports = (pool, authenticateFirebaseToken) => {
       const category = itemData[0].category;
       if (DEBUG_SHOP) console.log(`[SHOP DEBUG] Item category: ${category}`);
       
-      // If equipping, unequip other items in the same category
-      if (newStatus === 1) {
-        if (DEBUG_SHOP) console.log(`[SHOP DEBUG] Unequipping other items in category: ${category}`);
+      // If equipping, unequip other items in the same category 
+      // BUT ONLY for categories that should be exclusive (not badges)
+      if (newStatus === 1 && category !== 'badge') {
+        if (DEBUG_SHOP) console.log(`[SHOP DEBUG] Unequipping other items in category: ${category} (exclusive category)`);
         await connection.execute(`
           UPDATE user_items ui
           JOIN items i ON ui.item_id = i.item_id
           SET ui.is_equipped = 0
           WHERE ui.user_id = ? AND i.category = ? AND ui.item_id != ?
         `, [userId, category, itemId]);
+      } else if (newStatus === 1 && category === 'badge') {
+        if (DEBUG_SHOP) console.log(`[SHOP DEBUG] Equipping badge - allowing multiple badges to be equipped`);
+        // For badges, we don't unequip other badges - multiple can be equipped
       }
       
       // Update this item's status
@@ -349,7 +353,6 @@ module.exports = (pool, authenticateFirebaseToken) => {
       handleError(res, error, 'Error toggling item');
     }
   });
-
   // Get user's FutureCoins
   router.get('/coins/:userId', async (req, res) => {
     const userId = req.params.userId;
