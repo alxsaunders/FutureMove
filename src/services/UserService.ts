@@ -1,6 +1,17 @@
 // src/services/UserService.ts
+import { Platform } from 'react-native';
 
-const API_URL = "http://10.0.2.2:3001/api"; // Emulator localhost
+// API Base URL - platform specific
+const getApiBaseUrl = (): string => {
+  if (Platform.OS === "android") {
+    return "http://10.0.2.2:3001/api";
+  } else {
+    // For iOS or development on Mac
+    return 'http://192.168.1.207:3001/api';
+  }
+};
+
+const API_URL = getApiBaseUrl();
 
 /**
  * Updates a user's coin balance
@@ -15,10 +26,10 @@ export const updateUserCoins = async (userId: string, newCoinsValue: number): Pr
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ amount: newCoinsValue }),
     });
-    
+
     if (!res.ok) throw new Error('Failed to update user coins');
     const data = await res.json();
-    
+
     return data.futureCoins || data.future_coins || newCoinsValue;
   } catch (error) {
     console.error("Error updating user coins:", error);
@@ -34,26 +45,26 @@ export const updateUserCoins = async (userId: string, newCoinsValue: number): Pr
  * @returns Object containing the updated XP and level values
  */
 export const updateUserXP = async (
-  userId: string, 
-  newXpValue: number, 
+  userId: string,
+  newXpValue: number,
   newLevel?: number
 ): Promise<{ xp: number; level?: number }> => {
   try {
     const res = await fetch(`${API_URL}/users/${userId}/xp`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         amount: newXpValue,
-        level: newLevel 
+        level: newLevel
       }),
     });
-    
+
     if (!res.ok) throw new Error('Failed to update user XP');
     const data = await res.json();
-    
-    return { 
-      xp: data.xp || data.xp_points || newXpValue, 
-      level: data.level || newLevel 
+
+    return {
+      xp: data.xp || data.xp_points || newXpValue,
+      level: data.level || newLevel
     };
   } catch (error) {
     console.error("Error updating user XP:", error);
@@ -80,7 +91,7 @@ export const addUserXP = async (
     let newXp = currentXp + xpToAdd;
     let newLevel = currentLevel;
     let leveledUp = false;
-    
+
     // Check for level-up (XP maxes at 99, then resets to 0 at level-up)
     if (newXp >= 100) {
       const levelsGained = Math.floor(newXp / 100);
@@ -88,10 +99,10 @@ export const addUserXP = async (
       newXp = newXp % 100; // Keep the remainder
       leveledUp = true;
     }
-    
+
     // Update in database
     await updateUserXP(userId, newXp, newLevel);
-    
+
     // Return the new values
     return { xp: newXp, level: newLevel, leveledUp };
   } catch (error) {
@@ -115,7 +126,7 @@ export const addUserCoins = async (
   try {
     // Calculate new coin balance
     const newCoins = currentCoins + coinsToAdd;
-    
+
     // Update in database
     return await updateUserCoins(userId, newCoins);
   } catch (error) {
@@ -136,7 +147,7 @@ export const getUserData = async (
     const res = await fetch(`${API_URL}/users/${userId}`);
     if (!res.ok) throw new Error('Failed to fetch user data');
     const data = await res.json();
-    
+
     return {
       level: data.level || 1,
       xp: data.xp_points || data.xp || 0,

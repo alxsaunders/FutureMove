@@ -14,7 +14,16 @@ import {
 } from "react-native";
 
 // API URL based on platform
-const API_URL = "http://10.0.2.2:3001/api"; 
+const getApiUrl = (): string => {
+  if (Platform.OS === "android") {
+    return "http://10.0.2.2:3001/api";
+  } else {
+    // For iOS or development on Mac
+    return "http://192.168.1.207:3001/api";
+  }
+};
+
+const API_URL = getApiUrl();
 
 const ItemDetailScreen = ({ route, navigation }) => {
   const {
