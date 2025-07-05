@@ -10,6 +10,7 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  ImageBackground,
 } from "react-native";
 import { Image } from "expo-image";
 import {
@@ -292,152 +293,202 @@ const SignUpScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
-        <View style={styles.container}>
+    <ImageBackground
+      source={require("../assets/back3.png")}
+      style={styles.backgroundImage}
+      resizeMode="cover"
+    >
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.logoContainer}>
           <Image
             source={require("../assets/videos/FIXFUTURE-ezgif.com-optimize.gif")}
             style={styles.logo}
             contentFit="contain"
             transition={1000}
           />
-          <Text style={styles.title}>FutureMove</Text>
-          <Text style={styles.slogan}>"Move Forward, Achieve More."</Text>
+        </View>
 
-          <View style={styles.formContainer}>
-            <Text style={styles.formTitle}>Create Your Account</Text>
+        {/* Overlay for better text readability */}
+        <View style={styles.overlay} />
 
-            {/* Username Input */}
-            <View style={styles.inputContainer}>
-              <TextInput
-                style={[
-                  getInputStyle(
-                    usernameError,
-                    usernameValid,
-                    isCheckingUsername
-                  ),
-                  isLoading && styles.inputDisabled,
-                ]}
-                placeholder="Username"
-                value={username}
-                onChangeText={handleUsernameChange}
-                editable={!isLoading}
-                autoCapitalize="none"
-              />
-              {isCheckingUsername && (
-                <ActivityIndicator
-                  size="small"
-                  color="#4A90E2"
-                  style={styles.inputIcon}
+        <ScrollView contentContainerStyle={styles.scrollContainer}>
+          <View style={styles.container}>
+            <Text style={styles.title}>FutureMove</Text>
+            <Text style={styles.slogan}>"Move Forward, Achieve More."</Text>
+
+            <View style={styles.formContainer}>
+              <Text style={styles.formTitle}>Create Your Account</Text>
+
+              {/* Username Input */}
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={[
+                    getInputStyle(
+                      usernameError,
+                      usernameValid,
+                      isCheckingUsername
+                    ),
+                    isLoading && styles.inputDisabled,
+                  ]}
+                  placeholder="Username"
+                  placeholderTextColor="#999"
+                  value={username}
+                  onChangeText={handleUsernameChange}
+                  editable={!isLoading}
+                  autoCapitalize="none"
                 />
-              )}
-              {!isCheckingUsername && usernameValid && (
-                <Text style={styles.checkIcon}>✓</Text>
-              )}
-              {usernameError ? (
-                <Text style={styles.errorText}>{usernameError}</Text>
-              ) : null}
-            </View>
+                {isCheckingUsername && (
+                  <ActivityIndicator
+                    size="small"
+                    color="#4A90E2"
+                    style={styles.inputIcon}
+                  />
+                )}
+                {!isCheckingUsername && usernameValid && (
+                  <Text style={styles.checkIcon}>✓</Text>
+                )}
+                {usernameError ? (
+                  <Text style={styles.errorText}>{usernameError}</Text>
+                ) : null}
+              </View>
 
-            <TextInput
-              style={[styles.input, isLoading && styles.inputDisabled]}
-              placeholder="Full Name"
-              value={name}
-              onChangeText={setName}
-              editable={!isLoading}
-            />
-
-            {/* Email Input */}
-            <View style={styles.inputContainer}>
               <TextInput
-                style={[
-                  getInputStyle(emailError, emailValid, isCheckingEmail),
-                  isLoading && styles.inputDisabled,
-                ]}
-                placeholder="Email"
-                value={email}
-                onChangeText={handleEmailChange}
-                keyboardType="email-address"
-                autoCapitalize="none"
+                style={[styles.input, isLoading && styles.inputDisabled]}
+                placeholder="Full Name"
+                placeholderTextColor="#999"
+                value={name}
+                onChangeText={setName}
                 editable={!isLoading}
               />
-              {isCheckingEmail && (
-                <ActivityIndicator
-                  size="small"
-                  color="#4A90E2"
-                  style={styles.inputIcon}
+
+              {/* Email Input */}
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={[
+                    getInputStyle(emailError, emailValid, isCheckingEmail),
+                    isLoading && styles.inputDisabled,
+                  ]}
+                  placeholder="Email"
+                  placeholderTextColor="#999"
+                  value={email}
+                  onChangeText={handleEmailChange}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  editable={!isLoading}
                 />
-              )}
-              {!isCheckingEmail && emailValid && (
-                <Text style={styles.checkIcon}>✓</Text>
-              )}
-              {emailError ? (
-                <Text style={styles.errorText}>{emailError}</Text>
-              ) : null}
+                {isCheckingEmail && (
+                  <ActivityIndicator
+                    size="small"
+                    color="#4A90E2"
+                    style={styles.inputIcon}
+                  />
+                )}
+                {!isCheckingEmail && emailValid && (
+                  <Text style={styles.checkIcon}>✓</Text>
+                )}
+                {emailError ? (
+                  <Text style={styles.errorText}>{emailError}</Text>
+                ) : null}
+              </View>
+
+              <TextInput
+                style={[styles.input, isLoading && styles.inputDisabled]}
+                placeholder="Password (minimum 6 characters)"
+                placeholderTextColor="#999"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                editable={!isLoading}
+              />
             </View>
 
-            <TextInput
-              style={[styles.input, isLoading && styles.inputDisabled]}
-              placeholder="Password (minimum 6 characters)"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              editable={!isLoading}
-            />
-          </View>
-
-          <TouchableOpacity
-            style={[
-              styles.signUpButton,
-              (isLoading || !isFormValid()) && styles.buttonDisabled,
-            ]}
-            onPress={handleSignUp}
-            disabled={isLoading || !isFormValid()}
-          >
-            {isLoading ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator color="#999999" size="small" />
+            <TouchableOpacity
+              style={[
+                styles.signUpButton,
+                (isLoading || !isFormValid()) && styles.buttonDisabled,
+              ]}
+              onPress={handleSignUp}
+              disabled={isLoading || !isFormValid()}
+            >
+              {isLoading ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator color="#999999" size="small" />
+                  <Text
+                    style={[
+                      styles.buttonText,
+                      styles.buttonTextDisabled,
+                      { marginLeft: 10 },
+                    ]}
+                  >
+                    Creating Account...
+                  </Text>
+                </View>
+              ) : (
                 <Text
                   style={[
                     styles.buttonText,
-                    styles.buttonTextDisabled,
-                    { marginLeft: 10 },
+                    !isFormValid() && styles.buttonTextDisabled,
                   ]}
                 >
-                  Creating Account...
+                  Sign Up
                 </Text>
-              </View>
-            ) : (
-              <Text
-                style={[
-                  styles.buttonText,
-                  !isFormValid() && styles.buttonTextDisabled,
-                ]}
-              >
-                Sign Up
-              </Text>
-            )}
-          </TouchableOpacity>
+              )}
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            onPress={() => navigation.navigate("Splash")}
-            disabled={isLoading}
-            style={isLoading && styles.linkDisabled}
-          >
-            <Text style={[styles.link, isLoading && styles.textDisabled]}>
-              Already have an account? Sign in
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+            <TouchableOpacity
+              onPress={() => navigation.navigate("Splash")}
+              disabled={isLoading}
+              style={isLoading && styles.linkDisabled}
+            >
+              <Text style={[styles.link, isLoading && styles.textDisabled]}>
+                Already have an account? Sign in
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    </ImageBackground>
   );
 };
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#f5f5f5" },
-  scrollContainer: { flexGrow: 1 },
-  container: { flex: 1, alignItems: "center", padding: 20 },
+  backgroundImage: {
+    flex: 1,
+  },
+  safeArea: {
+    flex: 1,
+    backgroundColor: "transparent",
+  },
+  logoContainer: {
+    position: "absolute",
+    top: 40,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 0,
+  },
+  overlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.1)", // Semi-transparent overlay for better text readability
+    zIndex: 0,
+  },
+  scrollContainer: {
+    flexGrow: 1,
+    position: "relative",
+    zIndex: 1,
+  },
+  container: {
+    flex: 1,
+    alignItems: "center",
+    padding: 20,
+    position: "relative",
+    zIndex: 1,
+    paddingTop: 220, // Add space for the logo above
+  },
   logo: {
     width: 120,
     height: 120,
@@ -447,39 +498,52 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 32,
     fontWeight: "bold",
-    color: "#4A90E2",
+    color: "#FFFFFF", // Changed to white for better visibility on background
     marginBottom: 10,
+    textShadowColor: "rgba(0, 0, 0, 0.75)",
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   slogan: {
     fontSize: 16,
-    color: "#666",
+    color: "#E0E0E0", // Light gray for better visibility
     marginBottom: 30,
     fontStyle: "italic",
+    textShadowColor: "rgba(0, 0, 0, 0.75)",
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
-  formContainer: { width: "100%", marginBottom: 20 },
+  formContainer: {
+    width: "100%",
+    marginBottom: 20,
+  },
   formTitle: {
     fontSize: 20,
     fontWeight: "bold",
-    color: "#333",
+    color: "#FFFFFF", // Changed to white
     marginBottom: 16,
     textAlign: "center",
+    textShadowColor: "rgba(0, 0, 0, 0.75)",
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   inputContainer: {
     position: "relative",
     marginBottom: 12,
   },
   input: {
-    backgroundColor: "white",
+    backgroundColor: "rgba(255, 255, 255, 0.9)", // Semi-transparent white
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "rgba(255, 255, 255, 0.3)",
     borderRadius: 8,
     paddingHorizontal: 15,
     paddingVertical: 12,
     fontSize: 16,
     marginBottom: 12,
+    color: "#333",
   },
   inputDisabled: {
-    backgroundColor: "#f8f8f8",
+    backgroundColor: "rgba(248, 248, 248, 0.8)",
     color: "#999",
   },
   inputError: {
@@ -512,9 +576,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 8,
     paddingHorizontal: 4,
+    backgroundColor: "rgba(255, 255, 255, 0.9)",
+    borderRadius: 4,
+    padding: 4,
+    textShadowColor: "rgba(0, 0, 0, 0.5)",
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   signUpButton: {
-    backgroundColor: "#4A90E2",
+    backgroundColor: "rgba(74, 144, 226, 0.9)", // Semi-transparent blue
     paddingVertical: 15,
     paddingHorizontal: 40,
     borderRadius: 25,
@@ -523,13 +593,16 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   buttonDisabled: {
-    backgroundColor: "#cccccc",
+    backgroundColor: "rgba(204, 204, 204, 0.7)",
     opacity: 0.6,
   },
   buttonText: {
     color: "white",
     fontSize: 18,
     fontWeight: "bold",
+    textShadowColor: "rgba(0, 0, 0, 0.3)",
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   buttonTextDisabled: {
     color: "#999999",
@@ -539,10 +612,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   link: {
-    color: "#4A90E2",
+    color: "#FFFFFF", // Changed to white
     fontSize: 16,
-    fontWeight: "500",
+    fontWeight: "bold", // Made bold to match splash screen
     textAlign: "center",
+    textShadowColor: "rgba(0, 0, 0, 0.75)",
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   linkDisabled: {
     opacity: 0.5,
