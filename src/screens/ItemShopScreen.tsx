@@ -58,10 +58,16 @@ interface Props {
 const screenWidth = Dimensions.get("window").width;
 
 // API URL based on platform
-const API_URL =
-  Platform.OS === "android"
-    ? "http://10.0.2.2:3001/api"
-    : "http://10.0.2.2:3001/api";
+const getApiUrl = (): string => {
+  if (Platform.OS === "android") {
+    return "http://10.0.2.2:3001/api";
+  } else {
+    // For iOS or development on Mac
+    return "http://192.168.1.207:3001/api";
+  }
+};
+
+const API_URL = getApiUrl();
 
 // EMERGENCY FALLBACK - replace with a valid user ID from your database
 const FALLBACK_USER_ID = "KbtY3t4Tatd0r5tCjnjlmJyNT5R2";
@@ -434,7 +440,7 @@ const ItemShopScreen: React.FC<Props> = ({ route, navigation }) => {
             <ScrollView>
               <View style={styles.modalImageContainer}>
                 {selectedItem.image_url &&
-                hasItemImage(selectedItem.image_url) ? (
+                  hasItemImage(selectedItem.image_url) ? (
                   <Image
                     source={getItemImage(selectedItem.image_url)}
                     style={styles.modalImage}

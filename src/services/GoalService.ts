@@ -645,7 +645,7 @@ export const getUserStreaks = async (): Promise<number> => {
     
     // Add timeout to prevent hanging requests
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 5 second timeout
     
     try {
       const res = await fetch(`${apiUrl}/users/${userId}/streak`, {
