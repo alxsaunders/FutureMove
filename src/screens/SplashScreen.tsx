@@ -141,11 +141,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 32,
     fontWeight: "bold",
-    color: "#FFFFFF", // Changed to white for better visibility on background
+    color: "#2563EB", // Darker blue
+textShadowColor: "rgba(85, 12, 255, 0.5)",
+textShadowOffset: { width: 1, height: 1 },
+textShadowRadius: 6, // Changed to blue to match the design
     marginBottom: 10,
-    textShadowColor: "rgba(0, 0, 0, 0.75)",
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 3,
   },
   slogan: {
     fontSize: 16,
