@@ -15,6 +15,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GoalsScreenNavigationProp, HomeScreenProps } from "../types/navigaton";
 import { ProgressCircle } from "../components/ProgressCircle";
 import { DailyQuote } from "../components/DailyQuote";
@@ -217,6 +218,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
   const tabNavigation = useNavigation<GoalsScreenNavigationProp>();
 
   const { currentUser } = useAuth();
+  // Get safe area insets for proper header positioning
+  const insets = useSafeAreaInsets();
+
   // Get Firebase user ID, with fallback
   const userId = auth.currentUser?.uid || currentUser?.id || "default_user";
 
@@ -510,8 +514,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
 
           // Check for new achievements
           console.log(
-            `Checking for achievements in category: ${
-              goalToToggle.category || "Personal"
+            `Checking for achievements in category: ${goalToToggle.category || "Personal"
             }`
           );
           const newAchievements = await checkForNewAchievements(
@@ -731,9 +734,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
     tabNavigation.navigate("Goals", { openCreateGoal: true });
   };
 
-  // UPDATED: Create header component with achievement icon and larger coin icon
+  // UPDATED: Create header component with achievement icon and larger coin icon - now with safe area
   const renderHeader = () => (
-    <View style={styles.header}>
+    <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
       {/* Achievement Icon */}
       <TouchableOpacity
         style={styles.achievementButton}
@@ -1162,7 +1165,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
       renderItem: () => renderGoalsSection(),
       keyExtractor: () => "goals",
     },
- 
+
     {
       title: "news",
       data: [{ id: "news" }],
@@ -1244,7 +1247,8 @@ const styles = StyleSheet.create({
   },
   header: {
     padding: 16,
-    marginTop: 40, // INCREASED from 20 to 40 to prevent logo cutoff on various devices
+    paddingTop: 30, // Increased from 20 to 30
+    minHeight: 80, // Add minimum height
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -1266,6 +1270,8 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     flex: 1, // UPDATED: Centers title between trophy and coins
     textAlign: "center", // UPDATED: Centers the text
+    lineHeight: 45, // Add explicit line height to prevent clipping
+    includeFontPadding: false, // Android-specific: prevents extra padding
   },
   userCoinsContainer: {
     flexDirection: "row",
