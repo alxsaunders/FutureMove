@@ -60,6 +60,16 @@ const DAYS_OF_WEEK = [
 const GOAL_COMPLETION_XP = 10;
 const GOAL_COMPLETION_COINS = 5;
 
+// Dynamic API URL function
+const getApiBaseUrl = (): string => {
+  if (Platform.OS === "android") {
+    return "http://10.0.2.2:3001/api";
+  } else {
+    // For iOS or development on Mac
+    return 'http://192.168.1.207:3001/api';
+  }
+};
+
 const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
   const { currentUser } = useAuth();
   const userId = auth.currentUser?.uid || currentUser?.id || "default_user";
@@ -312,13 +322,13 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
 
       // Fetch user level and XP from database
       try {
-        // Use the same approach as HomeScreen but without duplicating the helper function
+        // Use dynamic API URL for cross-platform compatibility
+        const API_BASE_URL = getApiBaseUrl();
         const firebaseUserId = auth.currentUser?.uid;
         const effectiveUserId = firebaseUserId || userId;
 
-        // Simple fetch without custom API URL function
         const response = await fetch(
-          `http://10.0.2.2:3001/api/users/${effectiveUserId}`,
+          `${API_BASE_URL}/users/${effectiveUserId}`,
           {
             headers: {
               "Content-Type": "application/json",
@@ -1254,12 +1264,12 @@ const GoalsScreen: React.FC<GoalsScreenProps> = ({ navigation, route }) => {
           {searchQuery
             ? "No goals match your search criteria."
             : filterType === "completed"
-            ? "You haven't completed any goals yet."
-            : filterType === "active"
-            ? "You don't have any active goals for today."
-            : filterType === "routine"
-            ? "You don't have any routine goals set up."
-            : "You don't have any goals. Create one to get started!"}
+              ? "You haven't completed any goals yet."
+              : filterType === "active"
+                ? "You don't have any active goals for today."
+                : filterType === "routine"
+                  ? "You don't have any routine goals set up."
+                  : "You don't have any goals. Create one to get started!"}
         </Text>
       </View>
     );
