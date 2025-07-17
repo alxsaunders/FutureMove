@@ -1,7 +1,15 @@
 // src/services/StreakService.ts
 import { Streak } from '../types';
+import { Platform } from 'react-native';
 
-const API_URL = "http://10.0.2.2:3001/api"; // Emulator localhost
+const getApiBaseUrl = (): string => {
+  if (Platform.OS === "android") {
+    return "http://10.0.2.2:3001/api";
+  } else {
+    // For iOS or development on Mac
+    return 'http://192.168.1.207:3001/api';
+  }
+};
 
 /**
  * Fetches a user's streak data
@@ -10,10 +18,11 @@ const API_URL = "http://10.0.2.2:3001/api"; // Emulator localhost
  */
 export const fetchUserStreak = async (userId: string): Promise<Streak> => {
   try {
+    const API_URL = getApiBaseUrl();
     const res = await fetch(`${API_URL}/users/${userId}/streak`);
     if (!res.ok) throw new Error('Failed to fetch streak data');
     const data = await res.json();
-    
+
     // Transform API response to Streak type
     return {
       streak_id: data.streak_id || data.id || 1,
@@ -27,7 +36,7 @@ export const fetchUserStreak = async (userId: string): Promise<Streak> => {
     };
   } catch (error) {
     console.error("Error fetching user streak:", error);
-    
+
     // Return a default streak object if there's an error
     return {
       streak_id: 1,
@@ -50,15 +59,16 @@ export const fetchUserStreak = async (userId: string): Promise<Streak> => {
  */
 export const updateUserStreak = async (userId: string, streakData: Partial<Streak>): Promise<Streak> => {
   try {
+    const API_URL = getApiBaseUrl();
     const res = await fetch(`${API_URL}/users/${userId}/streak`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(streakData),
     });
-    
+
     if (!res.ok) throw new Error('Failed to update streak data');
     const data = await res.json();
-    
+
     // If the API returns the updated streak, use that
     if (data.streak_id || data.id) {
       return {
@@ -72,7 +82,7 @@ export const updateUserStreak = async (userId: string, streakData: Partial<Strea
         streak_start_date: data.streak_start_date || streakData.streak_start_date || new Date().toISOString(),
       };
     }
-    
+
     // If not, return the data we sent with the update
     const existingStreak = await fetchUserStreak(userId);
     return { ...existingStreak, ...streakData };
@@ -95,7 +105,7 @@ export const resetUserStreak = async (userId: string): Promise<Streak> => {
       last_completed_date: new Date().toISOString(),
       streak_start_date: new Date().toISOString(),
     };
-    
+
     return await updateUserStreak(userId, resetStreak);
   } catch (error) {
     console.error("Error resetting user streak:", error);
@@ -114,12 +124,12 @@ export const checkAndUpdateStreak = async (userId: string): Promise<Streak> => {
     const today = new Date();
     const lastCompletedDate = new Date(streakData.last_completed_date);
     const oneDayInMs = 24 * 60 * 60 * 1000;
-    
+
     // If already completed today, just return current data
     if (today.toDateString() === lastCompletedDate.toDateString()) {
       return streakData;
     }
-    
+
     // If last completion was yesterday, increment streak
     if (
       today.getTime() - lastCompletedDate.getTime() <= oneDayInMs * 2 &&
@@ -130,19 +140,19 @@ export const checkAndUpdateStreak = async (userId: string): Promise<Streak> => {
         current_streak: streakData.current_streak + 1,
         last_completed_date: today.toISOString(),
       };
-      
+
       // Check if this is a new record
       if (updatedStreak.current_streak! > streakData.longest_streak) {
         updatedStreak.longest_streak = updatedStreak.current_streak;
       }
-      
+
       return await updateUserStreak(userId, updatedStreak);
-    } 
+    }
     // If more than one day has passed, reset streak
     else if (today.getTime() - lastCompletedDate.getTime() > oneDayInMs * 2) {
       return await resetUserStreak(userId);
     }
-    
+
     // If already completed today or no action needed, just return current data
     return streakData;
   } catch (error) {
